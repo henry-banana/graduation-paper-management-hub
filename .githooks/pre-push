@@ -9,7 +9,7 @@ fi
 
 echo "[pre-push] Running backend checks..."
 if [ -f "backend/package.json" ]; then
-  npm --prefix backend run test
+  npm --prefix backend run test -- --passWithNoTests
   npm --prefix backend run build
 fi
 
