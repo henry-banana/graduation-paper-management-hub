@@ -1,0 +1,32 @@
+#!/bin/sh
+
+set -eu
+
+STAGED_FILES="$(git diff --cached --name-only --diff-filter=ACMRT)"
+
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+echo "[pre-commit] Running safety checks..."
+
+# 1) Block env and private key files from being committed
+if printf "%s\n" "$STAGED_FILES" | grep -Eiq '(^|/)(\.env($|\.)|.*\.pem$|.*\.key$|.*\.p12$|.*\.pfx$)'; then
+  echo "ERROR: Potential secret file detected in staged changes (.env/.pem/.key/.p12/.pfx)."
+  exit 1
+fi
+
+# 2) Detect obvious secret tokens in staged diff
+if git diff --cached | grep -Eiq '(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----|xox[baprs]-[0-9a-zA-Z-]+|ghp_[0-9A-Za-z]{30,}|AIza[0-9A-Za-z_-]{35})'; then
+  echo "ERROR: Potential credential/token found in staged diff."
+  exit 1
+fi
+
+# 3) Detect unresolved merge conflict markers
+if git diff --cached | grep -Eq '^(<<<<<<<|=======|>>>>>>>)'; then
+  echo "ERROR: Merge conflict markers found in staged content."
+  exit 1
+fi
+
+echo "[pre-commit] Safety checks passed."
+exit 0
