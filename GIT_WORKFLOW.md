@@ -18,6 +18,38 @@
   2. fix and PR to `main`
   3. merge the same fix back into `develop`
 
+## Automation commands (no auto-push)
+
+### Task complete
+
+Use this after each task is done:
+
+```powershell
+./scripts/task-complete.ps1 -Type feat -Scope frontend -Description "add lecturer dashboard filters"
+```
+
+Optional: commit selected files only:
+
+```powershell
+./scripts/task-complete.ps1 -Type fix -Scope backend -Description "handle score summary null case" -Paths backend/src/modules/scores/scores.service.ts
+```
+
+### Phase complete
+
+Use this after each phase is done:
+
+```powershell
+./scripts/phase-complete.ps1 -Phase "03-frontend" -Description "complete phase 03 dashboard implementation"
+```
+
+This command will:
+
+- run checks,
+- create conventional commit,
+- print manual push and PR instructions.
+
+No script performs push automatically.
+
 ## Commit format
 
 Use Conventional Commits:
@@ -36,6 +68,16 @@ Use Conventional Commits:
 - GitHub Actions:
   - `ci.yml`: backend and frontend quality checks
   - `branch-name-check.yml`: enforces branch naming patterns
+
+## Do we need GitHub CLI (gh)?
+
+- Git only is enough for:
+  - branching,
+  - commit,
+  - merge,
+  - push (manual),
+  - creating PR via GitHub web UI.
+- `gh` is optional and only needed if you want to automate remote operations from terminal (for example apply branch protection rules or create PR by CLI).
 
 ## Branch naming examples
 
