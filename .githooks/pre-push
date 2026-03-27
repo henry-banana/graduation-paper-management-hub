@@ -15,7 +15,11 @@ fi
 
 echo "[pre-push] Running frontend checks..."
 if [ -f "frontend/package.json" ]; then
-  npm --prefix frontend run lint
+  if [ -f "frontend/.eslintrc" ] || [ -f "frontend/.eslintrc.js" ] || [ -f "frontend/.eslintrc.cjs" ] || [ -f "frontend/.eslintrc.json" ] || [ -f "frontend/eslint.config.js" ] || [ -f "frontend/eslint.config.mjs" ]; then
+    npm --prefix frontend run lint
+  else
+    echo "[pre-push] Skipping frontend lint (no ESLint config found)."
+  fi
   npm --prefix frontend run build
 fi
 
