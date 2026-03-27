@@ -11,7 +11,11 @@ fi
 echo "[pre-commit] Running safety checks..."
 
 # 1) Block env and private key files from being committed
-if printf "%s\n" "$STAGED_FILES" | grep -Eiq '(^|/)(\.env($|\.)|.*\.pem$|.*\.key$|.*\.p12$|.*\.pfx$)'; then
+# Allow .env.example as a template file.
+if printf "%s\n" "$STAGED_FILES" \
+  | grep -Ei '(^|/)(\.env($|\.)|.*\.pem$|.*\.key$|.*\.p12$|.*\.pfx$)' \
+  | grep -Eiv '(^|/)\.env\.example($|\.)' \
+  >/dev/null; then
   echo "ERROR: Potential secret file detected in staged changes (.env/.pem/.key/.p12/.pfx)."
   exit 1
 fi
