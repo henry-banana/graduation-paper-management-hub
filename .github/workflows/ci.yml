@@ -5,10 +5,28 @@ on:
     branches: [main, develop]
   push:
     branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: 22
 
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ci_db
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ci_user -d ci_db"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
     defaults:
       run:
         working-directory: backend
@@ -19,8 +37,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            backend/package.json
 
       - name: Install dependencies
         run: |
@@ -30,11 +51,24 @@ jobs:
             npm install --no-audit --no-fund
           fi
 
-      - name: Run tests
-        run: npm run test
+      - name: Type check
+        run: npm run typecheck --if-present
+
+      - name: Run unit tests
+        run: npm run test --if-present
 
       - name: Build backend
         run: npm run build
+
+      - name: Upload backend test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-artifacts
+          path: |
+            backend/coverage
+            backend/test-results
+          if-no-files-found: ignore
 
   frontend:
     runs-on: ubuntu-latest
@@ -48,8 +82,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            frontend/package.json
 
       - name: Install dependencies
         run: |
@@ -59,8 +96,84 @@ jobs:
             npm install --no-audit --no-fund
           fi
 
-      - name: Run lint
-        run: npm run lint
+      - name: Type check
+        run: npm run typecheck --if-present
+
+      - name: Run unit tests
+        run: npm run test --if-present
 
       - name: Build frontend
         run: npm run build
+
+      - name: Upload frontend test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-artifacts
+          path: |
+            frontend/coverage
+            frontend/test-results
+          if-no-files-found: ignore
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            frontend/package.json
+
+      - name: Install frontend dependencies
+        run: |
+          if [ -f frontend/package-lock.json ]; then
+            npm ci --prefix frontend
+          else
+            npm install --prefix frontend --no-audit --no-fund
+          fi
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Start stack for e2e
+        run: docker compose -f docker-compose.yml up -d --build
+
+      - name: Wait for backend and frontend health
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS http://localhost:3001/api/v1/auth/health >/dev/null && curl -fsS http://localhost:3000 >/dev/null; then
+              echo "Services are healthy"
+              exit 0
+            fi
+            echo "Waiting for services..."
+            sleep 10
+          done
+          echo "Services did not become healthy in time"
+          docker compose -f docker-compose.yml logs
+          exit 1
+
+      - name: Run Playwright e2e
+        run: npm run test:e2e --if-present
+        working-directory: frontend
+
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+
+      - name: Stop stack
+        if: always()
+        run: docker compose -f docker-compose.yml down -v
