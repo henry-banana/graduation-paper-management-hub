@@ -2,7 +2,11 @@
 
 export default function LoginPage() {
   const handleLogin = () => {
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/google`;
+    const apiUrl =
+      process.env.NEXT_PUBLIC_API_URL ||
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      'http://localhost:3001/api/v1';
+    window.location.href = `${apiUrl}/auth/google`;
   };
 
   return (

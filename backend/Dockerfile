@@ -1,21 +1,34 @@
-FROM node:20-alpine AS base
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-
-FROM base AS development
 RUN npm install
+
+FROM node:22-alpine AS development
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 CMD ["npm", "run", "dev"]
 
-FROM base AS build
-RUN npm install
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine AS production
+FROM node:22-alpine AS runner
 WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3001
+
 COPY package*.json ./
-RUN npm install --omit=dev
-COPY --from=build /app/dist ./dist
-EXPOSE 3000
+RUN npm install --omit=dev && npm cache clean --force
+COPY --from=builder /app/dist ./dist
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN chown -R appuser:appgroup /app
+USER appuser
+
+EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- http://127.0.0.1:${PORT}/api/v1/auth/health || exit 1
+
 CMD ["node", "dist/main"]

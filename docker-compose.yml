@@ -1,6 +1,24 @@
 version: "3.9"
 
+# Development compose file
+# Use for local development only:
+#   docker compose -f docker-compose.yml up --build
+# Production runtime uses docker-compose.prod.yml
+
 services:
+  cache:
+    image: redis:7-alpine
+    container_name: kltn-redis-dev
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -8,16 +26,23 @@ services:
       target: development
     container_name: kltn-backend-dev
     ports:
-      - "3001:3000"
+      - "${BACKEND_PORT:-3001}:3001"
     env_file:
-      - ./backend/.env.example
+      - path: ./backend/.env
+        required: false
+      - path: ./backend/.env.example
+        required: true
     environment:
       NODE_ENV: development
-      PORT: 3000
+      PORT: 3001
+      REDIS_URL: redis://cache:6379
     volumes:
       - ./backend:/app
       - /app/node_modules
     command: npm run dev
+    depends_on:
+      cache:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -27,16 +52,20 @@ services:
       target: development
     container_name: kltn-frontend-dev
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     env_file:
-      - ./frontend/.env.example
+      - path: ./frontend/.env.local
+        required: false
+      - path: ./frontend/.env.example
+        required: true
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-3001}/api/v1
     volumes:
       - ./frontend:/app
       - /app/node_modules
     command: npm run dev
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     restart: unless-stopped
