@@ -9,6 +9,8 @@ These instructions apply to all agent sessions in this repository.
 - Data source: Google Sheets only (source of truth).
 - File storage: Google Drive.
 - Auth: Google OAuth2 + JWT.
+- Deployment target: Render (production deploy triggered by push to main).
+- Planning docs are maintained at workspace level: ../../docs/02-backend.
 
 ## 2) Tech Stack and Versions
 
@@ -150,4 +152,6 @@ Expected error shape:
 - Prefer minimal, focused diffs.
 - Update tests with behavior changes.
 - Keep CI green: typecheck, test, build.
+- Release flow: develop is integration branch, merge develop into main to release.
+- CD must keep main auto-deploy behavior for production on Render.
 - For multi-agent work, honor strict folder boundaries and shared contracts in backend/src/common.

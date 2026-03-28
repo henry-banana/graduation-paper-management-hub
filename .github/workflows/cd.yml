@@ -1,241 +1,92 @@
 # Required GitHub Secrets:
-# - STAGING_HOST, STAGING_USER, STAGING_SSH_KEY
-# - PROD_HOST, PROD_USER, PROD_SSH_KEY
+# - RENDER_BACKEND_DEPLOY_HOOK_URL
+# - RENDER_FRONTEND_DEPLOY_HOOK_URL
 #
-# Optional GitHub Environment Variables:
-# - STAGING_APP_DIR (default: /opt/graduation-paper-management-hub)
-# - PRODUCTION_APP_DIR (default: /opt/graduation-paper-management-hub)
+# Optional GitHub Variables:
+# - BACKEND_HEALTHCHECK_URL (example: https://api.example.com/api/v1/auth/health)
+# - FRONTEND_HEALTHCHECK_URL (example: https://app.example.com/login)
 
-name: cd
+name: cd-render-main
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      target:
-        description: Deployment target
-        required: true
-        default: staging
-        type: choice
-        options:
-          - staging
-          - production
 
-env:
-  REGISTRY: ghcr.io
-  NODE_VERSION: 22
-  BACKEND_IMAGE_NAME: ${{ github.repository_owner }}/graduation-paper-management-hub-backend
-  FRONTEND_IMAGE_NAME: ${{ github.repository_owner }}/graduation-paper-management-hub-frontend
+concurrency:
+  group: production-render-deploy
+  cancel-in-progress: false
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      backend_image: ${{ steps.meta.outputs.backend_image }}
-      frontend_image: ${{ steps.meta.outputs.frontend_image }}
-      short_sha: ${{ steps.vars.outputs.short_sha }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set tags and metadata
-        id: vars
-        shell: bash
-        run: |
-          SHORT_SHA="${GITHUB_SHA::7}"
-          BRANCH_TAG="$(echo "${GITHUB_REF_NAME}" | tr '/_' '-')"
-          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "branch_tag=${BRANCH_TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:sha-${{ steps.vars.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:branch-${{ steps.vars.outputs.branch_tag }}
-            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:sha-${{ steps.vars.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:branch-${{ steps.vars.outputs.branch_tag }}
-            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest
-
-      - name: Set build outputs
-        id: meta
-        shell: bash
-        run: |
-          echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:sha-${{ steps.vars.outputs.short_sha }}" >> "$GITHUB_OUTPUT"
-          echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:sha-${{ steps.vars.outputs.short_sha }}" >> "$GITHUB_OUTPUT"
-
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: [build-and-push]
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'staging')
-    environment: staging
-    env:
-      APP_DIR: ${{ vars.STAGING_APP_DIR || '/opt/graduation-paper-management-hub' }}
-      BACKEND_IMAGE: ${{ needs.build-and-push.outputs.backend_image }}
-      FRONTEND_IMAGE: ${{ needs.build-and-push.outputs.frontend_image }}
-      MIGRATION_COMMAND: npm run migration:deploy --if-present
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Upload compose file to staging server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.STAGING_HOST }}
-          username: ${{ secrets.STAGING_USER }}
-          key: ${{ secrets.STAGING_SSH_KEY }}
-          source: docker-compose.prod.yml
-          target: ${{ env.APP_DIR }}
-
-      - name: Deploy to staging with rollback
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          APP_DIR: ${{ env.APP_DIR }}
-          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE }}
-          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE }}
-          MIGRATION_COMMAND: ${{ env.MIGRATION_COMMAND }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          host: ${{ secrets.STAGING_HOST }}
-          username: ${{ secrets.STAGING_USER }}
-          key: ${{ secrets.STAGING_SSH_KEY }}
-          envs: APP_DIR,BACKEND_IMAGE,FRONTEND_IMAGE,MIGRATION_COMMAND,GITHUB_ACTOR,GITHUB_TOKEN
-          script: |
-            set -euo pipefail
-
-            mkdir -p "$APP_DIR"
-            cd "$APP_DIR"
-
-            PREV_BACKEND_IMAGE="$(docker inspect --format='{{.Config.Image}}' kltn-backend 2>/dev/null || true)"
-            PREV_FRONTEND_IMAGE="$(docker inspect --format='{{.Config.Image}}' kltn-frontend 2>/dev/null || true)"
-
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-
-            BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose -f docker-compose.prod.yml pull backend frontend
-            BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose -f docker-compose.prod.yml up -d backend frontend cache
-
-            BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose -f docker-compose.prod.yml run --rm backend sh -lc "$MIGRATION_COMMAND"
-
-            HEALTH_OK=0
-            for ATTEMPT in 1 2 3; do
-              if curl -fsS http://localhost:3001/api/v1/auth/health >/dev/null; then
-                HEALTH_OK=1
-                break
-              fi
-              echo "Health check failed on attempt ${ATTEMPT}, retrying in 10s"
-              sleep 10
-            done
-
-            if [ "$HEALTH_OK" -ne 1 ]; then
-              echo "Health check failed after deploy. Starting rollback..."
-              if [ -n "$PREV_BACKEND_IMAGE" ] && [ -n "$PREV_FRONTEND_IMAGE" ]; then
-                BACKEND_IMAGE="$PREV_BACKEND_IMAGE" FRONTEND_IMAGE="$PREV_FRONTEND_IMAGE" docker compose -f docker-compose.prod.yml up -d backend frontend cache
-              else
-                echo "No previous images detected. Rollback skipped."
-              fi
-              exit 1
-            fi
-
-            echo "Staging deployment completed successfully"
-
   deploy-production:
     runs-on: ubuntu-latest
-    needs: [build-and-push]
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'production'
-    environment: production
+    timeout-minutes: 20
     env:
-      APP_DIR: ${{ vars.PRODUCTION_APP_DIR || '/opt/graduation-paper-management-hub' }}
-      BACKEND_IMAGE: ${{ needs.build-and-push.outputs.backend_image }}
-      FRONTEND_IMAGE: ${{ needs.build-and-push.outputs.frontend_image }}
-      MIGRATION_COMMAND: npm run migration:deploy --if-present
+      BACKEND_HEALTHCHECK_URL: ${{ vars.BACKEND_HEALTHCHECK_URL }}
+      FRONTEND_HEALTHCHECK_URL: ${{ vars.FRONTEND_HEALTHCHECK_URL }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Detect deploy mode
+        id: mode
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}" ] && [ -n "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}" ]; then
+            echo "mode=hook" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=git-connected" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Upload compose file to production server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_KEY }}
-          source: docker-compose.prod.yml
-          target: ${{ env.APP_DIR }}
+      - name: Deploy mode summary
+        shell: bash
+        run: |
+          if [ "${{ steps.mode.outputs.mode }}" = "hook" ]; then
+            echo "Using Render deploy hooks from GitHub Actions"
+          else
+            echo "Using Render git-connected auto deploy on main"
+            echo "No deploy hook secrets found, skipping hook trigger steps"
+          fi
 
-      - name: Deploy to production with rollback
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          APP_DIR: ${{ env.APP_DIR }}
-          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE }}
-          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE }}
-          MIGRATION_COMMAND: ${{ env.MIGRATION_COMMAND }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_KEY }}
-          envs: APP_DIR,BACKEND_IMAGE,FRONTEND_IMAGE,MIGRATION_COMMAND,GITHUB_ACTOR,GITHUB_TOKEN
-          script: |
-            set -euo pipefail
+      - name: Trigger backend deploy on Render
+        if: ${{ steps.mode.outputs.mode == 'hook' }}
+        shell: bash
+        run: |
+          curl -fsS -X POST "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}"
 
-            mkdir -p "$APP_DIR"
-            cd "$APP_DIR"
+      - name: Trigger frontend deploy on Render
+        if: ${{ steps.mode.outputs.mode == 'hook' }}
+        shell: bash
+        run: |
+          curl -fsS -X POST "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}"
 
-            PREV_BACKEND_IMAGE="$(docker inspect --format='{{.Config.Image}}' kltn-backend 2>/dev/null || true)"
-            PREV_FRONTEND_IMAGE="$(docker inspect --format='{{.Config.Image}}' kltn-frontend 2>/dev/null || true)"
+      - name: Wait for rollout to begin
+        if: ${{ steps.mode.outputs.mode == 'hook' }}
+        run: sleep 45
 
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-
-            BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose -f docker-compose.prod.yml pull backend frontend
-            BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose -f docker-compose.prod.yml up -d backend frontend cache
-
-            BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose -f docker-compose.prod.yml run --rm backend sh -lc "$MIGRATION_COMMAND"
-
-            HEALTH_OK=0
-            for ATTEMPT in 1 2 3; do
-              if curl -fsS http://localhost:3001/api/v1/auth/health >/dev/null; then
-                HEALTH_OK=1
-                break
-              fi
-              echo "Health check failed on attempt ${ATTEMPT}, retrying in 10s"
-              sleep 10
-            done
-
-            if [ "$HEALTH_OK" -ne 1 ]; then
-              echo "Health check failed after deploy. Starting rollback..."
-              if [ -n "$PREV_BACKEND_IMAGE" ] && [ -n "$PREV_FRONTEND_IMAGE" ]; then
-                BACKEND_IMAGE="$PREV_BACKEND_IMAGE" FRONTEND_IMAGE="$PREV_FRONTEND_IMAGE" docker compose -f docker-compose.prod.yml up -d backend frontend cache
-              else
-                echo "No previous images detected. Rollback skipped."
-              fi
-              exit 1
+      - name: Verify backend health
+        if: ${{ steps.mode.outputs.mode == 'hook' && env.BACKEND_HEALTHCHECK_URL != '' }}
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS "$BACKEND_HEALTHCHECK_URL" >/dev/null; then
+              echo "Backend health check passed"
+              exit 0
             fi
+            echo "Backend is not healthy yet (attempt ${attempt}/6), waiting 20s"
+            sleep 20
+          done
+          echo "Backend health check failed after retries"
+          exit 1
 
-            echo "Production deployment completed successfully"
+      - name: Verify frontend health
+        if: ${{ steps.mode.outputs.mode == 'hook' && env.FRONTEND_HEALTHCHECK_URL != '' }}
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS "$FRONTEND_HEALTHCHECK_URL" >/dev/null; then
+              echo "Frontend health check passed"
+              exit 0
+            fi
+            echo "Frontend is not healthy yet (attempt ${attempt}/6), waiting 20s"
+            sleep 20
+          done
+          echo "Frontend health check failed after retries"
+          exit 1
