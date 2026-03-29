@@ -1,23 +1,23 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, XCircle, AlertCircle, GraduationCap, BookOpen, Award, User, Building, Calendar, Hash, Users } from "lucide-react";
+import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 
-const STUDENT_INFO = {
-  name: "Nguyễn Văn A",
-  studentId: "20110123",
-  dob: "01/01/2002",
-  gender: "Nam",
-  major: "Công nghệ Thông tin",
-  faculty: "Khoa CNTT",
-  className: "20110CL2A",
-  cohort: "2020",
-  email: "20110123@student.hcmute.edu.vn",
-  avatar: null,
-  // Graduation requirements
-  credits: { completed: 150, required: 150 },
-  bctt: "Hoàn thành",
-  kltn: "Hoàn thành",
-};
+interface UserProfileDto {
+  id: string;
+  email: string;
+  fullName: string;
+  studentId?: string;
+  department?: string;
+  earnedCredits?: number;
+}
+
+interface TopicDto {
+  id: string;
+  type: "BCTT" | "KLTN";
+  state: string;
+}
 
 const GradReq = ({ label, value, status }: { label: string; value: string; status: "done" | "pending" | "not_started" }) => {
   const cfg = {
@@ -40,8 +40,84 @@ const GradReq = ({ label, value, status }: { label: string; value: string; statu
 };
 
 export default function StudentProfilePage() {
-  const creditPct = (STUDENT_INFO.credits.completed / STUDENT_INFO.credits.required) * 100;
-  const allDone = STUDENT_INFO.bctt === "Hoàn thành" && STUDENT_INFO.kltn === "Hoàn thành" && STUDENT_INFO.credits.completed >= STUDENT_INFO.credits.required;
+  const [profile, setProfile] = useState<UserProfileDto | null>(null);
+  const [topics, setTopics] = useState<TopicDto[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const [profileRes, topicsRes] = await Promise.all([
+          api.get<ApiResponse<UserProfileDto>>("/users/me"),
+          api.get<ApiListResponse<TopicDto>>("/topics?role=student&page=1&size=100"),
+        ]);
+
+        setProfile(profileRes.data);
+        setTopics(topicsRes.data);
+      } catch (loadError) {
+        const message = loadError instanceof Error ? loadError.message : "Không thể tải thông tin sinh viên.";
+        setError(message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void loadData();
+  }, []);
+
+  const bcttState = useMemo(() => {
+    const topic = topics.find((item) => item.type === "BCTT");
+    if (!topic) {
+      return { label: "Chưa đăng ký", status: "not_started" as const };
+    }
+
+    if (topic.state === "COMPLETED") {
+      return { label: "Hoàn thành", status: "done" as const };
+    }
+
+    if (topic.state === "CANCELLED") {
+      return { label: "Đã hủy", status: "not_started" as const };
+    }
+
+    return { label: topic.state, status: "pending" as const };
+  }, [topics]);
+
+  const kltnState = useMemo(() => {
+    const topic = topics.find((item) => item.type === "KLTN");
+    if (!topic) {
+      return { label: "Chưa đăng ký", status: "not_started" as const };
+    }
+
+    if (topic.state === "COMPLETED") {
+      return { label: "Hoàn thành", status: "done" as const };
+    }
+
+    if (topic.state === "CANCELLED") {
+      return { label: "Đã hủy", status: "not_started" as const };
+    }
+
+    return { label: topic.state, status: "pending" as const };
+  }, [topics]);
+
+  const earnedCredits = profile?.earnedCredits ?? 0;
+  const allDone = bcttState.status === "done" && kltnState.status === "done";
+
+  if (isLoading) {
+    return <div className="text-sm text-outline">Đang tải thông tin sinh viên...</div>;
+  }
+
+  if (error || !profile) {
+    return (
+      <div className="flex items-start gap-3 bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3">
+        <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
+        <p className="text-sm text-error">{error ?? "Không tìm thấy hồ sơ sinh viên."}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
@@ -60,23 +136,16 @@ export default function StudentProfilePage() {
           {/* Avatar */}
           <div className="flex flex-col md:flex-row md:items-end gap-4 md:gap-6 -mt-10 md:-mt-14 mb-8">
             <div className="w-20 h-20 md:w-24 md:h-24 rounded-2xl bg-surface-container-lowest border-4 border-surface-container-lowest shadow-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
-              {STUDENT_INFO.avatar ? (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={STUDENT_INFO.avatar} alt={STUDENT_INFO.name} className="w-full h-full object-cover" />
-                </>
-              ) : (
-                <div className="w-full h-full bg-primary/10 flex items-center justify-center">
-                  <User className="w-10 h-10 text-primary/60" />
-                </div>
-              )}
+              <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                <User className="w-10 h-10 text-primary/60" />
+              </div>
             </div>
             <div className="pb-1">
-              <h2 className="text-2xl font-bold font-headline text-on-surface">{STUDENT_INFO.name}</h2>
+              <h2 className="text-2xl font-bold font-headline text-on-surface">{profile.fullName}</h2>
               <div className="flex items-center gap-2 mt-1">
-                <span className="text-sm text-outline">{STUDENT_INFO.studentId}</span>
+                <span className="text-sm text-outline">{profile.studentId ?? "-"}</span>
                 <span className="text-outline/30">·</span>
-                <span className="text-sm text-outline">{STUDENT_INFO.email}</span>
+                <span className="text-sm text-outline">{profile.email}</span>
               </div>
             </div>
           </div>
@@ -84,14 +153,14 @@ export default function StudentProfilePage() {
           {/* Info grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-0 rounded-2xl border border-outline-variant/15 overflow-hidden">
             {[
-              { icon: Hash, label: "Mã sinh viên", value: STUDENT_INFO.studentId },
-              { icon: Building, label: "Khoa", value: STUDENT_INFO.faculty },
-              { icon: User, label: "Họ tên", value: STUDENT_INFO.name },
-              { icon: BookOpen, label: "Ngành", value: STUDENT_INFO.major },
-              { icon: Calendar, label: "Ngày sinh", value: STUDENT_INFO.dob },
-              { icon: Users, label: "Lớp", value: STUDENT_INFO.className },
-              { icon: User, label: "Giới tính", value: STUDENT_INFO.gender },
-              { icon: GraduationCap, label: "Khóa", value: STUDENT_INFO.cohort },
+              { icon: Hash, label: "Mã sinh viên", value: profile.studentId ?? "-" },
+              { icon: Building, label: "Bộ môn", value: profile.department ?? "-" },
+              { icon: User, label: "Họ tên", value: profile.fullName },
+              { icon: BookOpen, label: "Email", value: profile.email },
+              { icon: Calendar, label: "Số tín chỉ đã tích lũy", value: String(earnedCredits) },
+              { icon: Users, label: "User ID", value: profile.id },
+              { icon: User, label: "Điều kiện BCTT", value: bcttState.label },
+              { icon: GraduationCap, label: "Điều kiện KLTN", value: kltnState.label },
             ].map((item, i) => {
               const Icon = item.icon;
               return (
@@ -130,36 +199,36 @@ export default function StudentProfilePage() {
           {/* Credits progress bar */}
           <div className="py-4 border-b border-outline-variant/10">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-on-surface-variant">Số tín chỉ đã hoàn thành</span>
+              <span className="text-sm font-medium text-on-surface-variant">Số tín chỉ đã tích lũy</span>
               <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-on-surface">{STUDENT_INFO.credits.completed}/{STUDENT_INFO.credits.required}</span>
-                <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${STUDENT_INFO.credits.completed >= STUDENT_INFO.credits.required ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-                  {STUDENT_INFO.credits.completed >= STUDENT_INFO.credits.required ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
-                  {STUDENT_INFO.credits.completed >= STUDENT_INFO.credits.required ? "Đạt" : "Chưa đạt"}
+                <span className="text-sm font-bold text-on-surface">{earnedCredits}</span>
+                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Theo dữ liệu hiện có
                 </span>
               </div>
             </div>
             <div className="w-full bg-primary/10 h-2.5 rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-primary to-primary-container transition-all duration-700"
-                style={{ width: `${Math.min(creditPct, 100)}%` }}
+                style={{ width: "100%" }}
               />
             </div>
             <div className="flex justify-between mt-2 text-xs text-outline">
               <span>0 tín chỉ</span>
-              <span>{STUDENT_INFO.credits.required} tín chỉ</span>
+              <span>{earnedCredits} tín chỉ</span>
             </div>
           </div>
 
-          <GradReq label="Báo cáo thực tập (BCTT)" value={STUDENT_INFO.bctt} status="done" />
-          <GradReq label="Khóa luận tốt nghiệp (KLTN)" value={STUDENT_INFO.kltn} status="done" />
+          <GradReq label="Báo cáo thực tập (BCTT)" value={bcttState.label} status={bcttState.status} />
+          <GradReq label="Khóa luận tốt nghiệp (KLTN)" value={kltnState.label} status={kltnState.status} />
         </div>
 
         {!allDone && (
           <div className="px-6 py-4 border-t border-outline-variant/10 bg-amber-50/50">
             <p className="text-xs text-amber-700 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              Chỉ mở khóa đăng ký KLTN khi đủ tín chỉ và hoàn thành Báo cáo thực tập.
+              Hệ thống chỉ mở khóa đăng ký KLTN khi hoàn thành điều kiện BCTT và tín chỉ theo dữ liệu học vụ.
             </p>
           </div>
         )}

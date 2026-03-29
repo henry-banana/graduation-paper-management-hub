@@ -1,7 +1,9 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { AccountRole } from '../../common/types';
+import { GetUsersQueryDto, UpdateUserProfileDto, UserResponseDto } from './dto';
+import { UsersRepository } from '../../infrastructure/google-sheets';
 
 export interface UserRecord {
   id: string;
@@ -12,8 +14,22 @@ export interface UserRecord {
   lecturerId?: string;
   department?: string;
   earnedCredits?: number;
+  requiredCredits?: number;
+  completedBcttScore?: number;
   totalQuota?: number;
   quotaUsed?: number;
+  phone?: string;
+  isActive?: boolean;
+  createdAt?: string;
+}
+
+interface PaginatedResult<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    size: number;
+    total: number;
+  };
 }
 
 const CACHE_TTL = 300000; // 5 minutes
@@ -22,6 +38,7 @@ const CACHE_TTL = 300000; // 5 minutes
 export class UsersService {
   constructor(
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly usersRepository: UsersRepository,
   ) {}
 
   async findByEmail(email: string): Promise<UserRecord | null> {
@@ -48,6 +65,62 @@ export class UsersService {
     return user;
   }
 
+  async findAll(query: GetUsersQueryDto): Promise<PaginatedResult<UserResponseDto>> {
+    let users = await this.usersRepository.findAll();
+
+    // Filter by role
+    if (query.role) {
+      users = users.filter((u) => u.role === query.role);
+    }
+
+    // Search by name or email
+    if (query.q) {
+      const searchLower = query.q.toLowerCase();
+      users = users.filter(
+        (u) =>
+          u.name.toLowerCase().includes(searchLower) ||
+          u.email.toLowerCase().includes(searchLower),
+      );
+    }
+
+    const total = users.length;
+    const page = query.page ?? 1;
+    const size = query.size ?? 20;
+    const start = (page - 1) * size;
+    const paginatedUsers = users.slice(start, start + size);
+
+    return {
+      data: paginatedUsers.map((u) => this.mapToDto(u)),
+      pagination: { page, size, total },
+    };
+  }
+
+  async updateProfile(
+    userId: string,
+    dto: UpdateUserProfileDto,
+  ): Promise<{ updated: boolean }> {
+    const user = await this.usersRepository.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (dto.fullName) {
+      user.name = dto.fullName;
+    }
+    if (dto.phone) {
+      user.phone = dto.phone;
+    }
+
+    await this.usersRepository.update(user.id, user);
+
+    await this.invalidateUserCache(
+      user.email,
+      user.id,
+    );
+
+    return { updated: true };
+  }
+
   async invalidateUserCache(email: string, id: string): Promise<void> {
     await Promise.all([
       this.cacheManager.del(`user:email:${email}`),
@@ -55,84 +128,29 @@ export class UsersService {
     ]);
   }
 
+  mapToDto(user: UserRecord): UserResponseDto {
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.name,
+      accountRole: user.role,
+      studentId: user.studentId,
+      lecturerId: user.lecturerId,
+      department: user.department,
+      earnedCredits: user.earnedCredits,
+      totalQuota: user.totalQuota,
+      quotaUsed: user.quotaUsed,
+      isActive: user.isActive,
+    };
+  }
+
   private async fetchUserFromSheet(email: string): Promise<UserRecord | null> {
-    // Placeholder: will be replaced with Google Sheets integration in F03
-    // For dev mode, return mock data based on email pattern
-    if (process.env.NODE_ENV === 'development' || process.env.MOCK_AUTH === 'true') {
-      return this.getMockUser(email);
-    }
-    return null;
+    return this.usersRepository.findFirst(
+      (u) => u.email.toLowerCase() === email.toLowerCase(),
+    );
   }
 
   private async fetchUserByIdFromSheet(id: string): Promise<UserRecord | null> {
-    // Placeholder: will be replaced with Google Sheets integration in F03
-    if (process.env.NODE_ENV === 'development' || process.env.MOCK_AUTH === 'true') {
-      return this.getMockUserById(id);
-    }
-    return null;
-  }
-
-  private getMockUser(email: string): UserRecord | null {
-    const mockUsers: Record<string, UserRecord> = {
-      'student@hcmute.edu.vn': {
-        id: 'USR001',
-        email: 'student@hcmute.edu.vn',
-        name: 'Nguyễn Văn A',
-        role: 'STUDENT',
-        studentId: '20110001',
-        earnedCredits: 120,
-      },
-      'lecturer@hcmute.edu.vn': {
-        id: 'USR002',
-        email: 'lecturer@hcmute.edu.vn',
-        name: 'Trần Văn B',
-        role: 'LECTURER',
-        lecturerId: 'GV001',
-        department: 'CNTT',
-        totalQuota: 10,
-        quotaUsed: 3,
-      },
-      'tbm@hcmute.edu.vn': {
-        id: 'USR003',
-        email: 'tbm@hcmute.edu.vn',
-        name: 'Lê Văn C',
-        role: 'TBM',
-        lecturerId: 'GV002',
-        department: 'CNTT',
-      },
-    };
-    return mockUsers[email] ?? null;
-  }
-
-  private getMockUserById(id: string): UserRecord | null {
-    const mockUsersById: Record<string, UserRecord> = {
-      'USR001': {
-        id: 'USR001',
-        email: 'student@hcmute.edu.vn',
-        name: 'Nguyễn Văn A',
-        role: 'STUDENT',
-        studentId: '20110001',
-        earnedCredits: 120,
-      },
-      'USR002': {
-        id: 'USR002',
-        email: 'lecturer@hcmute.edu.vn',
-        name: 'Trần Văn B',
-        role: 'LECTURER',
-        lecturerId: 'GV001',
-        department: 'CNTT',
-        totalQuota: 10,
-        quotaUsed: 3,
-      },
-      'USR003': {
-        id: 'USR003',
-        email: 'tbm@hcmute.edu.vn',
-        name: 'Lê Văn C',
-        role: 'TBM',
-        lecturerId: 'GV002',
-        department: 'CNTT',
-      },
-    };
-    return mockUsersById[id] ?? null;
+    return this.usersRepository.findById(id);
   }
 }

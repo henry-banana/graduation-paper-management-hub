@@ -5,7 +5,7 @@ import { Upload, X, CheckCircle, File, AlertCircle, Loader2 } from "lucide-react
 import { motion, AnimatePresence } from "framer-motion";
 
 interface FileUploadProps {
-  onUpload: (file: File) => void;
+  onUpload: (file: File) => Promise<void> | void;
   accept?: string;
   maxSize?: number; // in MB
 }
@@ -51,41 +51,53 @@ export function FileUpload({ onUpload, accept = ".pdf,.docx,.zip", maxSize = 50 
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
+
+    if (isUploading) {
+      return;
+    }
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const selectedFile = e.dataTransfer.files[0];
       if (validateFile(selectedFile)) {
-        processFile(selectedFile);
+        void processFile(selectedFile);
       }
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isUploading) {
+      return;
+    }
+
     if (e.target.files && e.target.files.length > 0) {
       const selectedFile = e.target.files[0];
       if (validateFile(selectedFile)) {
-        processFile(selectedFile);
+        void processFile(selectedFile);
       }
     }
   };
 
-  const processFile = (selectedFile: File) => {
+  const processFile = async (selectedFile: File) => {
     setFile(selectedFile);
     setIsUploading(true);
-    setProgress(0);
-    
-    // Simulate upload progress
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsUploading(false);
-          onUpload(selectedFile);
-          return 100;
-        }
-        return prev + 10;
-      });
-    }, 200);
+    setProgress(20);
+    setError(null);
+
+    try {
+      setProgress(55);
+      await onUpload(selectedFile);
+      setProgress(100);
+    } catch (uploadError) {
+      const message =
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Tải file thất bại. Vui lòng thử lại.";
+      setError(message);
+      setFile(null);
+      setProgress(0);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const reset = () => {

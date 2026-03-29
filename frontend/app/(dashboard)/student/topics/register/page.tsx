@@ -1,65 +1,159 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BookOpen, AlertCircle, ChevronDown, Send, Calendar, Info, Lock } from "lucide-react";
+import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 
-// MOCK DATA for business rule check
-const MOCK_USER_STATUS = {
-  credits: 130, // example: not enough to graduate or do KLTN
-  bcttDone: false, // BCTT must be true to register KLTN
-};
+interface PeriodDto {
+  id: string;
+  code: string;
+  type: "BCTT" | "KLTN";
+  openDate: string;
+  closeDate: string;
+  status: "DRAFT" | "OPEN" | "CLOSED";
+}
 
-const PERIODS = [
-  { id: "dot1", label: "ĐỢT 1 - HK2 25-26", start: "01/02/2026", end: "10/02/2026", open: false },
-  { id: "dot2", label: "ĐỢT 2 - HK2 25-26", start: "01/05/2026", end: "10/05/2026", open: true },
-];
+interface TopicDto {
+  id: string;
+  type: "BCTT" | "KLTN";
+  state: string;
+}
+
+interface UserProfileDto {
+  id: string;
+  fullName: string;
+  studentId?: string;
+  earnedCredits?: number;
+}
 
 export default function StudentTopicRegisterPage() {
+  const [periods, setPeriods] = useState<PeriodDto[]>([]);
+  const [topics, setTopics] = useState<TopicDto[]>([]);
+  const [profile, setProfile] = useState<UserProfileDto | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [form, setForm] = useState({
     topicName: "",
     domain: "",
-    gvhdEmail: "",
-    periodId: "dot2",
+    supervisorUserId: "",
+    periodId: "",
     type: "BCTT", // start with BCTT
     company: "",
   });
-  const [submitted, setSubmitted] = useState(false);
+  const [submittedTopicId, setSubmittedTopicId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  const selectedPeriod = PERIODS.find(p => p.id === form.periodId);
-  const canRegisterKLTN = MOCK_USER_STATUS.bcttDone; // Must finish BCTT to do KLTN
+  const canRegisterKLTN = useMemo(() => {
+    return topics.some((topic) => topic.type === "BCTT" && topic.state === "COMPLETED");
+  }, [topics]);
 
-  const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newType = e.target.value;
-    if (newType === "KLTN" && !canRegisterKLTN) {
-      setError("Bạn chưa đủ điều kiện đăng ký KLTN. Bắt buộc phải hoàn thành Báo cáo thực tập trước.");
-      setForm({ ...form, type: "BCTT" });
+  const availablePeriods = useMemo(() => {
+    return periods.filter((period) => period.type === form.type);
+  }, [periods, form.type]);
+
+  const selectedPeriod = useMemo(() => {
+    return availablePeriods.find((period) => period.id === form.periodId);
+  }, [availablePeriods, form.periodId]);
+
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      setError("");
+
+      try {
+        const [periodsRes, topicsRes, profileRes] = await Promise.all([
+          api.get<ApiListResponse<PeriodDto>>("/periods?page=1&size=100"),
+          api.get<ApiListResponse<TopicDto>>("/topics?role=student&page=1&size=100"),
+          api.get<ApiResponse<UserProfileDto>>("/users/me"),
+        ]);
+
+        setPeriods(periodsRes.data);
+        setTopics(topicsRes.data);
+        setProfile(profileRes.data);
+
+        const firstOpenBctt = periodsRes.data.find(
+          (period) => period.type === "BCTT" && period.status === "OPEN",
+        );
+
+        if (firstOpenBctt) {
+          setForm((prev) => ({ ...prev, periodId: firstOpenBctt.id }));
+        }
+      } catch (loadError) {
+        const message = loadError instanceof Error ? loadError.message : "Không thể tải dữ liệu đăng ký.";
+        setError(message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void loadData();
+  }, []);
+
+  useEffect(() => {
+    if (!availablePeriods.length) {
+      setForm((prev) => ({ ...prev, periodId: "" }));
       return;
     }
+
+    const hasCurrent = availablePeriods.some((period) => period.id === form.periodId);
+    if (!hasCurrent) {
+      const openPeriod = availablePeriods.find((period) => period.status === "OPEN");
+      setForm((prev) => ({ ...prev, periodId: openPeriod?.id ?? availablePeriods[0].id }));
+    }
+  }, [availablePeriods, form.periodId]);
+
+  const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newType = e.target.value as "BCTT" | "KLTN";
+    if (newType === "KLTN" && !canRegisterKLTN) {
+      setError("Bạn chưa đủ điều kiện đăng ký KLTN. Bắt buộc phải hoàn thành Báo cáo thực tập trước.");
+      return;
+    }
+
     setError("");
     setForm({ ...form, type: newType });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.topicName || !form.domain || !form.gvhdEmail || !form.periodId) {
+    if (!form.topicName || !form.domain || !form.supervisorUserId || !form.periodId) {
       setError("Vui lòng điền đầy đủ các trường bắt buộc.");
       return;
     }
-    if (!selectedPeriod?.open) {
+
+    if (!selectedPeriod || selectedPeriod.status !== "OPEN") {
       setError("Đợt đăng ký này hiện không mở. Vui lòng chọn đợt khác hoặc chờ đến kỳ đăng ký tiếp theo.");
       return;
     }
+
     if (form.type === "KLTN" && !canRegisterKLTN) {
       setError("Hệ thống phát hiện bạn chưa hoàn thành Báo cáo thực tập. Không thể đăng ký KLTN.");
       return;
     }
 
+    setIsSubmitting(true);
     setError("");
-    setSubmitted(true);
+
+    try {
+      const response = await api.post<ApiResponse<{ id: string; state: string }>>("/topics", {
+        type: form.type,
+        title: form.topicName,
+        domain: form.domain,
+        periodId: form.periodId,
+        supervisorUserId: form.supervisorUserId,
+        companyName: form.company || undefined,
+      });
+
+      setSubmittedTopicId(response.data.id);
+    } catch (submitError) {
+      const message = submitError instanceof Error ? submitError.message : "Đăng ký đề tài thất bại.";
+      setError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  if (submitted) {
+  if (submittedTopicId) {
     return (
       <div className="max-w-2xl mx-auto">
         <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 shadow-sm p-12 flex flex-col items-center text-center gap-6">
@@ -71,8 +165,13 @@ export default function StudentTopicRegisterPage() {
           <div>
             <h2 className="text-2xl font-bold font-headline text-on-surface">Đăng ký thành công!</h2>
             <p className="text-outline mt-2 max-w-sm">Đề tài đã được gửi đến GVHD. Vui lòng chờ xác nhận trong vòng <strong>5-7 ngày làm việc</strong>.</p>
+            <p className="text-xs text-outline mt-2">Mã đề tài: {submittedTopicId}</p>
           </div>
-          <button onClick={() => setSubmitted(false)} className="text-sm text-primary font-semibold hover:underline">
+          <button
+            type="button"
+            onClick={() => setSubmittedTopicId(null)}
+            className="text-sm text-primary font-semibold hover:underline"
+          >
             Đăng ký đề tài khác
           </button>
         </div>
@@ -105,14 +204,23 @@ export default function StudentTopicRegisterPage() {
                 </div>
               )}
 
+              {isLoading && (
+                <div className="flex items-center gap-2 text-sm text-outline">
+                  <Calendar className="w-4 h-4" />
+                  Đang tải dữ liệu đăng ký...
+                </div>
+              )}
+
               {/* Tên đề tài */}
               <div>
-                <label className="block text-sm font-semibold text-on-surface mb-2">Tên đề tài <span className="text-error">*</span></label>
+                <label htmlFor="topic-name" className="block text-sm font-semibold text-on-surface mb-2">Tên đề tài <span className="text-error">*</span></label>
                 <input
+                  id="topic-name"
                   type="text"
                   value={form.topicName}
                   onChange={e => setForm({ ...form, topicName: e.target.value })}
                   placeholder="Nhập tên đề tài..."
+                  disabled={isSubmitting || isLoading}
                   className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 />
               </div>
@@ -120,22 +228,26 @@ export default function StudentTopicRegisterPage() {
               {/* Mảng & GVHD */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-on-surface mb-2">Mảng <span className="text-error">*</span></label>
+                  <label htmlFor="topic-domain" className="block text-sm font-semibold text-on-surface mb-2">Mảng <span className="text-error">*</span></label>
                   <input
+                    id="topic-domain"
                     type="text"
                     value={form.domain}
                     onChange={e => setForm({ ...form, domain: e.target.value })}
                     placeholder="VD: Web, AI..."
+                    disabled={isSubmitting || isLoading}
                     className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-on-surface mb-2">Email GVHD <span className="text-error">*</span></label>
+                  <label htmlFor="supervisor-user-id" className="block text-sm font-semibold text-on-surface mb-2">Mã GVHD (User ID) <span className="text-error">*</span></label>
                   <input
-                    type="email"
-                    value={form.gvhdEmail}
-                    onChange={e => setForm({ ...form, gvhdEmail: e.target.value })}
-                    placeholder="gvhd@hcmute.edu.vn"
+                    id="supervisor-user-id"
+                    type="text"
+                    value={form.supervisorUserId}
+                    onChange={e => setForm({ ...form, supervisorUserId: e.target.value })}
+                    placeholder="VD: usr_gvhd_01"
+                    disabled={isSubmitting || isLoading}
                     className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   />
                 </div>
@@ -144,24 +256,32 @@ export default function StudentTopicRegisterPage() {
               {/* Đợt & Loại */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-on-surface mb-2">Đợt <span className="text-error">*</span></label>
+                  <label htmlFor="period-id" className="block text-sm font-semibold text-on-surface mb-2">Đợt <span className="text-error">*</span></label>
                   <div className="relative">
                     <select
+                      id="period-id"
                       value={form.periodId}
                       onChange={e => setForm({ ...form, periodId: e.target.value })}
+                      disabled={isSubmitting || isLoading || !availablePeriods.length}
                       className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary appearance-none pr-9"
                     >
-                      {PERIODS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      {availablePeriods.map((period) => (
+                        <option key={period.id} value={period.id}>
+                          {period.code} ({period.status})
+                        </option>
+                      ))}
                     </select>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline pointer-events-none" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-on-surface mb-2">Loại <span className="text-error">*</span></label>
+                  <label htmlFor="topic-type" className="block text-sm font-semibold text-on-surface mb-2">Loại <span className="text-error">*</span></label>
                   <div className="relative">
                     <select
+                      id="topic-type"
                       value={form.type}
                       onChange={handleTypeChange}
+                      disabled={isSubmitting || isLoading}
                       className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary appearance-none pr-9"
                     >
                       <option value="BCTT">Báo cáo thực tập</option>
@@ -177,18 +297,25 @@ export default function StudentTopicRegisterPage() {
 
               {/* Công ty */}
               <div>
-                <label className="block text-sm font-semibold text-on-surface mb-2">Công ty thực tập <span className="text-outline font-normal">(nếu có)</span></label>
+                <label htmlFor="company-name" className="block text-sm font-semibold text-on-surface mb-2">Công ty thực tập <span className="text-outline font-normal">(nếu có)</span></label>
                 <input
+                  id="company-name"
                   type="text"
                   value={form.company}
                   onChange={e => setForm({ ...form, company: e.target.value })}
                   placeholder="Tên công ty..."
+                  disabled={isSubmitting || isLoading}
                   className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 />
               </div>
 
-              <button type="submit" className="w-full flex items-center justify-center gap-2.5 px-6 py-3.5 bg-primary text-white font-semibold rounded-xl hover:bg-primary/90 hover:shadow-lg transition-all active:scale-95 text-sm mt-2">
-                <Send className="w-4 h-4" /> Đăng ký
+              <button
+                type="submit"
+                disabled={isSubmitting || isLoading}
+                className="w-full flex items-center justify-center gap-2.5 px-6 py-3.5 bg-primary text-white font-semibold rounded-xl hover:bg-primary/90 hover:shadow-lg transition-all active:scale-95 text-sm mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <Send className="w-4 h-4" />
+                {isSubmitting ? "Đang gửi..." : "Đăng ký"}
               </button>
             </div>
           </form>
@@ -201,15 +328,19 @@ export default function StudentTopicRegisterPage() {
               <h4 className="font-semibold text-on-surface text-sm flex items-center gap-2"><Calendar className="w-4 h-4 text-primary" /> Lịch đăng ký</h4>
             </div>
             <div className="p-4 space-y-3">
-              {PERIODS.map((p) => (
-                <div key={p.id} className={`px-4 py-3 rounded-2xl border ${p.open ? "border-green-200 bg-green-50" : "border-outline-variant/15 bg-surface-container"}`}>
+              {periods.map((p) => (
+                <div key={p.id} className={`px-4 py-3 rounded-2xl border ${p.status === "OPEN" ? "border-green-200 bg-green-50" : "border-outline-variant/15 bg-surface-container"}`}>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-on-surface">{p.label}</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${p.open ? "bg-green-500 text-white" : "bg-surface-container-high text-outline"}`}>{p.open ? "Đang mở" : "Đóng"}</span>
+                    <span className="text-xs font-bold text-on-surface">{p.code} ({p.type})</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${p.status === "OPEN" ? "bg-green-500 text-white" : "bg-surface-container-high text-outline"}`}>{p.status === "OPEN" ? "Đang mở" : p.status}</span>
                   </div>
-                  <p className="text-xs text-outline">{p.start} — {p.end}</p>
+                  <p className="text-xs text-outline">{p.openDate} — {p.closeDate}</p>
                 </div>
               ))}
+
+              {!periods.length && !isLoading && (
+                <p className="text-xs text-outline">Chưa có đợt đăng ký nào trong hệ thống.</p>
+              )}
             </div>
           </div>
           
@@ -220,6 +351,11 @@ export default function StudentTopicRegisterPage() {
               <div className="text-xs text-blue-900 leading-relaxed space-y-1.5">
                 <p className="font-bold">Quy định KLTN</p>
                 <p>Sinh viên muốn đăng ký Khóa luận tốt nghiệp phải có điểm <strong>Báo cáo thực tập &gt;= 5.0</strong>. Hệ thống sẽ tự động khóa tùy chọn KLTN nếu chưa đạt điều kiện này.</p>
+                {profile && (
+                  <p>
+                    Tín chỉ đã tích lũy hiện tại: <strong>{profile.earnedCredits ?? 0}</strong>
+                  </p>
+                )}
               </div>
             </div>
           </div>

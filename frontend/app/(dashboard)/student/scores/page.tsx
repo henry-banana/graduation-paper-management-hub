@@ -1,25 +1,117 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Award, TrendingUp, CheckCircle, Star, BarChart2, FileText } from "lucide-react";
+import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 
-const SCORE_DATA = {
-  topicCode: "BCTT-2023-01",
-  topicName: "Xây dựng hệ thống quản lý kho HKT",
-  totalScore: 8.5,
-  letterGrade: "A",
-  status: "Đạt",
-  gvhd: "TS. Nguyễn Văn B",
-  message: "Xin chúc mừng! Báo cáo thực tập của bạn đã hoàn thành xuất sắc. Bạn đã đủ điều kiện để đăng ký Khóa luận tốt nghiệp trong đợt tiếp theo.",
-};
+interface TopicDto {
+  id: string;
+  title: string;
+  type: "BCTT" | "KLTN";
+  state: string;
+  supervisorUserId: string;
+}
 
-const SCORE_MILESTONES = [
-  { label: "Trình bày & thuyết trình", icon: "🎤", sub: "Hội đồng phản biện" },
-  { label: "Chất lượng báo cáo", icon: "📄", sub: "GVHD đánh giá" },
-  { label: "Kỹ thuật & code", icon: "💻", sub: "Rubric tiêu chí" },
-];
+interface ScoreSummaryDto {
+  gvhdScore?: number;
+  gvpbScore?: number;
+  councilAvgScore?: number;
+  finalScore: number;
+  result: "PASS" | "FAIL";
+  confirmedByGvhd: boolean;
+  confirmedByCtHd: boolean;
+  published: boolean;
+}
+
+function toLetterGrade(score: number): string {
+  if (score >= 9) {
+    return "A+";
+  }
+  if (score >= 8) {
+    return "A";
+  }
+  if (score >= 7) {
+    return "B";
+  }
+  if (score >= 6) {
+    return "C";
+  }
+  if (score >= 5) {
+    return "D";
+  }
+  return "F";
+}
 
 export default function StudentScoresPage() {
-  const progress = (SCORE_DATA.totalScore / 10) * 100;
+  const [topics, setTopics] = useState<TopicDto[]>([]);
+  const [selectedTopicId, setSelectedTopicId] = useState<string>("");
+  const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const selectedTopic = useMemo(
+    () => topics.find((topic) => topic.id === selectedTopicId) ?? null,
+    [topics, selectedTopicId],
+  );
+
+  useEffect(() => {
+    const loadTopics = async () => {
+      setIsLoading(true);
+      setSummaryError(null);
+
+      try {
+        const response = await api.get<ApiListResponse<TopicDto>>(
+          "/topics?role=student&page=1&size=100",
+        );
+
+        setTopics(response.data);
+        if (response.data.length > 0) {
+          setSelectedTopicId(response.data[0].id);
+        }
+      } catch (loadError) {
+        const message = loadError instanceof Error ? loadError.message : "Không thể tải danh sách đề tài.";
+        setSummaryError(message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void loadTopics();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTopicId) {
+      setSummary(null);
+      return;
+    }
+
+    const loadSummary = async () => {
+      setSummaryError(null);
+
+      try {
+        const response = await api.get<ApiResponse<ScoreSummaryDto>>(
+          `/topics/${selectedTopicId}/scores/summary`,
+        );
+        setSummary(response.data);
+      } catch (loadError) {
+        setSummary(null);
+        const message = loadError instanceof Error ? loadError.message : "Chưa có điểm được công bố cho đề tài này.";
+        setSummaryError(message);
+      }
+    };
+
+    void loadSummary();
+  }, [selectedTopicId]);
+
+  const totalScore = summary?.finalScore ?? 0;
+  const progress = (totalScore / 10) * 100;
+
+  const scoreMilestones = [
+    { label: "Điểm GVHD", icon: "GV", sub: "Giảng viên hướng dẫn", score: summary?.gvhdScore },
+    { label: "Điểm GVPB", icon: "PB", sub: "Giảng viên phản biện", score: summary?.gvpbScore },
+    { label: "Điểm Hội đồng", icon: "HD", sub: "Trung bình Hội đồng", score: summary?.councilAvgScore },
+  ];
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
@@ -33,6 +125,34 @@ export default function StudentScoresPage() {
         </p>
       </div>
 
+      {isLoading && (
+        <p className="text-sm text-outline">Đang tải dữ liệu điểm số...</p>
+      )}
+
+      {topics.length > 0 && (
+        <label className="flex flex-col gap-2 text-sm text-on-surface-variant">
+          <span className="font-semibold">Chọn đề tài</span>
+          <select
+            value={selectedTopicId}
+            onChange={(event) => setSelectedTopicId(event.target.value)}
+            className="px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface"
+          >
+            {topics.map((topic) => (
+              <option key={topic.id} value={topic.id}>
+                {topic.title} ({topic.type})
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {summaryError && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+          <TrendingUp className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+          <p className="text-sm text-amber-700">{summaryError}</p>
+        </div>
+      )}
+
       {/* Main Score Card */}
       <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 overflow-hidden shadow-sm">
         {/* Topic info */}
@@ -44,10 +164,10 @@ export default function StudentScoresPage() {
               </div>
               <div>
                 <span className="inline-block text-xs font-bold text-primary bg-primary/10 px-3 py-1 rounded-full mb-2">
-                  {SCORE_DATA.topicCode}
+                  {selectedTopic?.id ?? "-"}
                 </span>
-                <h2 className="text-xl font-bold text-on-surface font-headline">{SCORE_DATA.topicName}</h2>
-                <p className="text-sm text-outline mt-1">GVHD: {SCORE_DATA.gvhd}</p>
+                <h2 className="text-xl font-bold text-on-surface font-headline">{selectedTopic?.title ?? "Chưa chọn đề tài"}</h2>
+                <p className="text-sm text-outline mt-1">GVHD: {selectedTopic?.supervisorUserId ?? "-"}</p>
               </div>
             </div>
 
@@ -65,8 +185,8 @@ export default function StudentScoresPage() {
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-3xl font-black text-primary font-headline">{SCORE_DATA.totalScore}</span>
-                  <span className="text-xs text-outline font-medium">{SCORE_DATA.status}</span>
+                  <span className="text-3xl font-black text-primary font-headline">{summary ? totalScore.toFixed(2) : "-"}</span>
+                  <span className="text-xs text-outline font-medium">{summary ? (summary.result === "PASS" ? "Đạt" : "Không đạt") : "Chưa công bố"}</span>
                 </div>
               </div>
             </div>
@@ -76,9 +196,9 @@ export default function StudentScoresPage() {
         {/* Grade summary row */}
         <div className="grid grid-cols-3 divide-x divide-outline-variant/10 px-0">
           {[
-            { label: "Xếp loại", value: SCORE_DATA.letterGrade, sub: "Giỏi", icon: <Award className="w-5 h-5 text-amber-500" /> },
-            { label: "Điểm số", value: `${SCORE_DATA.totalScore}/10`, sub: "Tổng hợp", icon: <BarChart2 className="w-5 h-5 text-primary" /> },
-            { label: "Trạng thái", value: "Đạt ✓", sub: "Hoàn thành", icon: <CheckCircle className="w-5 h-5 text-green-500" /> },
+            { label: "Xếp loại", value: summary ? toLetterGrade(totalScore) : "-", sub: "Theo điểm tổng", icon: <Award className="w-5 h-5 text-amber-500" /> },
+            { label: "Điểm số", value: summary ? `${totalScore.toFixed(2)}/10` : "-", sub: "Tổng hợp", icon: <BarChart2 className="w-5 h-5 text-primary" /> },
+            { label: "Trạng thái", value: summary ? (summary.result === "PASS" ? "Đạt" : "Không đạt") : "Chưa công bố", sub: "Xuất bản", icon: <CheckCircle className="w-5 h-5 text-green-500" /> },
           ].map((item, i) => (
             <div key={i} className="px-8 py-6 flex flex-col items-center text-center">
               <div className="mb-2">{item.icon}</div>
@@ -94,14 +214,18 @@ export default function StudentScoresPage() {
             Các tiêu chí đánh giá
           </h3>
           <div className="grid sm:grid-cols-3 gap-4">
-            {SCORE_MILESTONES.map((m, i) => (
+            {scoreMilestones.map((m, i) => (
               <div key={i} className="bg-surface-container-low rounded-2xl p-4 flex flex-col gap-2">
-                <span className="text-2xl">{m.icon}</span>
+                <span className="text-sm font-bold text-primary">{m.icon}</span>
                 <span className="text-sm font-semibold text-on-surface">{m.label}</span>
                 <span className="text-xs text-outline">{m.sub}</span>
                 <div className="w-full bg-surface-container h-1.5 rounded-full mt-2">
-                  <div className="bg-primary h-full rounded-full" style={{ width: `${75 + i * 5}%` }}></div>
+                  <div
+                    className="bg-primary h-full rounded-full"
+                    style={{ width: `${Math.min(((m.score ?? 0) / 10) * 100, 100)}%` }}
+                  ></div>
                 </div>
+                <span className="text-xs text-outline">{m.score != null ? `${m.score.toFixed(2)}/10` : "Chưa có"}</span>
               </div>
             ))}
           </div>
@@ -117,7 +241,11 @@ export default function StudentScoresPage() {
           </div>
           <div>
             <h4 className="text-sm font-semibold text-on-surface mb-1.5">Nhận xét từ Hội đồng / Khoa</h4>
-            <p className="text-sm text-outline leading-relaxed">{SCORE_DATA.message}</p>
+            <p className="text-sm text-outline leading-relaxed">
+              {summary
+                ? "Điểm đã được công bố. Sinh viên chỉ được xem điểm tổng hợp theo quy định khoa."
+                : "Điểm chưa được công bố hoặc đang chờ xác nhận cuối cùng của Hội đồng."}
+            </p>
           </div>
         </div>
       </div>
@@ -127,13 +255,16 @@ export default function StudentScoresPage() {
         <div className="flex items-center gap-4">
           <TrendingUp className="w-8 h-8 text-white/70" />
           <div>
-            <h4 className="font-bold font-headline">Bước tiếp theo: Đăng ký KLTN</h4>
-            <p className="text-sm text-white/70 mt-0.5">Bạn đủ điều kiện. Đăng ký sớm để được ưu tiên chọn đề tài.</p>
+            <h4 className="font-bold font-headline">Bước tiếp theo</h4>
+            <p className="text-sm text-white/70 mt-0.5">Theo dõi trạng thái đề tài và thông báo để không bỏ lỡ deadline.</p>
           </div>
         </div>
-        <button className="bg-white text-primary font-semibold px-6 py-3 rounded-xl hover:bg-primary-fixed transition-all active:scale-95 text-sm whitespace-nowrap">
-          Đăng ký KLTN →
-        </button>
+        <Link
+          href={selectedTopic ? `/student/topics/${selectedTopic.id}` : "/student/topics"}
+          className="bg-white text-primary font-semibold px-6 py-3 rounded-xl hover:bg-primary-fixed transition-all active:scale-95 text-sm whitespace-nowrap"
+        >
+          Xem chi tiết đề tài
+        </Link>
       </div>
     </div>
   );

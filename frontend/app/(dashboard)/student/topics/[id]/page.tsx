@@ -1,30 +1,120 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { CheckCircle2, Clock, FileText, Award, ChevronDown, ChevronUp, UploadCloud, AlertCircle, ArrowLeft, Lock, Filter, Play } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock,
+  FileText,
+  Award,
+  ChevronDown,
+  ChevronUp,
+  UploadCloud,
+  AlertCircle,
+  ArrowLeft,
+  Lock,
+  Calendar,
+} from "lucide-react";
 import Link from "next/link";
+import { FileUpload } from "@/components/ui/file-upload";
+import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 
-// BCTT/KLTN steps
+type SubmissionFileType = "REPORT" | "TURNITIN" | "REVISION";
+
+interface TopicDto {
+  id: string;
+  type: "BCTT" | "KLTN";
+  title: string;
+  domain: string;
+  companyName?: string;
+  state: string;
+  supervisorUserId: string;
+  periodId: string;
+  submitEndAt?: string;
+}
+
+interface SubmissionDto {
+  id: string;
+  fileType: SubmissionFileType;
+  version: number;
+  uploadedAt: string;
+  originalFileName?: string;
+  fileSize?: number;
+  driveLink?: string;
+}
+
+interface ScoreSummaryDto {
+  gvhdScore?: number;
+  gvpbScore?: number;
+  councilAvgScore?: number;
+  finalScore: number;
+  result: "PASS" | "FAIL";
+  published: boolean;
+}
+
+interface ScheduleDto {
+  id: string;
+  defenseAt: string;
+  locationType: "ONLINE" | "OFFLINE";
+  locationDetail?: string;
+  notes?: string;
+}
+
+interface NotificationDto {
+  id: string;
+  topicId?: string;
+  title: string;
+  body?: string;
+  createdAt: string;
+}
+
 const BCTT_STEPS = [
-  { key: "REGISTER", label: "ĐĂNG KÝ\nĐỀ TÀI" },
-  { key: "CONFIRMED", label: "XÁC NHẬN\nĐỀ TÀI" },
-  { key: "REPORT", label: "THỰC HIỆN\nBÁO CÁO" },
-  { key: "GRADING", label: "CHẤM\nĐIỂM" },
-  { key: "DONE", label: "HOÀN TẤT\nBÁO CÁO" },
+  { key: "DRAFT", label: "ĐĂNG KÝ" },
+  { key: "PENDING_GV", label: "CHỜ DUYỆT" },
+  { key: "CONFIRMED", label: "XÁC NHẬN" },
+  { key: "IN_PROGRESS", label: "THỰC HIỆN" },
+  { key: "GRADING", label: "CHẤM ĐIỂM" },
+  { key: "COMPLETED", label: "HOÀN TẤT" },
 ];
 
 const KLTN_STEPS = [
-  { key: "REGISTER", label: "ĐĂNG KÝ\nĐỀ TÀI", desc: "Đề tài đang trong trạng thái chờ xác nhận từ GVHD." },
-  { key: "CONFIRMED", label: "XÁC NHẬN\nĐỀ TÀI", desc: "Đề tài đã hoàn thành bước xác nhận. Vui lòng chờ đến giai đoạn Thực hiện." },
-  { key: "REPORT", label: "THỰC HIỆN\nĐỀ TÀI", desc: "Đề tài đang trong giai đoạn thực hiện. Vui lòng nộp báo cáo trước hạn." },
-  { key: "FINAL_CONFIRM", label: "XÁC NHẬN\nHOÀN TẤT", desc: "Đề tài đang được đăng ký ra Hội đồng bảo vệ." },
-  { key: "DEFENSE", label: "BẢO VỆ\nĐỀ TÀI", desc: "Sinh viên chuẩn bị bảo vệ trước Hội đồng. Theo dõi thông báo để biết lịch trình." },
-  { key: "GRADING", label: "CHẤM ĐIỂM\nĐỀ TÀI", desc: "Hội đồng và Giảng viên phản biện đang tiến hành chấm điểm." },
-  { key: "DONE", label: "HOÀN TẤT\nKLTN", desc: "Đề tài đã hoàn tất. Xem tổng điểm ở bảng điểm." },
+  { key: "DRAFT", label: "ĐĂNG KÝ" },
+  { key: "PENDING_GV", label: "CHỜ DUYỆT" },
+  { key: "CONFIRMED", label: "XÁC NHẬN" },
+  { key: "IN_PROGRESS", label: "THỰC HIỆN" },
+  { key: "PENDING_CONFIRM", label: "CHỜ PHẢN BIỆN" },
+  { key: "DEFENSE", label: "BẢO VỆ" },
+  { key: "SCORING", label: "CHẤM ĐIỂM" },
+  { key: "COMPLETED", label: "HOÀN TẤT" },
 ];
 
-function ProgressStepper({ steps, activeIdx }: { steps: typeof BCTT_STEPS; activeIdx: number }) {
+function formatDateTime(value?: string): string {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString("vi-VN", { hour12: false });
+}
+
+function formatFileSize(size?: number): string {
+  if (!size) {
+    return "-";
+  }
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function ProgressStepper({
+  steps,
+  activeIdx,
+}: {
+  steps: Array<{ key: string; label: string }>;
+  activeIdx: number;
+}) {
   return (
     <div className="flex items-center gap-0 overflow-x-auto pb-1 scrollbar-hide py-4 px-2">
       {steps.map((step, i) => {
@@ -42,7 +132,7 @@ function ProgressStepper({ steps, activeIdx }: { steps: typeof BCTT_STEPS; activ
               }`}
             >
               {isDone && <CheckCircle2 className="w-3.5 h-3.5 absolute top-1.5 right-1.5 text-white/70" />}
-              <span className="text-[10px] font-bold leading-tight tracking-wide whitespace-pre-line text-center">{step.label}</span>
+              <span className="text-[10px] font-bold leading-tight tracking-wide text-center">{step.label}</span>
             </div>
             {i < steps.length - 1 && (
               <div className={`w-8 h-0.5 flex-shrink-0 mx-1 rounded-full ${i < activeIdx ? "bg-primary/70" : "bg-outline-variant/30"}`} />
@@ -54,10 +144,23 @@ function ProgressStepper({ steps, activeIdx }: { steps: typeof BCTT_STEPS; activ
   );
 }
 
-function SubmissionPanel({ topic, activeIdx }: { topic: any, activeIdx: number }) {
+function SubmissionPanel({
+  topic,
+  submissions,
+  fileType,
+  onFileTypeChange,
+  onUpload,
+  isUploading,
+}: {
+  topic: TopicDto;
+  submissions: SubmissionDto[];
+  fileType: SubmissionFileType;
+  onFileTypeChange: (value: SubmissionFileType) => void;
+  onUpload: (file: File) => Promise<void>;
+  isUploading: boolean;
+}) {
   const [expanded, setExpanded] = useState(true);
-  const isLocked = activeIdx < 2; // < REPORT
-  const isSubmitted = topic.submissionState === "SUBMITTED";
+  const isLocked = topic.state !== "IN_PROGRESS";
 
   return (
     <div className={`rounded-2xl border overflow-hidden transition-all ${isLocked ? "border-outline-variant/15 bg-surface-container/30" : "border-primary/20 bg-primary/5 shadow-sm"}`}>
@@ -67,16 +170,16 @@ function SubmissionPanel({ topic, activeIdx }: { topic: any, activeIdx: number }
       >
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            {isLocked ? <Lock className="w-4 h-4 text-outline" /> : <UploadCloud className={`w-4 h-4 ${isSubmitted ? 'text-green-600' : 'text-primary'}`} />}
+            {isLocked ? <Lock className="w-4 h-4 text-outline" /> : <UploadCloud className="w-4 h-4 text-primary" />}
             <span className="text-sm font-semibold text-on-surface">Nộp báo cáo cuối kỳ</span>
-            {isSubmitted && <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full uppercase">Đã nộp</span>}
+            {submissions.length > 0 && <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full uppercase">Đã có bài nộp</span>}
           </div>
-          <span className="text-xs text-outline">{isLocked ? "Tính năng đang bị khóa" : (isSubmitted ? "Đã nộp bài thành công" : "Mở nộp bài")}</span>
+          <span className="text-xs text-outline">{isLocked ? "Tính năng đang bị khóa" : "Mở nộp bài"}</span>
         </div>
         <div className="flex items-center gap-4">
-          {!isLocked && topic.submissionDeadline && (
-            <span className={`text-xs font-semibold px-2 py-1 rounded bg-surface-container-high ${isSubmitted ? "text-outline" : "text-error"}`}>
-              Hạn: {topic.submissionDeadline}
+          {!isLocked && topic.submitEndAt && (
+            <span className="text-xs font-semibold px-2 py-1 rounded bg-surface-container-high text-error">
+              Hạn: {formatDateTime(topic.submitEndAt)}
             </span>
           )}
           {expanded ? <ChevronUp className="w-4 h-4 text-outline" /> : <ChevronDown className="w-4 h-4 text-outline" />}
@@ -93,29 +196,62 @@ function SubmissionPanel({ topic, activeIdx }: { topic: any, activeIdx: number }
               <p className="text-sm">Tính năng nộp bài sẽ mở khi hệ thống chuyển sang trạng thái <strong>THỰC HIỆN ĐỀ TÀI</strong>.</p>
             </div>
           ) : (
-            <div className="px-6 py-5 bg-surface-container-lowest flex flex-col items-start gap-4">
-              <div className="w-full grid grid-cols-2 text-sm border border-outline-variant/15 rounded-xl overflow-hidden">
-                <div className="px-4 py-3 bg-surface-container/40 font-medium text-outline border-b border-outline-variant/15">Trạng thái chấm điểm</div>
-                <div className="px-4 py-3 border-b border-outline-variant/15 font-semibold text-on-surface">{activeIdx >= 5 ? "Đã chấm điểm" : "Chưa chấm điểm"}</div>
-                
-                <div className="px-4 py-3 bg-surface-container/40 font-medium text-outline border-b border-outline-variant/15">Thời gian cập nhật</div>
-                <div className="px-4 py-3 border-b border-outline-variant/15 text-on-surface">{isSubmitted ? "Hôm nay, 14:30" : "-"}</div>
-                
-                <div className="px-4 py-3 bg-surface-container/40 font-medium text-outline">File đính kèm</div>
-                <div className="px-4 py-3 flex items-center gap-2">
-                  {isSubmitted ? (
-                    <a href="#" className="flex items-center gap-2 p-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors">
-                      <FileText className="w-4 h-4" /> <span className="text-xs font-semibold underline">Baocao_KLTN_NguyenVanA.pdf</span>
-                    </a>
-                  ) : "-"}
+            <div className="px-6 py-5 bg-surface-container-lowest flex flex-col gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+                  <span className="font-semibold">Loại file</span>
+                  <select
+                    value={fileType}
+                    onChange={(event) => onFileTypeChange(event.target.value as SubmissionFileType)}
+                    className="px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface"
+                    disabled={isUploading}
+                  >
+                    <option value="REPORT">REPORT</option>
+                    <option value="TURNITIN">TURNITIN</option>
+                    <option value="REVISION">REVISION</option>
+                  </select>
+                </label>
+                <div className="flex items-end text-xs text-outline">
+                  Nộp file PDF, dung lượng tối đa 50MB.
                 </div>
               </div>
 
-              {!isSubmitted && (
-                <button className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-primary/90 transition-all shadow-sm">
-                  <UploadCloud className="w-4 h-4" /> Thêm bài nộp
-                </button>
-              )}
+              <FileUpload onUpload={onUpload} accept=".pdf" maxSize={50} />
+
+              <div className="w-full border border-outline-variant/15 rounded-xl overflow-hidden">
+                <div className="px-4 py-2.5 bg-surface-container/40 text-xs font-bold uppercase tracking-wide text-outline">
+                  Lịch sử nộp
+                </div>
+                {submissions.length === 0 ? (
+                  <p className="px-4 py-4 text-sm text-outline">Chưa có bài nộp nào.</p>
+                ) : (
+                  <div className="divide-y divide-outline-variant/10">
+                    {submissions.map((submission) => (
+                      <div key={submission.id} className="px-4 py-3 text-sm">
+                        <p className="font-semibold text-on-surface">
+                          {submission.originalFileName ?? `${submission.fileType}_v${submission.version}.pdf`}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-outline">
+                          <span>{submission.fileType}</span>
+                          <span>v{submission.version}</span>
+                          <span>{formatDateTime(submission.uploadedAt)}</span>
+                          <span>{formatFileSize(submission.fileSize)}</span>
+                        </div>
+                        {submission.driveLink && (
+                          <a
+                            href={submission.driveLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-primary font-semibold mt-1 inline-flex"
+                          >
+                            Mở file trên Drive
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -140,67 +276,137 @@ function ScoreCard({ label, value }: { label: string; value: number | null }) {
 
 export default function StudentTopicDetailPage() {
   const params = useParams();
-  const id = params?.id as string;
+  const topicId = typeof params?.id === "string" ? params.id : "";
 
-  // INITIAL MOCK STATE. We make it stateful so we can build a control panel to preview Slide 6-13
-  const [activeKltnStep, setActiveKltnStep] = useState(0); 
-  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [topic, setTopic] = useState<TopicDto | null>(null);
+  const [submissions, setSubmissions] = useState<SubmissionDto[]>([]);
+  const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
+  const [schedule, setSchedule] = useState<ScheduleDto | null>(null);
+  const [notifications, setNotifications] = useState<NotificationDto[]>([]);
+  const [fileType, setFileType] = useState<SubmissionFileType>("REPORT");
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [scoreError, setScoreError] = useState<string | null>(null);
 
-  // MOCK TOPIC based on the dynamic state
-  const topic = {
-    id: "t2",
-    name: "Nghiên cứu ứng dụng AI trong quản lý chuỗi cung ứng",
-    type: "KLTN",
-    gvhdName: "TS. Nguyễn Thị B",
-    studentName: "Nguyễn Văn A",
-    period: "ĐỢT 2 HK2 25-26",
-    stateIndex: activeKltnStep,
-    submissionOpen: activeKltnStep >= 2, // >= REPORT
-    submissionDeadline: "30/04/2026",
-    submissionState: isSubmitted ? "SUBMITTED" : "NOT_SUBMITTED",
-    // Scores populate over time
-    scorePGVHD: activeKltnStep >= 5 ? 8.5 : null,
-    scoreSGVHD: activeKltnStep >= 5 ? 9.0 : null,
-    scoreHD: activeKltnStep >= 6 ? 9.5 : null, 
-    scoreTotal: activeKltnStep >= 6 ? 9.0 : null,
-    
-    announcements: [
-      { id: "a1", message: KLTN_STEPS[activeKltnStep].desc, sender: "Hệ thống", time: "Vừa xong" },
-      ...(isSubmitted ? [{ id: "a2", message: "Đã nộp báo cáo thành công.", sender: "Hệ thống", time: "10 phút trước" }] : []),
-      ...(activeKltnStep >= 6 ? [{ id: "a3", message: "Hội đồng đánh giá rất cao tính thực tiễn của đề tài.", sender: "TS. Trần Văn C (CT HĐ)", time: "Hôm qua" }] : [])
-    ]
+  useEffect(() => {
+    if (!topicId) {
+      return;
+    }
+
+    const loadData = async () => {
+      setError(null);
+      setScoreError(null);
+
+      try {
+        const topicRes = await api.get<ApiResponse<TopicDto>>(`/topics/${topicId}`);
+        setTopic(topicRes.data);
+
+        const [submissionsRes, notificationsRes] = await Promise.all([
+          api.get<ApiResponse<SubmissionDto[]>>(`/topics/${topicId}/submissions`),
+          api.get<ApiListResponse<NotificationDto>>("/notifications?page=1&size=100"),
+        ]);
+
+        setSubmissions(submissionsRes.data);
+        setNotifications(
+          notificationsRes.data.filter((notification) => notification.topicId === topicId),
+        );
+
+        try {
+          const summaryRes = await api.get<ApiResponse<ScoreSummaryDto>>(
+            `/topics/${topicId}/scores/summary`,
+          );
+          setSummary(summaryRes.data);
+        } catch (summaryLoadError) {
+          setSummary(null);
+          if (summaryLoadError instanceof Error) {
+            setScoreError(summaryLoadError.message);
+          }
+        }
+
+        try {
+          const scheduleRes = await api.get<ScheduleDto>(`/topics/${topicId}/schedule`);
+          setSchedule(scheduleRes);
+        } catch {
+          setSchedule(null);
+        }
+      } catch (loadError) {
+        const message = loadError instanceof Error ? loadError.message : "Không thể tải chi tiết đề tài.";
+        setError(message);
+      }
+    };
+
+    void loadData();
+  }, [topicId]);
+
+  const steps = topic?.type === "KLTN" ? KLTN_STEPS : BCTT_STEPS;
+  const activeStepIndex = useMemo(() => {
+    if (!topic) {
+      return 0;
+    }
+    const index = steps.findIndex((step) => step.key === topic.state);
+    return index >= 0 ? index : 0;
+  }, [steps, topic]);
+
+  const handleUpload = async (file: File) => {
+    if (!topic) {
+      throw new Error("Không tìm thấy đề tài.");
+    }
+
+    if (topic.state !== "IN_PROGRESS") {
+      throw new Error("Chỉ nộp file khi đề tài đang ở trạng thái IN_PROGRESS.");
+    }
+
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("fileType", fileType);
+
+      await api.postForm<ApiResponse<{ id: string; version: number }>>(
+        `/topics/${topic.id}/submissions`,
+        formData,
+      );
+
+      const updated = await api.get<ApiResponse<SubmissionDto[]>>(
+        `/topics/${topic.id}/submissions`,
+      );
+      setSubmissions(updated.data);
+    } catch (uploadError) {
+      const message = uploadError instanceof Error ? uploadError.message : "Nộp file thất bại.";
+      setError(message);
+      throw uploadError;
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const currentDesc = KLTN_STEPS[topic.stateIndex]?.desc;
+  if (error && !topic) {
+    return (
+      <div className="flex items-start gap-3 bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3">
+        <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
+        <p className="text-sm text-error">{error}</p>
+      </div>
+    );
+  }
+
+  if (!topic) {
+    return <div className="text-sm text-outline">Đang tải chi tiết đề tài...</div>;
+  }
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-24">
-      {/* Utility Debug Nav - FOR PREVIEW SLIDE 6-13 */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-xl border border-white/10 p-3 rounded-full flex items-center gap-2 shadow-2xl">
-        <span className="px-3 text-xs font-bold text-white uppercase tracking-widest hidden md:inline">TEST PANEL:</span>
-        {KLTN_STEPS.map((s, i) => (
-          <button
-            key={i}
-            onClick={() => setActiveKltnStep(i)}
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${activeKltnStep === i ? 'bg-primary text-white scale-110' : 'bg-white/10 text-white hover:bg-white/20'}`}
-          >
-            {i}
-          </button>
-        ))}
-        <div className="w-px h-6 bg-white/20 mx-2" />
-        <button 
-          onClick={() => setIsSubmitted(!isSubmitted)}
-          className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${isSubmitted ? 'bg-green-500 text-white' : 'bg-white/10 text-white'}`}
-          disabled={activeKltnStep < 2}
-          title={activeKltnStep < 2 ? "Chưa tới giai đoạn nộp bài" : ""}
-        >
-          {isSubmitted ? 'Đã nộp bài' : 'Chưa nộp bài'}
-        </button>
-      </div>
-
       <Link href="/student/topics" className="inline-flex items-center gap-1.5 text-sm font-semibold text-outline hover:text-primary transition-colors">
         <ArrowLeft className="w-4 h-4" /> Quay lại Đề tài của tôi
       </Link>
+
+      {error && (
+        <div className="flex items-start gap-3 bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
+          <p className="text-sm text-error">{error}</p>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6 items-start">
         {/* Main Content */}
@@ -211,38 +417,65 @@ export default function StudentTopicDetailPage() {
               <span className="inline-block px-3 py-1 bg-primary/10 text-primary text-[10px] font-bold tracking-widest uppercase rounded-full mb-3">
                 {topic.type}
               </span>
-              <h1 className="text-xl md:text-2xl font-bold font-headline text-on-surface leading-snug">{topic.name}</h1>
+              <h1 className="text-xl md:text-2xl font-bold font-headline text-on-surface leading-snug">{topic.title}</h1>
               
               <div className="mt-8 bg-surface-container-lowest rounded-2xl border border-outline-variant/10 p-4 shadow-sm overflow-hidden relative">
                 <span className="absolute top-0 right-0 px-3 py-1 bg-primary rounded-bl-xl text-[10px] font-bold text-white uppercase shadow-sm">
                   Tiến độ
                 </span>
-                <ProgressStepper steps={KLTN_STEPS} activeIdx={topic.stateIndex} />
+                <ProgressStepper steps={steps} activeIdx={activeStepIndex} />
               </div>
             </div>
 
             {/* Status Alert from slides */}
             <div className="px-6 py-4 bg-amber-50/50 border-t border-b border-amber-100 flex items-center gap-3">
               <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                <Play className="w-4 h-4 text-amber-600 ml-0.5" />
+                <Clock className="w-4 h-4 text-amber-600" />
               </div>
-              <p className="text-sm font-semibold text-amber-800">{currentDesc}</p>
+              <p className="text-sm font-semibold text-amber-800">Trạng thái hiện tại: {topic.state}</p>
             </div>
 
             <div className="px-6 py-5">
               <h4 className="text-xs font-bold uppercase tracking-widest text-outline mb-4">Thông tin đề tài</h4>
-              <div className="grid sm:grid-cols-2 gap-y-4 gap-x-8">
-                <div><span className="block text-xs text-outline mb-1">GV Hướng dẫn</span><span className="text-sm font-semibold text-on-surface">{topic.gvhdName}</span></div>
-                <div><span className="block text-xs text-outline mb-1">Đợt</span><span className="text-sm font-semibold text-on-surface">{topic.period}</span></div>
+              <div className="grid sm:grid-cols-2 gap-y-4 gap-x-8 text-sm">
+                <div><span className="block text-xs text-outline mb-1">GV Hướng dẫn</span><span className="font-semibold text-on-surface">{topic.supervisorUserId}</span></div>
+                <div><span className="block text-xs text-outline mb-1">Mảng đề tài</span><span className="font-semibold text-on-surface">{topic.domain}</span></div>
+                <div><span className="block text-xs text-outline mb-1">Đợt</span><span className="font-semibold text-on-surface">{topic.periodId}</span></div>
+                <div><span className="block text-xs text-outline mb-1">Hạn nộp</span><span className="font-semibold text-on-surface">{formatDateTime(topic.submitEndAt)}</span></div>
+                {topic.companyName && (
+                  <div className="sm:col-span-2"><span className="block text-xs text-outline mb-1">Công ty</span><span className="font-semibold text-on-surface">{topic.companyName}</span></div>
+                )}
               </div>
             </div>
           </div>
 
-          <SubmissionPanel topic={topic} activeIdx={activeKltnStep} />
+          <SubmissionPanel
+            topic={topic}
+            submissions={submissions}
+            fileType={fileType}
+            onFileTypeChange={setFileType}
+            onUpload={handleUpload}
+            isUploading={isUploading}
+          />
         </div>
 
         {/* Right Sidebar */}
         <div className="space-y-6">
+          {schedule && (
+            <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 bg-surface-container/30 border-b border-outline-variant/10 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-primary" />
+                <h3 className="font-bold text-sm text-on-surface">Lịch bảo vệ</h3>
+              </div>
+              <div className="p-4 text-sm text-on-surface-variant space-y-1.5">
+                <p><strong>Thời gian:</strong> {formatDateTime(schedule.defenseAt)}</p>
+                <p><strong>Hình thức:</strong> {schedule.locationType}</p>
+                <p><strong>Địa điểm:</strong> {schedule.locationDetail ?? "-"}</p>
+                {schedule.notes && <p><strong>Ghi chú:</strong> {schedule.notes}</p>}
+              </div>
+            </div>
+          )}
+
           {/* Score Box */}
           <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 shadow-sm overflow-hidden">
             <div className="px-5 py-4 bg-surface-container/30 border-b border-outline-variant/10 flex items-center gap-2">
@@ -250,18 +483,26 @@ export default function StudentTopicDetailPage() {
               <h3 className="font-bold text-sm text-on-surface">Kết quả điểm</h3>
             </div>
             <div className="p-4 grid grid-cols-2 gap-3 relative">
-              <ScoreCard label="Hướng dẫn" value={topic.scorePGVHD} />
-              <ScoreCard label="Phản biện" value={topic.scoreSGVHD} />
+              <ScoreCard label="Hướng dẫn" value={summary?.gvhdScore ?? null} />
+              <ScoreCard label="Phản biện" value={summary?.gvpbScore ?? null} />
               <div className="col-span-2">
-                <ScoreCard label="Hội đồng" value={topic.scoreHD} />
+                <ScoreCard label="Hội đồng" value={summary?.councilAvgScore ?? null} />
               </div>
-              {activeKltnStep < 5 && (
+              {!summary?.published && (
                  <div className="absolute inset-x-2 top-2 bottom-3 bg-surface-container-lowest/80 backdrop-blur-sm border border-outline-variant/10 rounded-2xl flex flex-col items-center justify-center text-center p-4">
                    <Lock className="w-6 h-6 text-outline mb-2" />
-                   <p className="text-xs font-semibold text-outline">Điểm được công bố sau<br/>khi thư ký nhập đánh giá.</p>
+                   <p className="text-xs font-semibold text-outline">Điểm được công bố sau khi hoàn tất xác nhận cuối cùng.</p>
                  </div>
               )}
             </div>
+            {summary && (
+              <div className="px-4 pb-4 text-sm text-on-surface-variant">
+                Tổng điểm: <strong>{summary.finalScore.toFixed(2)}</strong> ({summary.result === "PASS" ? "Đạt" : "Không đạt"})
+              </div>
+            )}
+            {scoreError && (
+              <div className="px-4 pb-4 text-xs text-outline">{scoreError}</div>
+            )}
           </div>
 
           {/* Announcements */}
@@ -272,12 +513,16 @@ export default function StudentTopicDetailPage() {
               </h3>
             </div>
             <div className="divide-y divide-outline-variant/10">
-              {topic.announcements.map((a: any) => (
+              {notifications.length === 0 && (
+                <div className="p-4 text-sm text-outline">Chưa có thông báo nào cho đề tài này.</div>
+              )}
+              {notifications.map((a) => (
                 <div key={a.id} className="p-4 hover:bg-surface-container/30 transition-colors">
-                  <p className="text-sm font-medium text-on-surface-variant leading-snug">{a.message}</p>
+                  <p className="text-sm font-medium text-on-surface-variant leading-snug">{a.title}</p>
+                  {a.body && <p className="text-xs text-outline mt-1">{a.body}</p>}
                   <div className="flex justify-between items-center mt-2 text-[10px] text-outline font-medium tracking-wide">
-                    <span>{a.sender}</span>
-                    <span>{a.time}</span>
+                    <span>Hệ thống</span>
+                    <span>{formatDateTime(a.createdAt)}</span>
                   </div>
                 </div>
               ))}

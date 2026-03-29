@@ -1,10 +1,57 @@
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "http://localhost:3001/api/v1";
+import {
+  clearAuthSession,
+  getAccessToken,
+  getRefreshToken,
+  isAccessTokenExpired,
+  updateAccessToken,
+} from "@/lib/auth/session";
+
+export interface ApiMeta {
+  requestId?: string;
+}
+
+export interface ApiPagination {
+  page: number;
+  size: number;
+  total: number;
+}
+
+export interface ApiResponse<T> {
+  data: T;
+  meta?: ApiMeta;
+}
+
+export interface ApiListResponse<T> {
+  data: T[];
+  pagination: ApiPagination;
+  meta?: ApiMeta;
+}
+
+interface ProblemDetail {
+  title?: string;
+  detail?: string;
+  message?: string;
+  status?: number;
+}
+
+interface RefreshResponse {
+  data: {
+    accessToken: string;
+    expiresIn: number;
+  };
+}
+
+export function getApiBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "http://localhost:3001/api/v1"
+  );
+}
 
 class ApiClient {
   private token: string | null = null;
+  private refreshPromise: Promise<void> | null = null;
 
   setToken(token: string) {
     this.token = token;
@@ -14,47 +61,134 @@ class ApiClient {
     this.token = null;
   }
 
-  async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-      ...(this.token && { Authorization: `Bearer ${this.token}` }),
-      ...options.headers,
-    };
+  private resolveAccessToken(): string | null {
+    if (this.token && !isAccessTokenExpired()) {
+      return this.token;
+    }
 
-    const res = await fetch(`${API_URL}${endpoint}`, {
+    const stored = getAccessToken();
+    this.token = stored;
+    return stored;
+  }
+
+  private async tryRefreshToken(): Promise<void> {
+    if (this.refreshPromise) {
+      await this.refreshPromise;
+      return;
+    }
+
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) {
+      clearAuthSession();
+      this.clearToken();
+      throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+    }
+
+    this.refreshPromise = (async () => {
+      const response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ refreshToken }),
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        clearAuthSession();
+        this.clearToken();
+        throw new Error("Không thể làm mới phiên đăng nhập.");
+      }
+
+      const payload = (await response.json()) as RefreshResponse;
+      updateAccessToken(payload.data.accessToken, payload.data.expiresIn);
+      this.token = payload.data.accessToken;
+    })();
+
+    try {
+      await this.refreshPromise;
+    } finally {
+      this.refreshPromise = null;
+    }
+  }
+
+  private toError(payload: unknown, status: number): Error {
+    const detail = payload as ProblemDetail | undefined;
+    const message =
+      detail?.detail ||
+      detail?.message ||
+      detail?.title ||
+      `Request failed with status ${status}`;
+    return new Error(message);
+  }
+
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    canRetryAuth = true,
+  ): Promise<T> {
+    const headers = new Headers(options.headers || {});
+    const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
+
+    if (!isFormDataBody && options.body && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+
+    const token = this.resolveAccessToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       ...options,
       headers,
       credentials: "include",
     });
 
-    if (!res.ok) {
-      const error = await res.json();
-      throw error;
+    if (response.status === 401 && canRetryAuth) {
+      await this.tryRefreshToken();
+      return this.request<T>(endpoint, options, false);
     }
 
-    return res.json();
+    const contentType = response.headers.get("content-type") || "";
+    const payload = contentType.includes("application/json")
+      ? await response.json()
+      : null;
+
+    if (!response.ok) {
+      throw this.toError(payload, response.status);
+    }
+
+    return payload as T;
   }
 
   get<T>(endpoint: string) {
-    return this.fetch<T>(endpoint);
+    return this.request<T>(endpoint);
   }
 
   post<T>(endpoint: string, data: unknown) {
-    return this.fetch<T>(endpoint, {
+    return this.request<T>(endpoint, {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
+  postForm<T>(endpoint: string, formData: FormData) {
+    return this.request<T>(endpoint, {
+      method: "POST",
+      body: formData,
+    });
+  }
+
   patch<T>(endpoint: string, data: unknown) {
-    return this.fetch<T>(endpoint, {
+    return this.request<T>(endpoint, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
   }
 
   delete<T>(endpoint: string) {
-    return this.fetch<T>(endpoint, { method: "DELETE" });
+    return this.request<T>(endpoint, { method: "DELETE" });
   }
 }
 

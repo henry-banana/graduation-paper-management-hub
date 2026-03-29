@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { GoogleSheetsClient } from '../../infrastructure/google-sheets';
+import { GoogleDriveClient } from '../../infrastructure/google-drive';
 
 export interface HealthStatus {
   status: 'healthy' | 'unhealthy' | 'degraded';
@@ -17,6 +19,11 @@ export interface ComponentHealth {
 @Injectable()
 export class HealthService {
   private readonly startTime = Date.now();
+
+  constructor(
+    private readonly googleSheetsClient: GoogleSheetsClient,
+    private readonly googleDriveClient: GoogleDriveClient,
+  ) {}
 
   async getHealth(): Promise<HealthStatus> {
     const components = await this.checkComponents();
@@ -47,25 +54,33 @@ export class HealthService {
       message: 'API server running',
     });
 
-    // Google Sheets check - placeholder
     results.push(await this.checkGoogleSheets());
 
-    // Google Drive check - placeholder
     results.push(await this.checkGoogleDrive());
 
     return results;
   }
 
   private async checkGoogleSheets(): Promise<ComponentHealth> {
-    try {
-      // Placeholder: actual implementation in F03
-      const start = Date.now();
-      // Simulated check
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    const start = Date.now();
+
+    if (!this.googleSheetsClient.isReady()) {
       return {
         name: 'google-sheets',
-        status: 'up',
-        message: 'Google Sheets API reachable',
+        status: 'down',
+        message: 'Google Sheets client not configured',
+        latency: Date.now() - start,
+      };
+    }
+
+    try {
+      const healthy = await this.googleSheetsClient.healthCheck();
+      return {
+        name: 'google-sheets',
+        status: healthy ? 'up' : 'down',
+        message: healthy
+          ? 'Google Sheets API reachable'
+          : 'Google Sheets API is unavailable',
         latency: Date.now() - start,
       };
     } catch (error) {
@@ -78,15 +93,25 @@ export class HealthService {
   }
 
   private async checkGoogleDrive(): Promise<ComponentHealth> {
-    try {
-      // Placeholder: actual implementation in F03
-      const start = Date.now();
-      // Simulated check
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    const start = Date.now();
+
+    if (!this.googleDriveClient.isReady()) {
       return {
         name: 'google-drive',
-        status: 'up',
-        message: 'Google Drive API reachable',
+        status: 'down',
+        message: 'Google Drive client not configured',
+        latency: Date.now() - start,
+      };
+    }
+
+    try {
+      const healthy = await this.googleDriveClient.healthCheck();
+      return {
+        name: 'google-drive',
+        status: healthy ? 'up' : 'down',
+        message: healthy
+          ? 'Google Drive API reachable'
+          : 'Google Drive API is unavailable',
         latency: Date.now() - start,
       };
     } catch (error) {

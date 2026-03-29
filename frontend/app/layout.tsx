@@ -16,11 +16,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const showRoleSwitcher = process.env.NEXT_PUBLIC_ENABLE_DEV_ROLE_SWITCHER === "true";
+
   return (
     <html lang="vi" suppressHydrationWarning>
       <body className={`${inter.variable} ${manrope.variable} font-body bg-surface text-on-surface antialiased`}>
         {children}
-        <RoleSwitcher />
+        {showRoleSwitcher && <RoleSwitcher />}
       </body>
     </html>
   );

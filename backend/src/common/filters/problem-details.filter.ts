@@ -8,6 +8,12 @@ import {
 import { Request, Response } from 'express';
 import { ProblemDetails, ProblemDetailsError } from '../types';
 
+interface MulterLikeError {
+  code: string;
+  message?: string;
+  field?: string;
+}
+
 @Catch()
 export class ProblemDetailsFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
@@ -34,6 +40,20 @@ export class ProblemDetailsFilter implements ExceptionFilter {
           message: String(message),
         }));
       }
+    } else if (this.isMulterLikeError(exception)) {
+      const mapped = this.mapMulterError(exception);
+      status = mapped.status;
+      title = mapped.title;
+      detail = mapped.detail;
+
+      if (exception.field) {
+        errors = [
+          {
+            field: exception.field,
+            message: mapped.detail,
+          },
+        ];
+      }
     }
 
     const body: ProblemDetails = {
@@ -46,5 +66,32 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     };
 
     response.status(status).json(body);
+  }
+
+  private isMulterLikeError(exception: unknown): exception is MulterLikeError {
+    return (
+      typeof exception === 'object' &&
+      exception !== null &&
+      'code' in exception &&
+      typeof (exception as { code?: unknown }).code === 'string'
+    );
+  }
+
+  private mapMulterError(
+    exception: MulterLikeError,
+  ): { status: number; title: string; detail: string } {
+    if (exception.code === 'LIMIT_FILE_SIZE') {
+      return {
+        status: HttpStatus.PAYLOAD_TOO_LARGE,
+        title: 'Payload Too Large',
+        detail: exception.message || 'File too large',
+      };
+    }
+
+    return {
+      status: HttpStatus.BAD_REQUEST,
+      title: 'Bad Request',
+      detail: exception.message || 'Invalid multipart payload',
+    };
   }
 }

@@ -19,6 +19,13 @@ interface JwtPayload {
   role: AccountRole;
 }
 
+interface GoogleIdTokenPayload {
+  email?: string;
+  name?: string;
+  picture?: string;
+  sub?: string;
+}
+
 @Injectable()
 export class AuthService {
   private readonly accessTokenTtl: number;
@@ -50,6 +57,11 @@ export class AuthService {
     return { user: authUser, tokens };
   }
 
+  async authenticateWithGoogleIdToken(idToken: string): Promise<AuthResponseDto> {
+    const googleUser = this.extractGoogleUserFromIdToken(idToken);
+    return this.validateGoogleUser(googleUser);
+  }
+
   async refreshAccessToken(refreshToken: string): Promise<RefreshTokenDto> {
     const isBlacklisted = await this.cacheManager.get<boolean>(`blacklist:${refreshToken}`);
     if (isBlacklisted) {
@@ -70,6 +82,15 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('Token không hợp lệ hoặc đã hết hạn');
     }
+  }
+
+  async getCurrentProfile(userId: string): Promise<AuthUserDto | null> {
+    const user = await this.usersService.findById(userId);
+    if (!user) {
+      return null;
+    }
+
+    return this.mapToAuthUser(user);
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -102,6 +123,41 @@ export class AuthService {
     ]);
 
     return { accessToken, refreshToken, expiresIn: this.accessTokenTtl };
+  }
+
+  private extractGoogleUserFromIdToken(idToken: string): GoogleUser {
+    const parts = idToken.split('.');
+    if (parts.length < 2) {
+      throw new UnauthorizedException('Invalid Google ID token format');
+    }
+
+    try {
+      const payloadJson = this.decodeBase64Url(parts[1]);
+      const payload = JSON.parse(payloadJson) as GoogleIdTokenPayload;
+
+      if (!payload.email) {
+        throw new UnauthorizedException('Google ID token does not include email');
+      }
+
+      return {
+        email: payload.email,
+        name: payload.name || payload.email,
+        picture: payload.picture,
+        accessToken: idToken,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      throw new UnauthorizedException('Unable to parse Google ID token');
+    }
+  }
+
+  private decodeBase64Url(value: string): string {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    return Buffer.from(padded, 'base64').toString('utf-8');
   }
 
   private mapToAuthUser(user: UserRecord, picture?: string): AuthUserDto {
