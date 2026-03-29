@@ -1,0 +1,21 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: kltn-backend
+    ports:
+      - '3001:3001'
+    env_file:
+      - ./.env
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    command: npm run dev
+    restart: unless-stopped

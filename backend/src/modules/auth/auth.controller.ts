@@ -12,12 +12,21 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { Response, Request } from 'express';
 import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
-import { RefreshTokenRequestDto, RefreshTokenDto } from './dto';
+import {
+  RefreshTokenRequestDto,
+  RefreshTokenDto,
+  GoogleCallbackRequestDto,
+} from './dto';
 import { GoogleUser } from './strategies/google.strategy';
 import { AuthUser } from '../../common/types';
+
+function generateRequestId(): string {
+  return `req_${crypto.randomBytes(8).toString('hex')}`;
+}
 
 @Controller('auth')
 export class AuthController {
@@ -65,20 +74,66 @@ export class AuthController {
   }
 
   @Public()
+  @Post('google/callback')
+  @HttpCode(HttpStatus.OK)
+  async googleTokenCallback(@Body() dto: GoogleCallbackRequestDto) {
+    const authResult = await this.authService.authenticateWithGoogleIdToken(
+      dto.idToken,
+    );
+
+    return {
+      data: {
+        accessToken: authResult.tokens.accessToken,
+        expiresIn: authResult.tokens.expiresIn,
+        user: {
+          id: authResult.user.userId,
+          email: authResult.user.email,
+          accountRole: authResult.user.role,
+        },
+      },
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refreshToken(@Body() dto: RefreshTokenRequestDto): Promise<RefreshTokenDto> {
-    return this.authService.refreshAccessToken(dto.refreshToken);
+  async refreshToken(
+    @Body() dto: RefreshTokenRequestDto,
+  ): Promise<{ data: RefreshTokenDto; meta: { requestId: string } }> {
+    const token = await this.authService.refreshAccessToken(dto.refreshToken);
+
+    return {
+      data: token,
+      meta: { requestId: generateRequestId() },
+    };
   }
 
   @Post('logout')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async logout(@Body() dto: RefreshTokenRequestDto): Promise<void> {
+  @HttpCode(HttpStatus.OK)
+  async logout(
+    @Body() dto: RefreshTokenRequestDto,
+  ): Promise<{ data: { success: boolean }; meta: { requestId: string } }> {
     await this.authService.logout(dto.refreshToken);
+
+    return {
+      data: { success: true },
+      meta: { requestId: generateRequestId() },
+    };
   }
 
   @Get('me')
-  async getCurrentUser(@CurrentUser() user: AuthUser): Promise<AuthUser> {
-    return user;
+  async getCurrentUser(@CurrentUser() user: AuthUser) {
+    const profile = await this.authService.getCurrentProfile(user.userId);
+
+    return {
+      data: {
+        id: profile?.userId ?? user.userId,
+        email: profile?.email ?? user.email,
+        fullName: profile?.name ?? user.email,
+        accountRole: profile?.role ?? user.role,
+      },
+      meta: { requestId: generateRequestId() },
+    };
   }
 }

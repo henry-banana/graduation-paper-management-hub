@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { X, BookOpen, Clock, CheckSquare, Users, FileText, Bell, ClipboardList, ChevronRight, LogOut } from "lucide-react";
+import { clearAuthSession, getCurrentUiRole } from "@/lib/auth/session";
 
 const ROLE_LABELS: Record<string, { label: string; color: string; abbr: string }> = {
   STUDENT: { label: "Sinh viên", color: "bg-blue-500", abbr: "SV" },
+  LECTURER: { label: "Giảng viên", color: "bg-green-600", abbr: "GV" },
   GVHD: { label: "GV Hướng dẫn", color: "bg-green-600", abbr: "HD" },
   GVPB: { label: "GV Phản biện", color: "bg-purple-600", abbr: "PB" },
   TBM: { label: "Thư ký BM", color: "bg-orange-500", abbr: "TK" },
@@ -20,8 +23,16 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
   STUDENT: [
     { name: "Thông báo", path: "/student/notifications", icon: Bell },
     { name: "Thông tin sinh viên", path: "/student/profile", icon: Users },
+    { name: "Nộp báo cáo", path: "/student/submissions", icon: FileText },
+    { name: "Kết quả điểm", path: "/student/scores", icon: CheckSquare },
     { name: "Đăng ký đề tài", path: "/student/topics/register", icon: BookOpen },
     { name: "Đề tài của tôi", path: "/student/topics", icon: ClipboardList },
+  ],
+  LECTURER: [
+    { name: "Duyệt đề tài", path: "/gvhd/pending", icon: Clock },
+    { name: "Tiến độ hướng dẫn", path: "/gvhd/topics", icon: BookOpen },
+    { name: "Chấm điểm (Rubric)", path: "/gvhd/scoring", icon: CheckSquare },
+    { name: "Hồ sơ phản biện", path: "/gvpb/reviews", icon: FileText },
   ],
   GVHD: [
     { name: "Duyệt đề tài", path: "/gvhd/pending", icon: Clock },
@@ -52,15 +63,21 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
 };
 
 export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (val: boolean) => void }) {
+  const router = useRouter();
   const pathname = usePathname();
   const [role, setRole] = useState("STUDENT");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const match = document.cookie.match(new RegExp("(^| )user_role=([^;]+)"));
-    if (match) setRole(match[2]);
+    setRole(getCurrentUiRole());
   }, []);
+
+  const handleLogout = () => {
+    clearAuthSession();
+    setIsOpen(false);
+    router.replace("/login");
+  };
 
   const currentRoutes = routes[role] || routes["STUDENT"];
   const roleInfo = ROLE_LABELS[role] || { label: role, color: "bg-primary", abbr: role.substring(0, 2) };
@@ -141,7 +158,11 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
 
         {/* Footer: logout */}
         <div className="p-4 border-t border-white/10">
-          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-white/50 hover:text-white hover:bg-white/10 transition-all text-sm">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-white/50 hover:text-white hover:bg-white/10 transition-all text-sm"
+          >
             <LogOut className="w-4 h-4" />
             <span>Đăng xuất</span>
           </button>

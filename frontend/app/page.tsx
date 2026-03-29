@@ -1,17 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { getApiBaseUrl } from "@/lib/api";
+import { clearAuthSession } from "@/lib/auth/session";
 
 export default function HomePage() {
-  const [loginType, setLoginType] = useState<"student" | "teacher" | null>(null);
-
   const handleLogin = () => {
-    const apiUrl =
-      process.env.NEXT_PUBLIC_API_URL ||
-      process.env.NEXT_PUBLIC_API_BASE_URL ||
-      "http://localhost:3001/api/v1";
-    window.location.href = `${apiUrl}/auth/google`;
+    clearAuthSession();
+    window.location.href = `${getApiBaseUrl()}/auth/google`;
   };
 
   return (
