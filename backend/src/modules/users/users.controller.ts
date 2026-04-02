@@ -16,6 +16,7 @@ import { AuthUser } from '../../common/types';
 import {
   UserResponseDto,
   GetUsersQueryDto,
+  SupervisorOptionDto,
   UpdateUserProfileDto,
 } from './dto';
 
@@ -36,6 +37,18 @@ export class UsersController {
     }
     return {
       data: this.usersService.mapToDto(user),
+      meta: { requestId: `req_${Date.now()}` },
+    };
+  }
+
+  @Get('supervisors/options')
+  @ApiOperation({ summary: 'Get active supervisor options for topic registration' })
+  @ApiResponse({ status: 200, type: [SupervisorOptionDto] })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getSupervisorOptions() {
+    const supervisors = await this.usersService.findSupervisorOptions();
+    return {
+      data: supervisors,
       meta: { requestId: `req_${Date.now()}` },
     };
   }

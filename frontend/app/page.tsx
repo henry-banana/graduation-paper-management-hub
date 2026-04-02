@@ -35,14 +35,14 @@ export default function HomePage() {
           <div className="w-20 h-20 relative mb-4 drop-shadow-xl">
             <Image
               src="/logo-ute.png"
-              alt="Logo Đại học Sư phạm Kỹ thuật TP.HCM"
+              alt="Logo Đại học Công Nghệ Kỹ thuật TP.HCM"
               fill
               className="object-contain"
               priority
             />
           </div>
           <h1 className="text-white text-center font-headline font-bold text-lg md:text-xl tracking-wide drop-shadow-md">
-            TRƯỜNG ĐẠI HỌC SƯ PHẠM KỸ THUẬT TP.HCM
+            TRƯỜNG ĐẠI HỌC CÔNG NGHỆ KỸ THUẬT TP.HCM
           </h1>
 
           {/* White frosted separator line */}
@@ -116,7 +116,7 @@ export default function HomePage() {
           {/* Footer */}
           <div className="px-8 py-5 border-t border-white/10 text-center">
             <p className="text-white/30 text-xs font-body">
-              © 2024 Trường ĐH Sư phạm Kỹ thuật TP.HCM • Khoa CNTT
+              © 2024 Trường ĐH Công Nghệ Kỹ thuật TP.HCM • Khoa CNTT
             </p>
           </div>
         </div>

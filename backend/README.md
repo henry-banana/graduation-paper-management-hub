@@ -28,6 +28,26 @@ GET /api/v1/health 200 4ms 127.0.0.1
 
 Set `ACCESS_LOG_ENABLED=false` to disable per-request logging.
 
+## Google OAuth Redirect URI (Production)
+
+For deployed environments, `GOOGLE_CALLBACK_URL` must use the public backend domain.
+
+Correct example:
+
+```text
+https://graduation-paper-management-hub.onrender.com/api/v1/auth/google/callback
+```
+
+Incorrect example (causes `redirect_uri_mismatch`):
+
+```text
+http://localhost:3001/api/v1/auth/google/callback
+```
+
+If `GOOGLE_CALLBACK_URL` is not set, backend falls back to `RENDER_EXTERNAL_URL` (Render only) and appends `/api/v1/auth/google/callback`.
+
+In Google Cloud Console, add exactly the same callback URL to Authorized redirect URIs.
+
 ## Seed Sample Data
 
 `npm run seed:sheets` upserts sample rows into all required Google Sheets tabs:
@@ -37,6 +57,10 @@ Set `ACCESS_LOG_ENABLED=false` to disable per-request logging.
 - `ExportFiles`, `Schedules`, `AuditLogs`
 
 This script does not hard-delete existing rows; it updates by `id` if row already exists.
+
+`npm run seed:sheets:validate` runs schema validation only and fails closed when any tab header does not match expected columns.
+
+`npm run seed:sheets:reset` clears all existing data rows (keeps headers), validates schema, then seeds again from canonical sample data.
 
 `npm run seed` is an alias for checklist compatibility and executes the same sheet seeding flow.
 

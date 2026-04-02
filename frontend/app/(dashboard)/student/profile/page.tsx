@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, XCircle, AlertCircle, GraduationCap, BookOpen, Award, User, Building, Calendar, Hash, Users } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { TOPIC_STATE_LABELS } from "@/lib/constants/vi-labels";
 
 interface UserProfileDto {
   id: string;
@@ -11,6 +12,9 @@ interface UserProfileDto {
   studentId?: string;
   department?: string;
   earnedCredits?: number;
+  requiredCredits?: number;
+  completedBcttScore?: number;
+  canRegisterKltn?: boolean;
 }
 
 interface TopicDto {
@@ -28,7 +32,10 @@ const GradReq = ({ label, value, status }: { label: string; value: string; statu
   const Icon = cfg.icon;
   return (
     <div className="flex items-center justify-between py-4 border-b border-outline-variant/10 last:border-0">
-      <span className="text-sm font-medium text-on-surface-variant">{label}</span>
+      <div className="flex flex-col">
+        <span className="text-sm font-medium text-on-surface-variant">{label}</span>
+        <span className="text-xs text-outline mt-0.5">{value}</span>
+      </div>
       <div className="flex items-center gap-4">
         <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${cfg.badge}`}>
           <Icon className={`w-3.5 h-3.5 ${cfg.color}`} />
@@ -83,7 +90,7 @@ export default function StudentProfilePage() {
       return { label: "Đã hủy", status: "not_started" as const };
     }
 
-    return { label: topic.state, status: "pending" as const };
+    return { label: TOPIC_STATE_LABELS[topic.state]?.label || topic.state, status: "pending" as const };
   }, [topics]);
 
   const kltnState = useMemo(() => {
@@ -100,11 +107,25 @@ export default function StudentProfilePage() {
       return { label: "Đã hủy", status: "not_started" as const };
     }
 
-    return { label: topic.state, status: "pending" as const };
+    return { label: TOPIC_STATE_LABELS[topic.state]?.label || topic.state, status: "pending" as const };
   }, [topics]);
 
-  const earnedCredits = profile?.earnedCredits ?? 0;
-  const allDone = bcttState.status === "done" && kltnState.status === "done";
+  const earnedCreditsRaw = Number(profile?.earnedCredits ?? 0);
+  const requiredCreditsRaw = Number(profile?.requiredCredits ?? 0);
+  const earnedCredits = Number.isFinite(earnedCreditsRaw) ? Math.max(0, earnedCreditsRaw) : 0;
+  const requiredCredits = Number.isFinite(requiredCreditsRaw) ? Math.max(0, requiredCreditsRaw) : 0;
+  const remainingCredits =
+    requiredCredits > 0 ? Math.max(0, requiredCredits - earnedCredits) : 0;
+  const completedBcttScore = profile?.completedBcttScore ?? 0;
+  const creditsProgressPercent = requiredCredits > 0
+    ? Math.min(100, Math.round((earnedCredits / requiredCredits) * 100))
+    : 0;
+  const isKltnEligible = profile?.canRegisterKltn ?? (
+    bcttState.status === "done" &&
+    completedBcttScore > 5 &&
+    requiredCredits > 0 &&
+    earnedCredits >= requiredCredits
+  );
 
   if (isLoading) {
     return <div className="text-sm text-outline">Đang tải thông tin sinh viên...</div>;
@@ -157,10 +178,10 @@ export default function StudentProfilePage() {
               { icon: Building, label: "Bộ môn", value: profile.department ?? "-" },
               { icon: User, label: "Họ tên", value: profile.fullName },
               { icon: BookOpen, label: "Email", value: profile.email },
-              { icon: Calendar, label: "Số tín chỉ đã tích lũy", value: String(earnedCredits) },
-              { icon: Users, label: "User ID", value: profile.id },
-              { icon: User, label: "Điều kiện BCTT", value: bcttState.label },
-              { icon: GraduationCap, label: "Điều kiện KLTN", value: kltnState.label },
+                { icon: Calendar, label: "Số tín chỉ đã tích lũy", value: earnedCredits.toFixed(0) },
+                { icon: Users, label: "Số tín chỉ yêu cầu KLTN", value: requiredCredits > 0 ? requiredCredits.toFixed(0) : "Chưa cấu hình" },
+                { icon: Award, label: "Điểm BCTT đã xác nhận", value: completedBcttScore > 0 ? completedBcttScore.toFixed(2) : "Chưa có" },
+                { icon: GraduationCap, label: "Điều kiện đăng ký KLTN", value: isKltnEligible ? "Đủ điều kiện" : "Chưa đủ điều kiện" },
             ].map((item, i) => {
               const Icon = item.icon;
               return (
@@ -188,35 +209,59 @@ export default function StudentProfilePage() {
             </div>
             <h3 className="font-bold text-on-surface font-headline">Yêu cầu tốt nghiệp</h3>
           </div>
-          {allDone && (
+          {isKltnEligible ? (
             <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-100 text-green-700 text-xs font-bold">
               <CheckCircle2 className="w-3.5 h-3.5" />
               Đủ điều kiện KLTN
             </span>
+          ) : (
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">
+              <AlertCircle className="w-3.5 h-3.5" />
+              Chưa đủ điều kiện KLTN
+            </span>
           )}
         </div>
         <div className="px-6 py-2">
-          {/* Credits progress bar */}
           <div className="py-4 border-b border-outline-variant/10">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium text-on-surface-variant">Số tín chỉ đã tích lũy</span>
               <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-on-surface">{earnedCredits}</span>
-                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Theo dữ liệu hiện có
+                <span className="text-sm font-bold text-on-surface">
+                  {requiredCredits > 0 ? `${earnedCredits.toFixed(0)}/${requiredCredits.toFixed(0)}` : `${earnedCredits.toFixed(0)}`}
                 </span>
+                {creditsProgressPercent >= 100 ? (
+                  <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Đạt yêu cầu
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary">
+                    {creditsProgressPercent}%
+                  </span>
+                )}
               </div>
             </div>
-            <div className="w-full bg-primary/10 h-2.5 rounded-full overflow-hidden">
+            {/* Progress bar: green when complete, primary when in progress */}
+            <div className="w-full bg-surface-container h-3 rounded-full overflow-hidden">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-primary to-primary-container transition-all duration-700"
-                style={{ width: "100%" }}
+                className={`h-full rounded-full transition-all duration-700 ${
+                  creditsProgressPercent >= 100
+                    ? "bg-gradient-to-r from-green-500 to-green-400"
+                    : "bg-gradient-to-r from-primary to-primary-container"
+                }`}
+                style={{ width: `${creditsProgressPercent}%` }}
               />
             </div>
             <div className="flex justify-between mt-2 text-xs text-outline">
-              <span>0 tín chỉ</span>
-              <span>{earnedCredits} tín chỉ</span>
+              <span>0</span>
+              <span>
+                {requiredCredits > 0
+                  ? remainingCredits > 0
+                    ? `Còn thiếu ${remainingCredits.toFixed(0)} tín chỉ`
+                    : `Đã đủ ${requiredCredits.toFixed(0)} tín chỉ yêu cầu`
+                  : `${earnedCredits.toFixed(0)} tín chỉ tích lũy`}
+              </span>
+              {requiredCredits > 0 && <span>{requiredCredits.toFixed(0)}</span>}
             </div>
           </div>
 
@@ -224,7 +269,7 @@ export default function StudentProfilePage() {
           <GradReq label="Khóa luận tốt nghiệp (KLTN)" value={kltnState.label} status={kltnState.status} />
         </div>
 
-        {!allDone && (
+        {!isKltnEligible && (
           <div className="px-6 py-4 border-t border-outline-variant/10 bg-amber-50/50">
             <p className="text-xs text-amber-700 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />

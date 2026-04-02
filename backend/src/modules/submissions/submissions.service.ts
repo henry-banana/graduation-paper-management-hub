@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
@@ -12,24 +13,43 @@ import {
   DownloadResponseDto,
 } from './dto';
 import { AuthUser } from '../../common/types';
-import { FileType } from './submission.constants';
+import {
+  buildVersionLabel,
+  FileType,
+  SubmissionStatus,
+  SUBMISSION_POLICY_ERROR_CODES,
+  VersionLabel,
+} from './submission.constants';
 import {
   SubmissionFileInfo,
   SubmissionFileValidatorService,
 } from './submission-file-validator.service';
 import {
+  RevisionRoundRecord,
+  RevisionRoundsRepository,
   SubmissionsRepository,
   TopicsRepository,
+  AssignmentsRepository,
 } from '../../infrastructure/google-sheets';
 import { GoogleDriveClient } from '../../infrastructure/google-drive';
 import type { TopicRecord } from '../topics/topics.service';
+import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface SubmissionRecord {
   id: string;
   topicId: string;
   uploaderUserId: string;
   fileType: FileType;
-  version: number;
+  revisionRoundId?: string;
+  revisionRoundNumber?: number;
+  versionNumber: number;
+  versionLabel: VersionLabel;
+  status: SubmissionStatus;
+  deadlineAt?: string;
+  confirmedAt?: string;
+  isLocked: boolean;
+  canReplace: boolean;
   driveFileId?: string;
   driveLink?: string;
   uploadedAt: string;
@@ -45,7 +65,11 @@ export class SubmissionsService {
     private readonly fileValidator: SubmissionFileValidatorService,
     private readonly submissionsRepository: SubmissionsRepository,
     private readonly topicsRepository: TopicsRepository,
+    private readonly revisionRoundsRepository: RevisionRoundsRepository,
+    private readonly assignmentsRepository: AssignmentsRepository,
     private readonly googleDriveClient: GoogleDriveClient,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditService: AuditService,
   ) {}
 
   private generateId(): string {
@@ -60,14 +84,23 @@ export class SubmissionsService {
     user: AuthUser,
   ): Promise<SubmissionResponseDto[]> {
     const topic = await this.getTopicOrThrow(topicId);
-    this.ensureCanReadTopic(topic, user);
+    await this.ensureCanReadTopic(topic, user);
 
     const submissions = await this.submissionsRepository.findAll();
-    const topicSubmissions = submissions.filter(
-      (s) => s.topicId === topicId,
-    );
+    const topicSubmissions = submissions
+      .filter((s) => s.topicId === topicId)
+      .map((s) => this.syncSubmissionPolicyFlags(s));
 
-    return topicSubmissions.map((s) => this.mapToDto(s));
+    return topicSubmissions
+      .sort((a, b) => {
+        const aRound = a.revisionRoundNumber ?? 0;
+        const bRound = b.revisionRoundNumber ?? 0;
+        if (aRound !== bRound) {
+          return bRound - aRound;
+        }
+        return new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime();
+      })
+      .map((s) => this.mapToDto(s));
   }
 
   /**
@@ -78,122 +111,176 @@ export class SubmissionsService {
     user: AuthUser,
   ): Promise<SubmissionRecord | null> {
     const submission = await this.submissionsRepository.findById(submissionId);
-    if (!submission) return null;
+    if (!submission) {
+      return null;
+    }
 
     const topic = await this.topicsRepository.findById(submission.topicId);
-    if (!topic) return null;
+    if (!topic) {
+      return null;
+    }
 
-    this.ensureCanReadTopic(topic, user);
+    await this.ensureCanReadTopic(topic, user);
 
-    return submission;
+    return this.syncSubmissionPolicyFlags(submission);
   }
 
   /**
    * Create a new submission (upload file)
-   * Note: In production, file handling would be done via multipart/form-data
    */
   async create(
     topicId: string,
     fileType: FileType,
     user: AuthUser,
     fileInfo: SubmissionFileInfo | undefined,
+    fileBuffer: Buffer,
   ): Promise<CreateSubmissionResponseDto> {
     const topic = await this.getTopicOrThrow(topicId);
     this.assertUploadPermission(topic, fileType, user);
     this.assertUploadState(topic, fileType);
     const validatedFile = this.fileValidator.validate(fileInfo);
 
-    // Calculate next version for this fileType
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new BadRequestException('Uploaded file content is empty');
+    }
+
+    const revisionRound = await this.resolveSubmissionRound(topic, fileType);
+
     const submissions = await this.submissionsRepository.findAll();
-    const existingVersions = submissions.filter(
-      (s) => s.topicId === topicId && s.fileType === fileType,
-    );
-    const nextVersion = existingVersions.length > 0
-      ? Math.max(...existingVersions.map((s) => s.version)) + 1
-      : 1;
+    const sameRoundSubmission = submissions
+      .filter(
+        (s) =>
+          s.topicId === topicId &&
+          s.fileType === fileType &&
+          s.revisionRoundNumber === revisionRound.roundNumber,
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
+      )[0];
 
-    this.logger.log(
-      `Submission upload requested topicId=${topicId} userId=${user.userId} fileType=${fileType} version=${nextVersion}`,
-    );
-
-    const uploadFolderId = await this.resolveUploadFolderForUser(user.userId);
-
-    const uploadPayload = Buffer.from(
-      JSON.stringify(
-        {
-          topicId,
-          fileType,
-          originalFileName: validatedFile.originalFileName,
-          mimeType: validatedFile.mimeType,
-          fileSize: validatedFile.fileSize,
-          version: nextVersion,
-          uploaderUserId: user.userId,
-          uploadedAt: new Date().toISOString(),
-        },
-        null,
-        2,
-      ),
-      'utf-8',
-    );
-
-    const fallbackDriveId = `drv_${crypto.randomBytes(6).toString('hex')}`;
-    let uploadResult: {
-      fileId: string;
-      webViewLink: string;
-      webContentLink?: string;
-    };
-
-    if (this.googleDriveClient.isReady()) {
-      try {
-        uploadResult = await this.googleDriveClient.uploadFile(
-          validatedFile.originalFileName,
-          validatedFile.mimeType,
-          uploadPayload,
-          uploadFolderId,
+    if (sameRoundSubmission) {
+      const policyState = this.syncSubmissionPolicyFlags(sameRoundSubmission);
+      if (!policyState.canReplace || policyState.isLocked) {
+        throw this.createPolicyConflict(
+          SUBMISSION_POLICY_ERROR_CODES.OVERDUE_SUBMISSION_LOCKED,
+          'Submission is locked and cannot be replaced after deadline',
         );
-
-        this.logger.log(
-          `Submission upload succeeded topicId=${topicId} userId=${user.userId} fileId=${uploadResult.fileId} folderId=${uploadFolderId ?? 'root'}`,
-        );
-      } catch (error) {
-        const stack = error instanceof Error ? error.stack : String(error);
-        this.logger.error(
-          `Submission upload failed topicId=${topicId} userId=${user.userId} fileType=${fileType}`,
-          stack,
-        );
-        throw error;
       }
-    } else {
-      uploadResult = {
-        fileId: fallbackDriveId,
-        webViewLink: `https://drive.google.com/file/d/${fallbackDriveId}`,
-      };
 
-      this.logger.warn(
-        `Google Drive client is not ready, using fallback upload metadata topicId=${topicId} userId=${user.userId}`,
+      return this.replaceSubmission(
+        topic,
+        policyState,
+        fileType,
+        user,
+        validatedFile,
+        fileBuffer,
+        undefined,
       );
     }
 
-    const newSubmission: SubmissionRecord = {
-      id: this.generateId(),
-      topicId,
-      uploaderUserId: user.userId,
+    return this.createSubmissionInRound(
+      topic,
+      revisionRound,
       fileType,
-      version: nextVersion,
-      driveFileId: uploadResult.fileId,
-      driveLink: uploadResult.webViewLink,
-      uploadedAt: new Date().toISOString(),
-      originalFileName: validatedFile.originalFileName,
-      fileSize: validatedFile.fileSize,
-    };
+      user,
+      validatedFile,
+      fileBuffer,
+    );
+  }
 
-    await this.submissionsRepository.create(newSubmission);
+  async confirm(
+    submissionId: string,
+    user: AuthUser,
+    note?: string,
+  ): Promise<SubmissionResponseDto> {
+    const submission = await this.submissionsRepository.findById(submissionId);
+    if (!submission) {
+      throw new NotFoundException(`Submission with ID ${submissionId} not found`);
+    }
 
-    return {
-      id: newSubmission.id,
-      version: newSubmission.version,
-      driveFileId: newSubmission.driveFileId,
-    };
+    const topic = await this.getTopicOrThrow(submission.topicId);
+    this.assertSubmitterOwnership(submission, topic, user);
+
+    const policyState = this.syncSubmissionPolicyFlags(submission);
+
+    if (policyState.isLocked) {
+      throw this.createPolicyConflict(
+        SUBMISSION_POLICY_ERROR_CODES.OVERDUE_SUBMISSION_LOCKED,
+        'Submission is locked and cannot be confirmed',
+      );
+    }
+
+    policyState.status = 'CONFIRMED';
+    policyState.confirmedAt = new Date().toISOString();
+    policyState.canReplace = !policyState.isLocked;
+
+    await this.submissionsRepository.update(policyState.id, policyState);
+
+    await this.auditService.log({
+      action: 'SUBMISSION_CONFIRMED',
+      actorId: user.userId,
+      actorRole: user.role,
+      topicId: topic.id,
+      detail: {
+        submissionId: policyState.id,
+        revisionRoundNumber: policyState.revisionRoundNumber,
+        versionNumber: policyState.versionNumber,
+        note: note?.trim() || undefined,
+      },
+    });
+
+    await this.notificationsService.create({
+      receiverUserId: topic.supervisorUserId,
+      type: 'SUBMISSION_CONFIRMED',
+      topicId: topic.id,
+      context: {
+        topicTitle: topic.title,
+        version: policyState.versionLabel,
+      },
+    });
+
+    return this.mapToDto(policyState);
+  }
+
+  async replace(
+    submissionId: string,
+    user: AuthUser,
+    fileInfo: SubmissionFileInfo | undefined,
+    fileBuffer: Buffer,
+    reason?: string,
+  ): Promise<CreateSubmissionResponseDto> {
+    const submission = await this.submissionsRepository.findById(submissionId);
+    if (!submission) {
+      throw new NotFoundException(`Submission with ID ${submissionId} not found`);
+    }
+
+    const topic = await this.getTopicOrThrow(submission.topicId);
+    this.assertSubmitterOwnership(submission, topic, user);
+    this.assertUploadPermission(topic, submission.fileType, user);
+
+    const validatedFile = this.fileValidator.validate(fileInfo);
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new BadRequestException('Uploaded file content is empty');
+    }
+
+    const policyState = this.syncSubmissionPolicyFlags(submission);
+    if (!policyState.canReplace || policyState.isLocked) {
+      throw this.createPolicyConflict(
+        SUBMISSION_POLICY_ERROR_CODES.VERSION_IMMUTABLE_OUTSIDE_DEADLINE,
+        'Submission version is immutable outside allowed deadline',
+      );
+    }
+
+    return this.replaceSubmission(
+      topic,
+      policyState,
+      submission.fileType,
+      user,
+      validatedFile,
+      fileBuffer,
+      reason,
+    );
   }
 
   /**
@@ -212,9 +299,8 @@ export class SubmissionsService {
       throw new NotFoundException('No file associated with this submission');
     }
 
-    // In production, this would generate a signed URL from Google Drive
     const downloadUrl = `https://drive.google.com/uc?id=${submission.driveFileId}&export=download`;
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
     return {
       downloadUrl,
@@ -231,12 +317,19 @@ export class SubmissionsService {
     user: AuthUser,
   ): Promise<SubmissionRecord | null> {
     const topic = await this.getTopicOrThrow(topicId);
-    this.ensureCanReadTopic(topic, user);
+    await this.ensureCanReadTopic(topic, user);
 
     const submissions = await this.submissionsRepository.findAll();
     const matching = submissions
       .filter((s) => s.topicId === topicId && s.fileType === fileType)
-      .sort((a, b) => b.version - a.version);
+      .map((s) => this.syncSubmissionPolicyFlags(s))
+      .sort((a, b) => {
+        const roundDiff = (b.revisionRoundNumber ?? 0) - (a.revisionRoundNumber ?? 0);
+        if (roundDiff !== 0) {
+          return roundDiff;
+        }
+        return new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime();
+      });
 
     return matching.length > 0 ? matching[0] : null;
   }
@@ -250,12 +343,290 @@ export class SubmissionsService {
       topicId: record.topicId,
       uploaderUserId: record.uploaderUserId,
       fileType: record.fileType,
-      version: record.version,
+      revisionRoundId: record.revisionRoundId,
+      revisionRoundNumber: record.revisionRoundNumber,
+      version: record.versionNumber,
+      versionLabel: record.versionLabel,
+      status: record.status,
+      deadlineAt: record.deadlineAt,
+      confirmedAt: record.confirmedAt,
+      isLocked: record.isLocked,
+      canReplace: record.canReplace,
       driveFileId: record.driveFileId,
       driveLink: record.driveLink,
       uploadedAt: record.uploadedAt,
       originalFileName: record.originalFileName,
       fileSize: record.fileSize,
+    };
+  }
+
+  private async createSubmissionInRound(
+    topic: TopicRecord,
+    revisionRound: RevisionRoundRecord,
+    fileType: FileType,
+    user: AuthUser,
+    validatedFile: SubmissionFileInfo,
+    fileBuffer: Buffer,
+  ): Promise<CreateSubmissionResponseDto> {
+    const uploadResult = await this.uploadFileToDrive(
+      validatedFile,
+      fileBuffer,
+      user.userId,
+      topic.id,
+      fileType,
+    );
+
+    const newSubmission: SubmissionRecord = {
+      id: this.generateId(),
+      topicId: topic.id,
+      uploaderUserId: user.userId,
+      fileType,
+      revisionRoundId: revisionRound.id,
+      revisionRoundNumber: revisionRound.roundNumber,
+      versionNumber: revisionRound.roundNumber,
+      versionLabel: buildVersionLabel(revisionRound.roundNumber),
+      status: 'DRAFT',
+      deadlineAt: revisionRound.endAt,
+      confirmedAt: undefined,
+      isLocked: false,
+      canReplace: true,
+      driveFileId: uploadResult.fileId,
+      driveLink: uploadResult.webViewLink,
+      uploadedAt: new Date().toISOString(),
+      originalFileName: validatedFile.originalFileName,
+      fileSize: validatedFile.fileSize,
+    };
+
+    await this.submissionsRepository.create(newSubmission);
+
+    await this.auditService.log({
+      action: 'SUBMISSION_UPLOADED',
+      actorId: user.userId,
+      actorRole: user.role,
+      topicId: topic.id,
+      detail: {
+        submissionId: newSubmission.id,
+        revisionRoundNumber: newSubmission.revisionRoundNumber,
+        versionNumber: newSubmission.versionNumber,
+        fileType,
+      },
+    });
+
+    await this.notificationsService.create({
+      receiverUserId: topic.supervisorUserId,
+      type: 'SUBMISSION_UPLOADED',
+      topicId: topic.id,
+      context: {
+        topicTitle: topic.title,
+        fileType,
+        version: newSubmission.versionLabel,
+      },
+    });
+
+    return {
+      id: newSubmission.id,
+      revisionRoundNumber: newSubmission.revisionRoundNumber,
+      version: newSubmission.versionNumber,
+      versionLabel: newSubmission.versionLabel,
+      driveFileId: newSubmission.driveFileId,
+      deadlineAt: newSubmission.deadlineAt,
+      canReplace: true,
+    };
+  }
+
+  private async replaceSubmission(
+    topic: TopicRecord,
+    submission: SubmissionRecord,
+    fileType: FileType,
+    user: AuthUser,
+    validatedFile: SubmissionFileInfo,
+    fileBuffer: Buffer,
+    replacementReason?: string,
+  ): Promise<CreateSubmissionResponseDto> {
+    const uploadResult = await this.uploadFileToDrive(
+      validatedFile,
+      fileBuffer,
+      user.userId,
+      topic.id,
+      fileType,
+    );
+
+    submission.driveFileId = uploadResult.fileId;
+    submission.driveLink = uploadResult.webViewLink;
+    submission.uploadedAt = new Date().toISOString();
+    submission.originalFileName = validatedFile.originalFileName;
+    submission.fileSize = validatedFile.fileSize;
+    submission.canReplace = !submission.isLocked;
+
+    await this.submissionsRepository.update(submission.id, submission);
+
+    await this.auditService.log({
+      action: 'SUBMISSION_REPLACED_IN_DEADLINE',
+      actorId: user.userId,
+      actorRole: user.role,
+      topicId: topic.id,
+      detail: {
+        submissionId: submission.id,
+        revisionRoundNumber: submission.revisionRoundNumber,
+        versionNumber: submission.versionNumber,
+        reason: replacementReason?.trim() || undefined,
+      },
+    });
+
+    await this.notificationsService.create({
+      receiverUserId: topic.supervisorUserId,
+      type: 'SUBMISSION_UPLOADED',
+      topicId: topic.id,
+      context: {
+        topicTitle: topic.title,
+        fileType,
+        version: submission.versionLabel,
+      },
+    });
+
+    return {
+      id: submission.id,
+      revisionRoundNumber: submission.revisionRoundNumber,
+      version: submission.versionNumber,
+      versionLabel: submission.versionLabel,
+      driveFileId: submission.driveFileId,
+      deadlineAt: submission.deadlineAt,
+      canReplace: submission.canReplace,
+    };
+  }
+
+  private async resolveSubmissionRound(
+    topic: TopicRecord,
+    fileType: FileType,
+  ): Promise<RevisionRoundRecord> {
+    if (fileType !== 'REPORT') {
+      return this.createPseudoRound(topic.submitStartAt, topic.submitEndAt, 1, topic.id, 'SYSTEM');
+    }
+
+    const rounds = await this.revisionRoundsRepository.findWhere(
+      (round) => round.topicId === topic.id && round.status === 'OPEN',
+    );
+
+    if (!rounds.length) {
+      if (topic.submitStartAt && topic.submitEndAt) {
+        return this.createPseudoRound(topic.submitStartAt, topic.submitEndAt, 1, topic.id, 'SYSTEM');
+      }
+
+      throw this.createPolicyConflict(
+        SUBMISSION_POLICY_ERROR_CODES.REVISION_ROUND_NOT_OPEN,
+        'Revision round is not open for this topic',
+      );
+    }
+
+    return rounds.sort((a, b) => b.roundNumber - a.roundNumber)[0];
+  }
+
+  private createPseudoRound(
+    startAt: string | undefined,
+    endAt: string | undefined,
+    roundNumber: number,
+    topicId: string,
+    requestedBy: string,
+  ): RevisionRoundRecord {
+    if (!startAt || !endAt) {
+      throw new ConflictException('Submission window is not configured');
+    }
+
+    return {
+      id: `round_${topicId}_${roundNumber}`,
+      topicId,
+      roundNumber,
+      status: 'OPEN',
+      startAt,
+      endAt,
+      requestedBy,
+      reason: undefined,
+      createdAt: startAt,
+      updatedAt: startAt,
+    };
+  }
+
+  private syncSubmissionPolicyFlags(submission: SubmissionRecord): SubmissionRecord {
+    const deadline = submission.deadlineAt ? new Date(submission.deadlineAt).getTime() : NaN;
+    const hasDeadline = !Number.isNaN(deadline);
+    const overdue = hasDeadline ? Date.now() > deadline : false;
+
+    const wasLocked = submission.isLocked;
+    submission.isLocked = overdue;
+    submission.canReplace = !overdue;
+
+    if (overdue && submission.status !== 'LOCKED') {
+      submission.status = 'LOCKED';
+    }
+
+    if (!overdue && submission.status === 'LOCKED') {
+      submission.status = submission.confirmedAt ? 'CONFIRMED' : 'DRAFT';
+    }
+
+    if (overdue && !wasLocked) {
+      void this.auditService.log({
+        action: 'SUBMISSION_LOCKED_OVERDUE',
+        actorId: 'SYSTEM',
+        actorRole: 'SYSTEM',
+        topicId: submission.topicId,
+        detail: {
+          submissionId: submission.id,
+          revisionRoundNumber: submission.revisionRoundNumber,
+          deadlineAt: submission.deadlineAt,
+        },
+      });
+
+      void this.submissionsRepository.update(submission.id, submission);
+    }
+
+    return submission;
+  }
+
+  private async uploadFileToDrive(
+    validatedFile: SubmissionFileInfo,
+    fileBuffer: Buffer,
+    userId: string,
+    topicId: string,
+    fileType: FileType,
+  ): Promise<{ fileId: string; webViewLink: string; webContentLink?: string }> {
+    this.logger.log(
+      `Submission upload requested topicId=${topicId} userId=${userId} fileType=${fileType}`,
+    );
+
+    const uploadFolderId = await this.resolveUploadFolderForUser(userId);
+    const fallbackDriveId = `drv_${crypto.randomBytes(6).toString('hex')}`;
+
+    if (this.googleDriveClient.isReady()) {
+      try {
+        const uploadResult = await this.googleDriveClient.uploadFile(
+          validatedFile.originalFileName,
+          validatedFile.mimeType,
+          fileBuffer,
+          uploadFolderId,
+        );
+
+        this.logger.log(
+          `Submission upload succeeded topicId=${topicId} userId=${userId} fileId=${uploadResult.fileId} folderId=${uploadFolderId ?? 'root'}`,
+        );
+
+        return uploadResult;
+      } catch (error) {
+        const stack = error instanceof Error ? error.stack : String(error);
+        this.logger.error(
+          `Submission upload failed topicId=${topicId} userId=${userId} fileType=${fileType}`,
+          stack,
+        );
+        throw error;
+      }
+    }
+
+    this.logger.warn(
+      `Google Drive client is not ready, using fallback upload metadata topicId=${topicId} userId=${userId}`,
+    );
+
+    return {
+      fileId: fallbackDriveId,
+      webViewLink: `https://drive.google.com/file/d/${fallbackDriveId}`,
     };
   }
 
@@ -268,7 +639,7 @@ export class SubmissionsService {
     return topic;
   }
 
-  private ensureCanReadTopic(topic: TopicRecord, user: AuthUser): void {
+  private async ensureCanReadTopic(topic: TopicRecord, user: AuthUser): Promise<void> {
     if (user.role === 'TBM') {
       return;
     }
@@ -277,19 +648,46 @@ export class SubmissionsService {
       if (topic.studentUserId === user.userId) {
         return;
       }
-
       throw new ForbiddenException('Cannot view submissions for this topic');
     }
 
     if (user.role === 'LECTURER') {
+      // GVHD (supervisor) always has access
       if (topic.supervisorUserId === user.userId) {
         return;
       }
-
+      // GVPB / Council: check if assigned to this topic via Assignments sheet
+      const assignments = await this.assignmentsRepository.findAll();
+      const isAssigned = assignments.some(
+        (a) => a.topicId === topic.id && a.userId === user.userId,
+      );
+      if (isAssigned) {
+        return;
+      }
       throw new ForbiddenException('Cannot access this topic');
     }
 
     throw new ForbiddenException('Cannot access this topic');
+  }
+
+  private assertSubmitterOwnership(
+    submission: SubmissionRecord,
+    topic: TopicRecord,
+    user: AuthUser,
+  ): void {
+    if (user.role === 'TBM') {
+      return;
+    }
+
+    if (user.role === 'STUDENT' && topic.studentUserId === user.userId) {
+      return;
+    }
+
+    if (user.role === 'LECTURER' && topic.supervisorUserId === user.userId) {
+      return;
+    }
+
+    throw new ForbiddenException('Cannot modify this submission');
   }
 
   private assertUploadPermission(
@@ -381,5 +779,13 @@ export class SubmissionsService {
       );
       throw error;
     }
+  }
+
+  private createPolicyConflict(code: string, message: string): ConflictException {
+    return new ConflictException({
+      error: code,
+      message,
+      code,
+    });
   }
 }

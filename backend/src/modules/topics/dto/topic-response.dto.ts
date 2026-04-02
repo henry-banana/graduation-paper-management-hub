@@ -38,6 +38,12 @@ export class TopicResponseDto {
   @ApiPropertyOptional({ example: '2026-05-20T23:59:59Z' })
   submitEndAt?: string;
 
+  @ApiPropertyOptional({ example: 'Topic scope is too broad' })
+  reasonRejected?: string;
+
+  @ApiPropertyOptional({ example: 'reserved' })
+  revisionsAllowed?: string;
+
   @ApiPropertyOptional({ example: '2026-01-15T00:00:00Z' })
   createdAt?: string;
 

@@ -2,7 +2,12 @@ import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { AccountRole } from '../../common/types';
-import { GetUsersQueryDto, UpdateUserProfileDto, UserResponseDto } from './dto';
+import {
+  GetUsersQueryDto,
+  SupervisorOptionDto,
+  UpdateUserProfileDto,
+  UserResponseDto,
+} from './dto';
 import { UsersRepository } from '../../infrastructure/google-sheets';
 
 export interface UserRecord {
@@ -13,12 +18,14 @@ export interface UserRecord {
   studentId?: string;
   lecturerId?: string;
   department?: string;
+  heDaoTao?: string;
   earnedCredits?: number;
   requiredCredits?: number;
   completedBcttScore?: number;
   totalQuota?: number;
   quotaUsed?: number;
   phone?: string;
+  expertise?: string;
   isActive?: boolean;
   createdAt?: string;
 }
@@ -32,7 +39,8 @@ interface PaginatedResult<T> {
   };
 }
 
-const CACHE_TTL = 300000; // 5 minutes
+// 0 = disabled in dev so sheet edits reflect instantly; 5 min in prod
+const CACHE_TTL = process.env.NODE_ENV === 'production' ? 180_000 : 0;
 
 @Injectable()
 export class UsersService {
@@ -95,6 +103,31 @@ export class UsersService {
     };
   }
 
+  async findSupervisorOptions(): Promise<SupervisorOptionDto[]> {
+    const users = await this.usersRepository.findAll();
+
+    return users
+      .filter((user) => {
+        if (user.role !== 'LECTURER' || user.isActive === false) {
+          return false;
+        }
+
+        const totalQuota = user.totalQuota ?? 0;
+        const quotaUsed = user.quotaUsed ?? 0;
+        return totalQuota - quotaUsed > 0;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((user) => ({
+        id: user.id,
+        email: user.email,
+        fullName: user.name,
+        lecturerId: user.lecturerId,
+        department: user.department,
+        totalQuota: user.totalQuota,
+        quotaUsed: user.quotaUsed,
+      }));
+  }
+
   async updateProfile(
     userId: string,
     dto: UpdateUserProfileDto,
@@ -129,6 +162,26 @@ export class UsersService {
   }
 
   mapToDto(user: UserRecord): UserResponseDto {
+    const earnedCredits = user.earnedCredits;
+    const requiredCredits = user.requiredCredits;
+    const completedBcttScore = user.completedBcttScore;
+
+    const hasRequiredCredits =
+      typeof earnedCredits === 'number' &&
+      typeof requiredCredits === 'number' &&
+      earnedCredits >= requiredCredits;
+
+    const hasPassedBctt = typeof completedBcttScore === 'number' && completedBcttScore > 5;
+
+    let kltnEligibilityReason: 'OK' | 'BCTT_INCOMPLETE' | 'BCTT_SCORE_TOO_LOW' | 'INSUFFICIENT_CREDITS' = 'OK';
+    if (!hasRequiredCredits) {
+      kltnEligibilityReason = 'INSUFFICIENT_CREDITS';
+    } else if (completedBcttScore === undefined || completedBcttScore === null) {
+      kltnEligibilityReason = 'BCTT_INCOMPLETE';
+    } else if (!hasPassedBctt) {
+      kltnEligibilityReason = 'BCTT_SCORE_TOO_LOW';
+    }
+
     return {
       id: user.id,
       email: user.email,
@@ -137,7 +190,11 @@ export class UsersService {
       studentId: user.studentId,
       lecturerId: user.lecturerId,
       department: user.department,
-      earnedCredits: user.earnedCredits,
+      earnedCredits,
+      requiredCredits,
+      completedBcttScore,
+      canRegisterKltn: hasRequiredCredits && hasPassedBctt,
+      kltnEligibilityReason,
       totalQuota: user.totalQuota,
       quotaUsed: user.quotaUsed,
       isActive: user.isActive,

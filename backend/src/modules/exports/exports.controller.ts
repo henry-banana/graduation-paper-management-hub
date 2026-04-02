@@ -121,6 +121,22 @@ export class ExportsController {
     };
   }
 
+  @Post('minutes/:topicId')
+  @Roles('LECTURER', 'TBM')
+  @ApiOperation({ summary: 'Generate biên bản họp hội đồng bảo vệ (PDF)' })
+  @ApiParam({ name: 'topicId', example: 'tp_001' })
+  @ApiResponse({ status: 201, description: 'Biên bản PDF created', type: ExportResponseDto })
+  async exportMinutes(
+    @Param('topicId') topicId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<{ data: ExportResponseDto; meta: { requestId: string } }> {
+    const result = await this.exportsService.exportMinutes(topicId, user);
+    return {
+      data: result,
+      meta: { requestId: `req_${crypto.randomBytes(8).toString('hex')}` },
+    };
+  }
+
   @Post('topics')
   @Roles('TBM')
   @ApiOperation({ summary: 'Export topic list' })

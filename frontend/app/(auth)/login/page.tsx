@@ -39,7 +39,7 @@ export default function LoginPage() {
             />
           </div>
           <h1 className="text-white text-center font-headline font-bold text-lg tracking-wide drop-shadow-md">
-            TRƯỜNG ĐH SƯ PHẠM KỸ THUẬT TP.HCM
+            TRƯỜNG ĐH CÔNG NGHỆ KỸ THUẬT TP.HCM
           </h1>
           <div className="mt-3 w-56 h-px bg-white/30" />
           <h2 className="text-white/90 text-center font-semibold text-sm tracking-[0.15em] mt-3 uppercase">
@@ -77,7 +77,7 @@ export default function LoginPage() {
 
           <div className="px-8 py-5 border-t border-white/10 text-center">
             <p className="text-white/30 text-xs font-body">
-              © 2024 Trường ĐH Sư phạm Kỹ thuật TP.HCM
+              © 2026 Trường ĐH Công Nghệ Kỹ thuật TP.HCM
             </p>
           </div>
         </div>

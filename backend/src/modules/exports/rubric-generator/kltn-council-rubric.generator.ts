@@ -93,7 +93,7 @@ export async function generateKltnCouncilRubricDocx(data: KltnCouncilRubricData)
       {
         children: [
           new Paragraph({
-            children: [new TextRun({ text: 'TRƯỜNG ĐẠI HỌC SƯ PHẠM KỸ THUẬT TP.HCM', bold: true, size: 24, color: '0070C0' })],
+            children: [new TextRun({ text: 'TRƯỜNG ĐẠI HỌC CÔNG NGHỆ KỸ THUẬT TP.HCM', bold: true, size: 24, color: '0070C0' })],
             alignment: AlignmentType.CENTER,
           }),
           new Paragraph({

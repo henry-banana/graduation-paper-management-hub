@@ -12,12 +12,16 @@ import { GoogleSheetsClient, SheetRow } from './google-sheets.client';
  */
 export abstract class SheetsBaseRepository<T extends { id: string }> {
   protected readonly logger: Logger;
+  /** Column index (0-based) where the entity's `id` is stored in the sheet row */
+  protected readonly idColumnIndex: number;
 
   constructor(
     protected readonly sheetsClient: GoogleSheetsClient,
     protected readonly sheetName: string,
+    idColumnIndex = 0,
   ) {
     this.logger = new Logger(`${sheetName}Repository`);
+    this.idColumnIndex = idColumnIndex;
   }
 
   /** Convert a Sheets row (string[]) to domain entity */
@@ -30,7 +34,10 @@ export abstract class SheetsBaseRepository<T extends { id: string }> {
   async findAll(): Promise<T[]> {
     const rows = await this.sheetsClient.getRows(this.sheetName);
     return rows
-      .filter((r) => r.values[0] !== '__DELETED__' && r.values[0])
+      .filter((r) => {
+        const idCell = r.values[this.idColumnIndex];
+        return idCell !== '__DELETED__' && idCell;
+      })
       .map((r) => this.fromRow(r));
   }
 
@@ -38,7 +45,7 @@ export abstract class SheetsBaseRepository<T extends { id: string }> {
   async findById(id: string): Promise<T | null> {
     const rows = await this.sheetsClient.getRows(this.sheetName);
     const row = rows.find(
-      (r) => r.values[0] === id && r.values[0] !== '__DELETED__',
+      (r) => r.values[this.idColumnIndex] === id && r.values[this.idColumnIndex] !== '__DELETED__',
     );
     return row ? this.fromRow(row) : null;
   }
@@ -76,7 +83,7 @@ export abstract class SheetsBaseRepository<T extends { id: string }> {
   /** Update an existing entity by id */
   async update(id: string, updated: T): Promise<T> {
     const rows = await this.sheetsClient.getRows(this.sheetName);
-    const row = rows.find((r) => r.values[0] === id);
+    const row = rows.find((r) => r.values[this.idColumnIndex] === id);
     if (!row) {
       throw new Error(`${this.sheetName}: row with id=${id} not found`);
     }
@@ -97,7 +104,7 @@ export abstract class SheetsBaseRepository<T extends { id: string }> {
   /** Soft delete by marking row as __DELETED__ */
   async softDelete(id: string): Promise<void> {
     const rows = await this.sheetsClient.getRows(this.sheetName);
-    const row = rows.find((r) => r.values[0] === id);
+    const row = rows.find((r) => r.values[this.idColumnIndex] === id);
     if (!row) throw new Error(`${this.sheetName}: id=${id} not found`);
     await this.sheetsClient.markRowDeleted(this.sheetName, row.sheetRowNumber);
     this.logger.log(`Soft-deleted ${this.sheetName} id=${id}`);

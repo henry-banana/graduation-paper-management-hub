@@ -3,7 +3,7 @@ import { SheetsBaseRepository } from '../sheets-base.repository';
 import { GoogleSheetsClient, SheetRow } from '../google-sheets.client';
 import { SHEET_NAMES } from '../sheets.constants';
 import type { NotificationRecord } from '../../../modules/notifications/notifications.service';
-import type { NotificationType } from '../../../modules/notifications/dto';
+import type { NotificationScope, NotificationType } from '../../../modules/notifications/dto';
 
 @Injectable()
 export class NotificationsRepository extends SheetsBaseRepository<NotificationRecord> {
@@ -17,6 +17,7 @@ export class NotificationsRepository extends SheetsBaseRepository<NotificationRe
     return {
       id: this.str(v[0]),
       receiverUserId: this.str(v[1]),
+      scope: this.parseScope(this.optionalStr(v[10]), this.str(v[1])),
       topicId: this.optionalStr(v[2]),
       type: this.parseType(this.str(v[3])),
       title: this.str(v[4]),
@@ -40,6 +41,7 @@ export class NotificationsRepository extends SheetsBaseRepository<NotificationRe
       entity.isRead,
       this.str(entity.createdAt),
       this.str(entity.readAt ?? ''),
+      this.str(entity.scope ?? this.deriveScopeFromReceiver(entity.receiverUserId)),
     ];
   }
 
@@ -50,14 +52,39 @@ export class NotificationsRepository extends SheetsBaseRepository<NotificationRe
       'TOPIC_PENDING',
       'DEADLINE_SET',
       'DEADLINE_REMINDER',
+      'DEADLINE_OVERDUE',
+      'REVISION_ROUND_OPENED',
+      'REVISION_ROUND_CLOSED',
       'SUBMISSION_UPLOADED',
+      'SUBMISSION_CONFIRMED',
       'SCORE_SUBMITTED',
       'SCORE_PUBLISHED',
       'ASSIGNMENT_ADDED',
+      'SYSTEM',
       'GENERAL',
     ];
     return valid.includes(value as NotificationType)
       ? (value as NotificationType)
       : 'GENERAL';
+  }
+
+  private parseScope(
+    value: string | undefined,
+    receiverUserId: string,
+  ): NotificationScope {
+    if (value === 'GLOBAL' || value === 'PERSONAL') {
+      return value;
+    }
+
+    return this.deriveScopeFromReceiver(receiverUserId);
+  }
+
+  private deriveScopeFromReceiver(receiverUserId: string): NotificationScope {
+    const normalized = receiverUserId.trim().toUpperCase();
+    if (!normalized || ['ALL', 'COMMON', 'GLOBAL', 'PUBLIC', '*'].includes(normalized)) {
+      return 'GLOBAL';
+    }
+
+    return 'PERSONAL';
   }
 }

@@ -8,14 +8,24 @@ interface FileUploadProps {
   onUpload: (file: File) => Promise<void> | void;
   accept?: string;
   maxSize?: number; // in MB
+  requireConfirmation?: boolean;
+  confirmButtonText?: string;
 }
 
-export function FileUpload({ onUpload, accept = ".pdf,.docx,.zip", maxSize = 50 }: FileUploadProps) {
+export function FileUpload({
+  onUpload,
+  accept = ".pdf,.docx,.zip",
+  maxSize = 50,
+  requireConfirmation = true,
+  confirmButtonText = "Xác nhận nộp file",
+}: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [isReadyToUpload, setIsReadyToUpload] = useState(false);
+  const [isUploaded, setIsUploaded] = useState(false);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -47,6 +57,45 @@ export function FileUpload({ onUpload, accept = ".pdf,.docx,.zip", maxSize = 50 
     return true;
   };
 
+  const processFile = async (selectedFile: File) => {
+    setIsUploading(true);
+    setIsReadyToUpload(false);
+    setIsUploaded(false);
+    setProgress(20);
+    setError(null);
+
+    try {
+      setProgress(55);
+      await onUpload(selectedFile);
+      setProgress(100);
+      setIsUploaded(true);
+    } catch (uploadError) {
+      const message =
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Tải file thất bại. Vui lòng thử lại.";
+      setError(message);
+      setProgress(0);
+      setIsReadyToUpload(true);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleCandidateFile = (selectedFile: File) => {
+    setFile(selectedFile);
+    setError(null);
+    setProgress(0);
+    setIsUploaded(false);
+
+    if (requireConfirmation) {
+      setIsReadyToUpload(true);
+      return;
+    }
+
+    void processFile(selectedFile);
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -59,7 +108,7 @@ export function FileUpload({ onUpload, accept = ".pdf,.docx,.zip", maxSize = 50 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const selectedFile = e.dataTransfer.files[0];
       if (validateFile(selectedFile)) {
-        void processFile(selectedFile);
+        handleCandidateFile(selectedFile);
       }
     }
   };
@@ -72,32 +121,17 @@ export function FileUpload({ onUpload, accept = ".pdf,.docx,.zip", maxSize = 50 
     if (e.target.files && e.target.files.length > 0) {
       const selectedFile = e.target.files[0];
       if (validateFile(selectedFile)) {
-        void processFile(selectedFile);
+        handleCandidateFile(selectedFile);
       }
     }
   };
 
-  const processFile = async (selectedFile: File) => {
-    setFile(selectedFile);
-    setIsUploading(true);
-    setProgress(20);
-    setError(null);
-
-    try {
-      setProgress(55);
-      await onUpload(selectedFile);
-      setProgress(100);
-    } catch (uploadError) {
-      const message =
-        uploadError instanceof Error
-          ? uploadError.message
-          : "Tải file thất bại. Vui lòng thử lại.";
-      setError(message);
-      setFile(null);
-      setProgress(0);
-    } finally {
-      setIsUploading(false);
+  const confirmUpload = () => {
+    if (!file || isUploading) {
+      return;
     }
+
+    void processFile(file);
   };
 
   const reset = () => {
@@ -105,6 +139,8 @@ export function FileUpload({ onUpload, accept = ".pdf,.docx,.zip", maxSize = 50 
     setError(null);
     setProgress(0);
     setIsUploading(false);
+    setIsReadyToUpload(false);
+    setIsUploaded(false);
   };
 
   return (
@@ -181,7 +217,13 @@ export function FileUpload({ onUpload, accept = ".pdf,.docx,.zip", maxSize = 50 
             
             <div className="flex items-center gap-4 relative z-10">
               <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0 text-primary">
-                {isUploading ? <Loader2 className="w-6 h-6 animate-spin" /> : <File className="w-6 h-6" />}
+                {isUploading ? (
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                ) : isUploaded ? (
+                  <CheckCircle className="w-6 h-6" />
+                ) : (
+                  <File className="w-6 h-6" />
+                )}
               </div>
               
               <div className="flex-1 min-w-0">
@@ -190,24 +232,45 @@ export function FileUpload({ onUpload, accept = ".pdf,.docx,.zip", maxSize = 50 
                   <span className="text-xs text-outline">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
                   {isUploading ? (
                     <span className="text-xs font-medium text-primary">Đang tải lên... {progress}%</span>
-                  ) : (
+                  ) : isUploaded ? (
                     <span className="flex items-center gap-1 text-xs font-medium text-green-600">
                       <CheckCircle className="w-3.5 h-3.5" /> Thành công
                     </span>
+                  ) : isReadyToUpload ? (
+                    <span className="text-xs font-medium text-primary">Đã chọn file, chờ xác nhận nộp</span>
+                  ) : (
+                    <span className="text-xs font-medium text-outline">Sẵn sàng tải lên</span>
                   )}
                 </div>
+                {error && !isUploading && (
+                  <p className="mt-1 text-xs text-error">{error}</p>
+                )}
               </div>
-              
-              {!isUploading && (
-                <button 
-                  onClick={reset}
-                  className="p-2 text-outline hover:text-error hover:bg-error/10 rounded-lg transition-colors"
-                  title="Xóa file"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              )}
             </div>
+
+            {!isUploading && (
+              <div className="relative z-10 mt-4 flex flex-wrap items-center gap-2">
+                {isReadyToUpload && !isUploaded && (
+                  <button
+                    type="button"
+                    onClick={confirmUpload}
+                    className="inline-flex items-center gap-2 bg-primary text-white font-semibold px-4 py-2 rounded-xl hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95 text-sm"
+                  >
+                    <Upload className="w-4 h-4" />
+                    {confirmButtonText}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant/20 text-sm font-semibold text-outline hover:text-error hover:border-error/30 hover:bg-error/10 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                  {isUploaded ? "Nộp file khác" : "Chọn file khác"}
+                </button>
+              </div>
+            )}
             
             {isUploading && (
               <div className="absolute bottom-0 left-0 right-0 h-1 bg-surface-container">

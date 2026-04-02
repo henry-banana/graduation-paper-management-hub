@@ -41,12 +41,12 @@ export class GetTopicsQueryDto {
   state?: TopicState;
 
   @ApiPropertyOptional({
-    description: 'Filter by role context (e.g., my topics as student, as GVHD)',
-    enum: ['student', 'supervisor', 'reviewer'],
+    description: 'Filter by role context',
+    enum: ['student', 'supervisor', 'reviewer', 'gvhd', 'gvpb', 'tv_hd', 'ct_hd', 'tbm'],
   })
   @IsOptional()
-  @IsIn(['student', 'supervisor', 'reviewer'])
-  role?: 'student' | 'supervisor' | 'reviewer';
+  @IsIn(['student', 'supervisor', 'reviewer', 'gvhd', 'gvpb', 'tv_hd', 'ct_hd', 'tbm'])
+  role?: 'student' | 'supervisor' | 'reviewer' | 'gvhd' | 'gvpb' | 'tv_hd' | 'ct_hd' | 'tbm';
 
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()

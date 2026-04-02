@@ -32,6 +32,8 @@ export class TopicsRepository extends SheetsBaseRepository<TopicRecord> {
       approvalDeadlineAt: this.optionalStr(v[9]),
       submitStartAt: this.optionalStr(v[10]),
       submitEndAt: this.optionalStr(v[11]),
+      reasonRejected: this.optionalStr(v[12]),
+      revisionsAllowed: this.optionalStr(v[13]),
       createdAt: this.str(v[14]),
       updatedAt: this.str(v[15]),
     };
@@ -51,8 +53,8 @@ export class TopicsRepository extends SheetsBaseRepository<TopicRecord> {
       this.str(entity.approvalDeadlineAt ?? ''),
       this.str(entity.submitStartAt ?? ''),
       this.str(entity.submitEndAt ?? ''),
-      '',
-      '',
+      this.str(entity.reasonRejected ?? ''),
+      this.str(entity.revisionsAllowed ?? ''),
       this.str(entity.createdAt),
       this.str(entity.updatedAt),
     ];

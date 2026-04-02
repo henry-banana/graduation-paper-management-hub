@@ -8,6 +8,6 @@ export const SCORE_STATUSES = ['DRAFT', 'SUBMITTED'] as const;
 
 export const SCORE_RESULTS = ['PASS', 'FAIL', 'PENDING'] as const;
 
-export const SCORE_ALLOWED_TOPIC_STATES = ['GRADING', 'SCORING'] as const;
+export const SCORE_ALLOWED_TOPIC_STATES = ['GRADING', 'SCORING', 'DEFENSE', 'COMPLETED'] as const;
 
 export const SCORE_PASS_THRESHOLD = 5;

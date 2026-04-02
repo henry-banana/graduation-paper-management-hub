@@ -1,738 +1,369 @@
-import { Logger } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from '../app.module';
-import {
-  AssignmentsRepository,
-  AuditLogsRepository,
-  ExportFilesRepository,
-  GoogleSheetsClient,
-  NotificationsRepository,
-  PeriodsRepository,
-  SchedulesRepository,
-  ScoreSummariesRepository,
-  ScoresRepository,
-  SubmissionsRepository,
-  TopicsRepository,
-  UsersRepository,
-} from '../infrastructure/google-sheets';
-import { SHEET_NAMES } from '../infrastructure/google-sheets/sheets.constants';
-import type { UserRecord } from '../modules/users/users.service';
-import type { PeriodRecord } from '../modules/periods/periods.service';
-import type { TopicRecord } from '../modules/topics/topics.service';
-import type { AssignmentRecord } from '../modules/assignments/assignments.service';
-import type { SubmissionRecord } from '../modules/submissions/submissions.service';
-import type {
-  ScoreRecord,
-  ScoreSummaryRecord,
-} from '../modules/scores/scores.service';
-import type { NotificationRecord } from '../modules/notifications/notifications.service';
-import type { ExportRecord } from '../modules/exports/exports.service';
-import type { ScheduleRecord } from '../modules/schedules/schedules.service';
-import type { AuditLogRecord } from '../modules/audit/audit.service';
+/**
+ * seed-sheets.ts — Schema v3.2
+ * ─────────────────────────────────────────────────────────────
+ * Usage:
+ *   npm run seed:sheets              (upsert — keeps existing data)
+ *   npm run seed:sheets:reset        (CLEAR app data tabs then seed)
+ *   npm run seed:sheets:validate     (read-only: count rows per tab)
+ *
+ * Tab names now match teacher's Google Sheet EXACTLY:
+ *   Data, Dot, Trangthaidetai, Điểm, TenDetai, Bienban,
+ *   BB GVHD - Ứng dụng, BB GVHD - NC, BB GVPB - Ứng dụng,
+ *   BB GVPB - NC, Chấm điểm của HĐồng, Quota, Major, Detaigoiy
+ *
+ * App-specific tabs:
+ *   Topics, RevisionRounds, ScoreSummaries, Notifications,
+ *   Schedules, AuditLogs, SystemConfig
+ * ─────────────────────────────────────────────────────────────
+ */
 
-type Repo<T extends { id: string }> = {
-  findById(id: string): Promise<T | null>;
-  create(entity: T): Promise<T>;
-  update(id: string, entity: T): Promise<T>;
+import 'dotenv/config';
+import { google, sheets_v4 } from 'googleapis';
+
+// ─── Auth ────────────────────────────────────────────────────
+const EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? '';
+const RAW_KEY = process.env.GOOGLE_PRIVATE_KEY ?? '';
+const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID ?? '';
+
+if (!EMAIL || !RAW_KEY || !SPREADSHEET_ID) {
+  console.error('❌  Missing env vars: GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_SPREADSHEET_ID');
+  process.exit(1);
+}
+
+const privateKey = RAW_KEY.replace(/\\n/g, '\n');
+const auth = new google.auth.JWT(EMAIL, undefined, privateKey, [
+  'https://www.googleapis.com/auth/spreadsheets',
+]);
+const sheets: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
+
+// ─── Helpers ─────────────────────────────────────────────────
+function now(): string {
+  return new Date().toISOString();
+}
+
+type Row = (string | number | boolean | null)[];
+
+async function ensureTab(sheetName: string, headers: string[]): Promise<void> {
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+  const existing = (spreadsheet.data.sheets ?? []).map((s) => s.properties?.title ?? '');
+  if (!existing.some((t) => t.trim() === sheetName.trim())) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
+    });
+    console.log(`  📋  Created tab: ${sheetName}`);
+  }
+  // Write / overwrite header row
+  const lastCol = columnName(headers.length);
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${sheetName}'!A1:${lastCol}1`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [headers] },
+  });
+}
+
+async function clearData(sheetName: string): Promise<void> {
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${sheetName}'!A2:ZZ`,
+  });
+}
+
+async function appendRows(sheetName: string, rows: Row[]): Promise<void> {
+  if (!rows.length) return;
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${sheetName}'!A1`,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: rows },
+  });
+}
+
+async function countRows(sheetName: string): Promise<number> {
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `'${sheetName}'!A2:A`,
+      valueRenderOption: 'UNFORMATTED_VALUE',
+    });
+    return (res.data.values ?? []).filter((r) => r[0]).length;
+  } catch {
+    return -1; // tab doesn't exist
+  }
+}
+
+function columnName(n: number): string {
+  let name = '';
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    name = String.fromCharCode(65 + m) + name;
+    n = Math.floor((n - m) / 26);
+  }
+  return name || 'A';
+}
+
+// ─── Schema v3.2 — Tab Headers ───────────────────────────────
+const SHEETS: Record<string, string[]> = {
+  // ── Teacher tabs ──
+  'Data': [
+    'Email', 'MS', 'Ten', 'Role', 'Major', 'HeDaoTao',
+    'id', 'phone', 'completedBcttScore', 'totalQuota', 'quotaUsed', 'expertise', 'isActive', 'createdAt',
+    'earnedCredits', 'requiredCredits',
+  ],
+  'Dot': [
+    'StartReg', 'EndReg', 'Loaidetai', 'Major', 'Dot', 'Active', 'StartEx', 'EndEx',
+    'id', 'createdAt', 'updatedAt',
+  ],
+  'Trangthaidetai': [
+    'EmailSV', 'EmailGV', 'Role', 'Diadiem', 'Diem', 'End',
+    'id', 'topicId', 'userId', 'status', 'assignedAt', 'revokedAt',
+  ],
+  'Điểm': [
+    'Email', 'Tên SV', 'MSSV', 'Tên Đề tài', 'GV', 'Role',
+    'TC1', 'TC2', 'TC3', 'TC4', 'TC5', 'TC6', 'TC7', 'TC8', 'TC9', 'TC10',
+    'id', 'topicId', 'scorerUserId', 'scorerRole', 'status',
+    'totalScore', 'rubricData', 'allowDefense', 'questions', 'submittedAt', 'updatedAt',
+  ],
+  'BB GVHD - Ứng dụng': ['Tên TC', 'Điểm tối đa', 'id', 'code', 'order', 'scorerRole'],
+  'BB GVHD - NC':        ['Tên TC', 'Điểm tối đa', 'id', 'code', 'order', 'scorerRole'],
+  'BB GVPB - Ứng dụng': ['Tên TC', 'Điểm tối đa', 'id', 'code', 'order', 'scorerRole'],
+  'BB GVPB - NC':        ['Tên TC', 'Điểm tối đa', 'id', 'code', 'order', 'scorerRole'],
+  'Chấm điểm của HĐồng': ['Tên TC', 'Mô tả', 'id', 'code', 'order', 'scorerRole'],
+  'TenDetai': [
+    'EmailSV', 'Tendetai', 'DotHK', 'Loaidetai', 'Version', 'Linkbai',
+    'id', 'topicId', 'uploaderUserId', 'fileType',
+    'revisionRoundId', 'revisionRoundNumber', 'versionNumber', 'versionLabel', 'status',
+    'deadlineAt', 'confirmedAt', 'isLocked', 'canReplace',
+    'driveFileId', 'uploadedAt', 'originalFileName', 'fileSize',
+  ],
+  'Bienban': [
+    'Email', 'Bienban',
+    'id', 'topicId', 'exportType', 'status', 'driveFileId',
+    'driveLink', 'downloadUrl', 'fileName', 'mimeType',
+    'errorMessage', 'requestedBy', 'createdAt', 'completedAt',
+  ],
+  'Quota':    ['Email', 'Major', 'HeDaoTao', 'Quota'],
+  'Major':    ['Email', 'Major', 'Field'],
+  'Detaigoiy': ['Email', 'Tendetai', 'Dot', 'id', 'lecturerUserId', 'createdAt'],
+
+  // ── App-specific tabs ──
+  'Topics': [
+    'id', 'periodId', 'type', 'title', 'domain', 'companyName',
+    'studentUserId', 'supervisorUserId', 'state',
+    'approvalDeadlineAt', 'submitStartAt', 'submitEndAt',
+    'reasonRejected', 'revisionsAllowed', 'createdAt', 'updatedAt',
+  ],
+  'RevisionRounds': [
+    'id', 'topicId', 'roundNumber', 'status', 'startAt',
+    'endAt', 'requestedBy', 'reason', 'createdAt', 'updatedAt',
+  ],
+  'ScoreSummaries': [
+    'id', 'topicId', 'gvhdScore', 'gvpbScore', 'councilAvgScore',
+    'finalScore', 'result', 'confirmedByGvhd', 'confirmedByCtHd', 'published', 'updatedAt',
+  ],
+  'Notifications': [
+    'id', 'receiverUserId', 'topicId', 'type', 'title', 'body',
+    'deepLink', 'isRead', 'createdAt', 'readAt', 'scope',
+  ],
+  'Schedules': [
+    'id', 'topicId', 'defenseAt', 'locationType', 'locationDetail',
+    'notes', 'createdBy', 'createdAt', 'updatedAt',
+  ],
+  'AuditLogs': ['id', 'action', 'actorId', 'actorRole', 'topicId', 'detail', 'createdAt'],
+  'SystemConfig': ['key', 'value', 'description', 'updatedAt'],
 };
 
-const logger = new Logger('SeedSheets');
+// ─── Seed Data (v3.2 layout) ──────────────────────────────────
+const T = now();
+const PERIOD_ID = 'period-2025-1';
+const PERIOD_ID2 = 'period-2025-2';
 
-function isoHoursFromNow(offset: number): string {
-  return new Date(Date.now() + offset * 60 * 60 * 1000).toISOString();
-}
+// Data tab: Email, MS, Ten, Role, Major, HeDaoTao, id, phone, completedBcttScore, totalQuota, quotaUsed, expertise, isActive, createdAt, earnedCredits, requiredCredits
+const DATA_ROWS: Row[] = [
+  // Students (Role=SV) — earnedCredits / requiredCredits for KLTN eligibility
+  ['haitrann218@gmail.com',                'SV21004', 'Nguyễn Hải Trân',   'SV',  'CNPM', 'Chính quy', 'u-sv-004', '0901111004', 7.5, '', '', '',           'TRUE', T, 120, 120],
+  ['nguyen.van.an@student.hcmute.edu.vn',  'SV21001', 'Nguyễn Văn An',     'SV',  'CNPM', 'Chính quy', 'u-sv-001', '0901111001', 7.5, '', '', '',           'TRUE', T, 120, 120],
+  ['tran.thi.bich@student.hcmute.edu.vn',  'SV21002', 'Trần Thị Bích',     'SV',  'CNPM', 'Chính quy', 'u-sv-002', '0901111002', 6.0, '', '', '',           'TRUE', T, 100, 120],
+  // Lecturers (Role=GV)
+  ['phan.van.duc@hcmute.edu.vn',    'GV001', 'PGS.TS Phan Văn Đức', 'GV',  'CNPM', '', 'u-gv-001', '0902221001', '', 5, 2, 'AI, ML',           'TRUE', T, '', ''],
+  ['nguyen.thi.em@hcmute.edu.vn',   'GV002', 'TS. Nguyễn Thị Em',   'GV',  'CNPM', '', 'u-gv-002', '0902221002', '', 4, 0, 'Web, Mobile',       'TRUE', T, '', ''],
+  ['hoang.van.phu@hcmute.edu.vn',   'GV003', 'TS. Hoàng Văn Phú',   'GV',  'KTMT', '', 'u-gv-003', '0902221003', '', 6, 1, 'Mạng, Hệ thống',   'TRUE', T, '', ''],
+  ['vo.thi.giang@hcmute.edu.vn',    'GV004', 'ThS. Võ Thị Giang',   'GV',  'CNPM', '', 'u-gv-004', '0902221004', '', 3, 0, '',                 'TRUE', T, '', ''],
+  // TBM
+  ['tbm.cnpm@hcmute.edu.vn',        'TBM001', 'Trưởng BM CNPM',     'TBM', 'CNPM', '', 'u-tbm-001', '0903331001', '', '', '', '',               'TRUE', T, '', ''],
+];
 
-async function upsertMany<T extends { id: string }>(
-  repo: Repo<T>,
-  items: T[],
-): Promise<void> {
-  for (const item of items) {
-    const existing = await repo.findById(item.id);
-    if (existing) {
-      await repo.update(item.id, item);
-    } else {
-      await repo.create(item);
+const PERIOD_ID3 = 'period-2025-3';
+
+// Dot tab: StartReg, EndReg, Loaidetai, Major, Dot, Active, StartEx, EndEx, id, createdAt, updatedAt
+// Dates must be OPEN (today is 2026-04-02) for registration to work
+const DOT_ROWS: Row[] = [
+  ['2026-01-01', '2026-12-31', 'BCTT', 'CNPM', 'HK1-2025-2026', 'TRUE', '2026-03-01', '2026-12-31', PERIOD_ID3,  T, T],
+  ['2026-01-01', '2026-12-31', 'KLTN', 'CNPM', 'HK2-2025-2026', 'TRUE', '2026-04-01', '2026-12-31', PERIOD_ID2, T, T],
+  ['2025-01-01', '2025-06-30', 'BCTT', 'CNPM', 'HK1-2024-2025', 'TRUE', '2025-03-01', '2025-06-15', PERIOD_ID,  T, T],
+];
+
+// Topics tab (app-specific) — only keep topic-001 for demo (u-sv-001), haitrann (u-sv-004) starts clean
+const TOPICS_ROWS: Row[] = [
+  [
+    'topic-001', PERIOD_ID, 'BCTT',
+    'Xây dựng hệ thống quản lý tài liệu nội bộ cho doanh nghiệp',
+    'Phần mềm doanh nghiệp', 'Công ty TNHH Tech Việt',
+    'u-sv-001', 'u-gv-001', 'IN_PROGRESS',
+    '2025-01-15T17:00:00.000Z', '2025-03-01T00:00:00.000Z', '2025-06-15T17:00:00.000Z',
+    '', 2, T, T,
+  ],
+];
+
+// Trangthaidetai tab: EmailSV, EmailGV, Role, Diadiem, Diem, End, id, topicId, userId, status, assignedAt, revokedAt
+const TRANGTHAIDETAI_ROWS: Row[] = [
+  ['nguyen.van.an@student.hcmute.edu.vn',  'phan.van.duc@hcmute.edu.vn',   'GVHD', '', '', '', 'assign-001', 'topic-001', 'u-gv-001', 'ACTIVE', T, ''],
+  ['tran.thi.bich@student.hcmute.edu.vn',  'nguyen.thi.em@hcmute.edu.vn',  'GVHD', '', '', '', 'assign-002', 'topic-002', 'u-gv-002', 'ACTIVE', T, ''],
+  ['nguyen.van.an@student.hcmute.edu.vn',  'phan.van.duc@hcmute.edu.vn',   'GVHD', '', '', '', 'assign-003', 'topic-003', 'u-gv-001', 'ACTIVE', T, ''],
+];
+
+// RevisionRounds tab (app-specific)
+const REVISION_ROUNDS_ROWS: Row[] = [
+  ['rr-001', 'topic-001', 1, 'CLOSED', '2025-03-01T00:00:00.000Z', '2025-06-15T17:00:00.000Z', 'u-tbm-001', 'Kết thúc đợt nộp chính', T, T],
+  ['rr-002', 'topic-001', 2, 'OPEN',   '2025-06-16T00:00:00.000Z', '2025-06-25T17:00:00.000Z', 'u-tbm-001', 'Mở đợt chỉnh sửa bổ sung', T, T],
+];
+
+// TenDetai tab: EmailSV, Tendetai, DotHK, Loaidetai, Version, Linkbai, id, topicId, uploaderUserId, fileType, ...
+const TENDETAI_ROWS: Row[] = [
+  [
+    'nguyen.van.an@student.hcmute.edu.vn',
+    'Xây dựng hệ thống quản lý tài liệu nội bộ cho doanh nghiệp',
+    'HK1-2024-2025', 'BCTT', 1, '', // Version=1, Linkbai=empty (not uploaded yet)
+    'sub-001', 'topic-001', 'u-sv-001', 'REPORT',
+    'rr-001', 1, 1, 'V1', 'CONFIRMED',
+    '2025-06-15T17:00:00.000Z', '2025-06-14T08:00:00.000Z', 'FALSE', 'TRUE',
+    '', T, 'bao_cao_luan_van_v1.pdf', 2145728,
+  ],
+];
+
+// Rubric criteria for BB GVHD - Ứng dụng
+const BB_GVHD_UNG_DUNG_ROWS: Row[] = [
+  ['Thái độ trong quá trình thực hiện',               10, 'tc-gvhd-ung-1', 'TC1', 1, 'GVHD'],
+  ['Chất lượng mở đầu / giới thiệu',                  10, 'tc-gvhd-ung-2', 'TC2', 2, 'GVHD'],
+  ['Chất lượng nội dung chương 1 (Tổng quan)',         10, 'tc-gvhd-ung-3', 'TC3', 3, 'GVHD'],
+  ['Chất lượng nội dung chương 2 (Phân tích, TK)',     10, 'tc-gvhd-ung-4', 'TC4', 4, 'GVHD'],
+  ['Chất lượng nội dung chương 3 (Giải pháp)',         10, 'tc-gvhd-ung-5', 'TC5', 5, 'GVHD'],
+  ['Chất lượng nội dung chương 4 (Kết quả)',           10, 'tc-gvhd-ung-6', 'TC6', 6, 'GVHD'],
+  ['Chất lượng kết luận và đề nghị',                  10, 'tc-gvhd-ung-7', 'TC7', 7, 'GVHD'],
+  ['Hình thức báo cáo (định dạng, trình bày)',         10, 'tc-gvhd-ung-8', 'TC8', 8, 'GVHD'],
+  ['Tính hoàn thiện của sản phẩm / demo',             10, 'tc-gvhd-ung-9', 'TC9', 9, 'GVHD'],
+  ['Tính đúng hạn và tinh thần hợp tác',              10, 'tc-gvhd-ung-10','TC10', 10, 'GVHD'],
+];
+
+// Rubric criteria for Chấm điểm của HĐồng (TV_HD)
+const CHAM_DIEM_HDONG_ROWS: Row[] = [
+  ['Chất lượng nội dung nghiên cứu',           'Đánh giá tính sáng tạo, chiều sâu của đề tài',       'tc-hd-1', 'TC1', 1, 'TV_HD'],
+  ['Trình bày báo cáo',                        'Rõ ràng, mạch lạc, slides chuyên nghiệp',            'tc-hd-2', 'TC2', 2, 'TV_HD'],
+  ['Trả lời câu hỏi hội đồng',                 'Chính xác, tự tin, thể hiện hiểu biết sâu',          'tc-hd-3', 'TC3', 3, 'TV_HD'],
+  ['Hình thức báo cáo viết',                   'Tuân thủ định dạng, ít lỗi chính tả',                'tc-hd-4', 'TC4', 4, 'TV_HD'],
+  ['Ứng dụng thực tiễn và mức độ hoàn thiện',  'Sản phẩm/hệ thống có thể deploy được không',        'tc-hd-5', 'TC5', 5, 'TV_HD'],
+];
+
+// Notifications
+const SV1_ID = 'u-sv-001';
+const NOTIFICATIONS_ROWS: Row[] = [
+  ['notif-001', 'ALL', '', 'SYSTEM', '📢 Thông báo mở đăng ký KLTN HK2 2024-2025', 'Thời gian đăng ký: 01/02/2025 – 15/02/2025.', '/student/notifications/notif-001', 'FALSE', T, '', 'GLOBAL'],
+  ['notif-002', 'ALL', '', 'DEADLINE_REMINDER', '⚠️ Hạn nộp BCTT sắp đến', 'Deadline ngày 15/06/2025 lúc 17:00.', '/student/notifications/notif-002', 'FALSE', T, '', 'GLOBAL'],
+  ['notif-003', SV1_ID, 'topic-001', 'TOPIC_APPROVED', '✅ GVHD đã xác nhận đề tài', 'PGS.TS Phan Văn Đức đã xác nhận hướng dẫn.', '/student/topics/topic-001', 'FALSE', T, '', 'PERSONAL'],
+  ['notif-004', SV1_ID, 'topic-001', 'SUBMISSION_UPLOADED', '📄 Bài nộp đã được ghi nhận', 'File "bao_cao_luan_van_v1.pdf" đã được nhận.', '/student/topics/topic-001', 'TRUE', T, T, 'PERSONAL'],
+  ['notif-005', SV1_ID, 'topic-003', 'SYSTEM', '🔔 Đề tài KLTN đang chờ GVHD xác nhận', 'Vui lòng chờ xác nhận trong vòng 3 ngày làm việc.', '/student/topics/topic-003', 'FALSE', T, '', 'PERSONAL'],
+];
+
+// SystemConfig defaults
+const SYSTEM_CONFIG_ROWS: Row[] = [
+  ['score.weight.gvhd', '0.5', 'Trọng số điểm GVHD trong tổng điểm', T],
+  ['score.weight.gvpb', '0.25', 'Trọng số điểm GVPB trong tổng điểm', T],
+  ['score.weight.council', '0.25', 'Trọng số điểm trung bình hội đồng trong tổng điểm', T],
+  ['score.council.member_count', '1', 'Số thành viên HĐ tham gia chấm (dùng để tính avg)', T],
+  ['submission.max_version_per_round', '10', 'Số phiên bản tối đa cho mỗi revision round', T],
+  ['submission.file_max_size_mb', '50', 'Kích thước file tối đa (MB)', T],
+];
+
+// ─── Main ────────────────────────────────────────────────────
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const isReset = args.includes('--reset');
+  const isValidateOnly = args.includes('--validate-only');
+
+  console.log('\n🚀  KLTN Seed Script — Schema v3.2');
+  console.log(`  Spreadsheet: ${SPREADSHEET_ID}`);
+  console.log(`  Mode: ${isValidateOnly ? 'VALIDATE' : isReset ? 'RESET + SEED' : 'SEED (upsert)'}\n`);
+
+  const tabNames = Object.keys(SHEETS);
+
+  // ── Validate only ──
+  if (isValidateOnly) {
+    console.log('📊  Row counts per tab:');
+    for (const sheetName of tabNames) {
+      const count = await countRows(sheetName);
+      const status = count === -1 ? '⚠️  tab not found' : `${count} rows`;
+      console.log(`  ${sheetName.padEnd(28)} ${status}`);
+    }
+    console.log('\n✅  Validation complete.\n');
+    return;
+  }
+
+  // ── Ensure all tabs exist with correct headers ──
+  console.log('📋  Ensuring tabs and headers...');
+  for (const [sheetName, headers] of Object.entries(SHEETS)) {
+    await ensureTab(sheetName, headers);
+    process.stdout.write(`  ✓ ${sheetName}\n`);
+  }
+
+  // ── Clear if --reset (skip Quota, Major which are teacher-only) ──
+  if (isReset) {
+    const skipClear = new Set(['Quota', 'Major']);
+    console.log('\n🗑️   Clearing data rows (keeping Quota, Major)...');
+    for (const sheetName of tabNames) {
+      if (skipClear.has(sheetName)) {
+        console.log(`  ⏭  ${sheetName} — skipped (read-only ref)`);
+        continue;
+      }
+      await clearData(sheetName);
+      process.stdout.write(`  ✓ ${sheetName} cleared\n`);
     }
   }
-}
 
-async function bootstrap(): Promise<void> {
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: ['log', 'warn', 'error'],
-  });
+  // ── Seed data ──
+  console.log('\n🌱  Seeding data...');
 
-  try {
-    const usersRepository = app.get(UsersRepository);
-    const sheetsClient = app.get(GoogleSheetsClient);
-    const periodsRepository = app.get(PeriodsRepository);
-    const topicsRepository = app.get(TopicsRepository);
-    const assignmentsRepository = app.get(AssignmentsRepository);
-    const submissionsRepository = app.get(SubmissionsRepository);
-    const scoresRepository = app.get(ScoresRepository);
-    const scoreSummariesRepository = app.get(ScoreSummariesRepository);
-    const notificationsRepository = app.get(NotificationsRepository);
-    const exportFilesRepository = app.get(ExportFilesRepository);
-    const schedulesRepository = app.get(SchedulesRepository);
-    const auditLogsRepository = app.get(AuditLogsRepository);
+  const data: [string, Row[]][] = [
+    ['Data', DATA_ROWS],
+    ['Dot', DOT_ROWS],
+    ['Topics', TOPICS_ROWS],
+    ['RevisionRounds', REVISION_ROUNDS_ROWS],
+    ['Trangthaidetai', TRANGTHAIDETAI_ROWS],
+    ['TenDetai', TENDETAI_ROWS],
+    ['BB GVHD - Ứng dụng', BB_GVHD_UNG_DUNG_ROWS],
+    ['Chấm điểm của HĐồng', CHAM_DIEM_HDONG_ROWS],
+    ['Notifications', NOTIFICATIONS_ROWS],
+    ['SystemConfig', SYSTEM_CONFIG_ROWS],
+  ];
 
-    const now = new Date().toISOString();
-
-    await sheetsClient.ensureSheets([
-      {
-        sheetName: SHEET_NAMES.USERS,
-        headers: [
-          'id',
-          'email',
-          'name',
-          'role',
-          'studentId',
-          'lecturerId',
-          'department',
-          'earnedCredits',
-          'requiredCredits',
-          'completedBcttScore',
-          'totalQuota',
-          'quotaUsed',
-          'phone',
-          'isActive',
-          'createdAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.PERIODS,
-        headers: [
-          'id',
-          'code',
-          'type',
-          'openDate',
-          'closeDate',
-          'status',
-          'createdAt',
-          'updatedAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.TOPICS,
-        headers: [
-          'id',
-          'periodId',
-          'type',
-          'title',
-          'domain',
-          'companyName',
-          'studentUserId',
-          'supervisorUserId',
-          'state',
-          'approvalDeadlineAt',
-          'submitStartAt',
-          'submitEndAt',
-          'reasonRejected',
-          'revisionsAllowed',
-          'createdAt',
-          'updatedAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.ASSIGNMENTS,
-        headers: [
-          'id',
-          'topicId',
-          'userId',
-          'topicRole',
-          'status',
-          'assignedAt',
-          'revokedAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.SUBMISSIONS,
-        headers: [
-          'id',
-          'topicId',
-          'uploaderUserId',
-          'fileType',
-          'version',
-          'driveFileId',
-          'driveLink',
-          'uploadedAt',
-          'originalFileName',
-          'fileSize',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.SCORES,
-        headers: [
-          'id',
-          'topicId',
-          'scorerUserId',
-          'scorerRole',
-          'status',
-          'totalScore',
-          'rubricData',
-          'allowDefense',
-          'questions',
-          'submittedAt',
-          'updatedAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.SCORE_SUMMARIES,
-        headers: [
-          'id',
-          'topicId',
-          'gvhdScore',
-          'gvpbScore',
-          'councilAvgScore',
-          'finalScore',
-          'result',
-          'confirmedByGvhd',
-          'confirmedByCtHd',
-          'published',
-          'updatedAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.NOTIFICATIONS,
-        headers: [
-          'id',
-          'receiverUserId',
-          'topicId',
-          'type',
-          'title',
-          'body',
-          'deepLink',
-          'isRead',
-          'createdAt',
-          'readAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.EXPORT_FILES,
-        headers: [
-          'id',
-          'topicId',
-          'exportType',
-          'status',
-          'driveFileId',
-          'driveLink',
-          'downloadUrl',
-          'fileName',
-          'mimeType',
-          'errorMessage',
-          'requestedBy',
-          'createdAt',
-          'completedAt',
-          'expiresAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.SCHEDULES,
-        headers: [
-          'id',
-          'topicId',
-          'defenseAt',
-          'locationType',
-          'locationDetail',
-          'notes',
-          'createdBy',
-          'createdAt',
-          'updatedAt',
-        ],
-      },
-      {
-        sheetName: SHEET_NAMES.AUDIT_LOGS,
-        headers: [
-          'id',
-          'action',
-          'actorId',
-          'actorRole',
-          'topicId',
-          'detail',
-          'createdAt',
-        ],
-      },
-    ]);
-
-    const users: UserRecord[] = [
-      {
-        id: 'USR001',
-        email: 'student1@hcmute.edu.vn',
-        name: 'Nguyen Van A',
-        role: 'STUDENT',
-        studentId: '20110001',
-        earnedCredits: 125,
-        requiredCredits: 110,
-        completedBcttScore: 7.8,
-        phone: '0901000001',
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR004',
-        email: 'student2@hcmute.edu.vn',
-        name: 'Pham Thi D',
-        role: 'STUDENT',
-        studentId: '20110002',
-        earnedCredits: 108,
-        requiredCredits: 110,
-        completedBcttScore: 0,
-        phone: '0901000002',
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR002',
-        email: 'gvhd1@hcmute.edu.vn',
-        name: 'Tran Van B',
-        role: 'LECTURER',
-        lecturerId: 'GV001',
-        department: 'CNTT',
-        totalQuota: 10,
-        quotaUsed: 2,
-        phone: '0902000001',
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR005',
-        email: 'gvhd2@hcmute.edu.vn',
-        name: 'Hoang Van E',
-        role: 'LECTURER',
-        lecturerId: 'GV002',
-        department: 'CNTT',
-        totalQuota: 10,
-        quotaUsed: 1,
-        phone: '0902000002',
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR006',
-        email: 'gvpb@hcmute.edu.vn',
-        name: 'Le Thi GVPB',
-        role: 'LECTURER',
-        lecturerId: 'GV003',
-        department: 'CNTT',
-        totalQuota: 8,
-        quotaUsed: 1,
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR007',
-        email: 'cthd@hcmute.edu.vn',
-        name: 'Chu tich Hoi dong',
-        role: 'LECTURER',
-        lecturerId: 'GV004',
-        department: 'CNTT',
-        totalQuota: 8,
-        quotaUsed: 1,
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR008',
-        email: 'tkhd@hcmute.edu.vn',
-        name: 'Thu ky Hoi dong',
-        role: 'LECTURER',
-        lecturerId: 'GV005',
-        department: 'CNTT',
-        totalQuota: 8,
-        quotaUsed: 1,
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR009',
-        email: 'tvhd1@hcmute.edu.vn',
-        name: 'Uy vien 1',
-        role: 'LECTURER',
-        lecturerId: 'GV006',
-        department: 'CNTT',
-        totalQuota: 8,
-        quotaUsed: 1,
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR010',
-        email: 'tvhd2@hcmute.edu.vn',
-        name: 'Uy vien 2',
-        role: 'LECTURER',
-        lecturerId: 'GV007',
-        department: 'CNTT',
-        totalQuota: 8,
-        quotaUsed: 1,
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR011',
-        email: 'tvhd3@hcmute.edu.vn',
-        name: 'Uy vien 3',
-        role: 'LECTURER',
-        lecturerId: 'GV008',
-        department: 'CNTT',
-        totalQuota: 8,
-        quotaUsed: 1,
-        isActive: true,
-        createdAt: now,
-      },
-      {
-        id: 'USR003',
-        email: 'tbm@hcmute.edu.vn',
-        name: 'Truong Bo Mon',
-        role: 'TBM',
-        lecturerId: 'GV009',
-        department: 'CNTT',
-        isActive: true,
-        createdAt: now,
-      },
-    ];
-
-    const periods: PeriodRecord[] = [
-      {
-        id: 'prd_2026_hk1_bctt',
-        code: 'HK1-2026-BCTT',
-        type: 'BCTT',
-        openDate: '2026-02-01',
-        closeDate: '2026-12-31',
-        status: 'OPEN',
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        id: 'prd_2026_hk1_kltn',
-        code: 'HK1-2026-KLTN',
-        type: 'KLTN',
-        openDate: '2026-02-01',
-        closeDate: '2026-12-31',
-        status: 'OPEN',
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-
-    const topics: TopicRecord[] = [
-      {
-        id: 'tp_001',
-        periodId: 'prd_2026_hk1_kltn',
-        type: 'KLTN',
-        title: 'Ung dung AI trong quan ly hoc tap',
-        domain: 'Artificial Intelligence',
-        companyName: 'UTE LAB',
-        studentUserId: 'USR001',
-        supervisorUserId: 'USR002',
-        state: 'DEFENSE',
-        approvalDeadlineAt: isoHoursFromNow(24 * 3),
-        submitStartAt: isoHoursFromNow(-72),
-        submitEndAt: isoHoursFromNow(72),
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        id: 'tp_002',
-        periodId: 'prd_2026_hk1_bctt',
-        type: 'BCTT',
-        title: 'He thong quan ly thuc tap doanh nghiep',
-        domain: 'Software Engineering',
-        companyName: 'ABC Tech',
-        studentUserId: 'USR004',
-        supervisorUserId: 'USR005',
-        state: 'IN_PROGRESS',
-        approvalDeadlineAt: isoHoursFromNow(24 * 2),
-        submitStartAt: isoHoursFromNow(-48),
-        submitEndAt: isoHoursFromNow(96),
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-
-    const assignments: AssignmentRecord[] = [
-      {
-        id: 'as_001',
-        topicId: 'tp_001',
-        userId: 'USR002',
-        topicRole: 'GVHD',
-        status: 'ACTIVE',
-        assignedAt: now,
-      },
-      {
-        id: 'as_002',
-        topicId: 'tp_001',
-        userId: 'USR006',
-        topicRole: 'GVPB',
-        status: 'ACTIVE',
-        assignedAt: now,
-      },
-      {
-        id: 'as_003',
-        topicId: 'tp_001',
-        userId: 'USR007',
-        topicRole: 'CT_HD',
-        status: 'ACTIVE',
-        assignedAt: now,
-      },
-      {
-        id: 'as_004',
-        topicId: 'tp_001',
-        userId: 'USR008',
-        topicRole: 'TK_HD',
-        status: 'ACTIVE',
-        assignedAt: now,
-      },
-      {
-        id: 'as_005',
-        topicId: 'tp_001',
-        userId: 'USR009',
-        topicRole: 'TV_HD',
-        status: 'ACTIVE',
-        assignedAt: now,
-      },
-      {
-        id: 'as_006',
-        topicId: 'tp_001',
-        userId: 'USR010',
-        topicRole: 'TV_HD',
-        status: 'ACTIVE',
-        assignedAt: now,
-      },
-      {
-        id: 'as_007',
-        topicId: 'tp_001',
-        userId: 'USR011',
-        topicRole: 'TV_HD',
-        status: 'ACTIVE',
-        assignedAt: now,
-      },
-      {
-        id: 'as_008',
-        topicId: 'tp_002',
-        userId: 'USR005',
-        topicRole: 'GVHD',
-        status: 'ACTIVE',
-        assignedAt: now,
-      },
-    ];
-
-    const submissions: SubmissionRecord[] = [
-      {
-        id: 'sub_001',
-        topicId: 'tp_002',
-        uploaderUserId: 'USR004',
-        fileType: 'REPORT',
-        version: 1,
-        driveFileId: 'drv_seed_sub_001',
-        driveLink: 'https://drive.google.com/file/d/drv_seed_sub_001',
-        uploadedAt: now,
-        originalFileName: 'bctt-report-v1.pdf',
-        fileSize: 1024000,
-      },
-    ];
-
-    const scores: ScoreRecord[] = [
-      {
-        id: 'sc_001',
-        topicId: 'tp_001',
-        scorerUserId: 'USR002',
-        scorerRole: 'GVHD',
-        status: 'SUBMITTED',
-        totalScore: 8.2,
-        rubricData: [
-          { criterion: 'quality', score: 2.1, max: 2.5 },
-          { criterion: 'implementation', score: 3.2, max: 4.0 },
-          { criterion: 'presentation', score: 2.9, max: 3.5 },
-        ],
-        submittedAt: now,
-        updatedAt: now,
-      },
-      {
-        id: 'sc_002',
-        topicId: 'tp_001',
-        scorerUserId: 'USR006',
-        scorerRole: 'GVPB',
-        status: 'SUBMITTED',
-        totalScore: 8.0,
-        rubricData: [
-          { criterion: 'quality', score: 2.0, max: 2.5 },
-          { criterion: 'implementation', score: 3.1, max: 4.0 },
-          { criterion: 'presentation', score: 2.9, max: 3.5 },
-        ],
-        allowDefense: true,
-        questions: [
-          'Dong gop chinh cua de tai voi bai toan thuc te la gi?',
-          'Neu mo rong he thong trong 6 thang toi thi uu tien hang muc nao?',
-        ],
-        submittedAt: now,
-        updatedAt: now,
-      },
-      {
-        id: 'sc_003',
-        topicId: 'tp_001',
-        scorerUserId: 'USR009',
-        scorerRole: 'TV_HD',
-        status: 'SUBMITTED',
-        totalScore: 7.9,
-        rubricData: [
-          { criterion: 'quality', score: 2.0, max: 2.5 },
-          { criterion: 'implementation', score: 3.0, max: 4.0 },
-          { criterion: 'presentation', score: 2.9, max: 3.5 },
-        ],
-        submittedAt: now,
-        updatedAt: now,
-      },
-      {
-        id: 'sc_004',
-        topicId: 'tp_001',
-        scorerUserId: 'USR010',
-        scorerRole: 'TV_HD',
-        status: 'SUBMITTED',
-        totalScore: 8.1,
-        rubricData: [
-          { criterion: 'quality', score: 2.1, max: 2.5 },
-          { criterion: 'implementation', score: 3.1, max: 4.0 },
-          { criterion: 'presentation', score: 2.9, max: 3.5 },
-        ],
-        submittedAt: now,
-        updatedAt: now,
-      },
-      {
-        id: 'sc_005',
-        topicId: 'tp_001',
-        scorerUserId: 'USR011',
-        scorerRole: 'TV_HD',
-        status: 'SUBMITTED',
-        totalScore: 8.3,
-        rubricData: [
-          { criterion: 'quality', score: 2.2, max: 2.5 },
-          { criterion: 'implementation', score: 3.2, max: 4.0 },
-          { criterion: 'presentation', score: 2.9, max: 3.5 },
-        ],
-        submittedAt: now,
-        updatedAt: now,
-      },
-      {
-        id: 'sc_006',
-        topicId: 'tp_002',
-        scorerUserId: 'USR005',
-        scorerRole: 'GVHD',
-        status: 'SUBMITTED',
-        totalScore: 7.6,
-        rubricData: [
-          { criterion: 'thai do', score: 1.5, max: 2 },
-          { criterion: 'hinh thuc', score: 0.8, max: 1 },
-          { criterion: 'mo dau', score: 0.7, max: 1 },
-          { criterion: 'noi dung', score: 3.8, max: 5 },
-          { criterion: 'ket luan', score: 0.8, max: 1 },
-        ],
-        submittedAt: now,
-        updatedAt: now,
-      },
-    ];
-
-    const scoreSummaries: ScoreSummaryRecord[] = [
-      {
-        id: 'sum_001',
-        topicId: 'tp_001',
-        gvhdScore: 8.2,
-        gvpbScore: 8.0,
-        councilAvgScore: 8.1,
-        finalScore: 8.1,
-        result: 'PASS',
-        confirmedByGvhd: true,
-        confirmedByCtHd: true,
-        published: true,
-      },
-    ];
-
-    const notifications: NotificationRecord[] = [
-      {
-        id: 'nt_001',
-        receiverUserId: 'USR001',
-        topicId: 'tp_001',
-        type: 'SCORE_PUBLISHED',
-        title: 'Diem da duoc cong bo',
-        body: 'Diem tong ket de tai tp_001 da duoc cong bo.',
-        deepLink: '/topics/tp_001/scores',
-        isRead: false,
-        createdAt: now,
-      },
-      {
-        id: 'nt_002',
-        receiverUserId: 'USR004',
-        topicId: 'tp_002',
-        type: 'DEADLINE_REMINDER',
-        title: 'Nhac nho deadline',
-        body: 'Con 3 ngay den han nop bao cao.',
-        deepLink: '/topics/tp_002/submissions',
-        isRead: false,
-        createdAt: now,
-      },
-    ];
-
-    const exportsData: ExportRecord[] = [
-      {
-        id: 'exp_001',
-        topicId: 'tp_001',
-        exportType: 'RUBRIC_KLTN',
-        status: 'COMPLETED',
-        driveFileId: 'drv_seed_exp_001',
-        driveLink: 'https://drive.google.com/file/d/drv_seed_exp_001/view',
-        downloadUrl: 'https://drive.google.com/file/d/drv_seed_exp_001/view',
-        fileName: 'rubric_kltn_tp_001.pdf',
-        mimeType: 'application/pdf',
-        requestedBy: 'USR003',
-        createdAt: now,
-        completedAt: now,
-        expiresAt: isoHoursFromNow(24),
-      },
-    ];
-
-    const schedules: ScheduleRecord[] = [
-      {
-        id: 'sch_001',
-        topicId: 'tp_001',
-        defenseAt: isoHoursFromNow(48),
-        locationType: 'OFFLINE',
-        locationDetail: 'Phong A3-201',
-        notes: 'Mang theo ban in khoa luan',
-        createdBy: 'USR003',
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-
-    const auditLogs: AuditLogRecord[] = [
-      {
-        id: 'audit_001',
-        action: 'SCHEDULE_CREATED',
-        actorId: 'USR003',
-        actorRole: 'TBM',
-        topicId: 'tp_001',
-        detail: {
-          scheduleId: 'sch_001',
-          defenseAt: isoHoursFromNow(48),
-        },
-        createdAt: now,
-      },
-    ];
-
-    await upsertMany(usersRepository, users);
-    await upsertMany(periodsRepository, periods);
-    await upsertMany(topicsRepository, topics);
-    await upsertMany(assignmentsRepository, assignments);
-    await upsertMany(submissionsRepository, submissions);
-    await upsertMany(scoresRepository, scores);
-    await upsertMany(scoreSummariesRepository, scoreSummaries);
-    await upsertMany(notificationsRepository, notifications);
-    await upsertMany(exportFilesRepository, exportsData);
-    await upsertMany(schedulesRepository, schedules);
-    await upsertMany(auditLogsRepository, auditLogs);
-
-    logger.log('Seed data upserted successfully to Google Sheets tabs.');
-  } finally {
-    await app.close();
+  for (const [sheetName, rows] of data) {
+    await appendRows(sheetName, rows);
+    console.log(`  ✓ ${sheetName.padEnd(28)} ${rows.length} rows`);
   }
+
+  // ── Summary ──
+  console.log('\n📊  Final row counts:');
+  for (const sheetName of tabNames) {
+    const count = await countRows(sheetName);
+    const status = count === -1 ? '⚠️  not found' : `${count} rows`;
+    console.log(`  ${sheetName.padEnd(28)} ${status}`);
+  }
+
+  console.log('\n✅  Seed complete!\n');
 }
 
-void bootstrap();
+main().catch((err) => {
+  console.error('❌  Seed failed:', err);
+  process.exit(1);
+});

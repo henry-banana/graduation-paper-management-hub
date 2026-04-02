@@ -35,6 +35,7 @@ export class GoogleDriveClient implements OnModuleInit {
   private auth!: JWT | OAuth2Client;
   private initialized = false;
   private readonly userFolderCache = new Map<string, string>();
+  private readonly subfolderCache = new Map<string, string>();
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -366,6 +367,72 @@ export class GoogleDriveClient implements OnModuleInit {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Find or create a named subfolder inside a parent Drive folder.
+   * Results are cached per (parentFolderId + name) to avoid repeated API calls.
+   */
+  async getOrCreateSubfolder(
+    parentFolderId: string,
+    folderName: string,
+  ): Promise<string> {
+    this.assertReady();
+
+    const cacheKey = `${parentFolderId}::${folderName}`;
+    const cached = this.subfolderCache.get(cacheKey);
+    if (cached) return cached;
+
+    const safeName = folderName
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 64) || 'unnamed';
+
+    const q = [
+      `name='${this.escapeDriveQueryLiteral(safeName)}'`,
+      "mimeType='application/vnd.google-apps.folder'",
+      'trashed=false',
+      `'${this.escapeDriveQueryLiteral(parentFolderId)}' in parents`,
+    ].join(' and ');
+
+    const listRes = await this.drive.files.list({
+      q,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      spaces: 'drive',
+      pageSize: 1,
+      fields: 'files(id,name)',
+    });
+
+    const existing = listRes.data.files?.[0]?.id;
+    if (existing) {
+      this.subfolderCache.set(cacheKey, existing);
+      return existing;
+    }
+
+    const createRes = await this.drive.files.create({
+      supportsAllDrives: true,
+      requestBody: {
+        name: safeName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentFolderId],
+      },
+      fields: 'id,name',
+    });
+
+    const created = createRes.data.id;
+    if (!created) {
+      throw new Error(
+        `Could not create Drive subfolder "${safeName}" inside ${parentFolderId}`,
+      );
+    }
+
+    this.subfolderCache.set(cacheKey, created);
+    this.logger.log(
+      `Created Drive subfolder "${safeName}" (${created}) inside ${parentFolderId}`,
+    );
+    return created;
   }
 
   private assertReady(): void {

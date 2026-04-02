@@ -1,11 +1,9 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { X, BookOpen, Clock, CheckSquare, Users, FileText, Bell, ClipboardList, ChevronRight, LogOut } from "lucide-react";
+import { X, BookOpen, Clock, CheckSquare, Users, Bell, ClipboardList, ChevronRight, LogOut, FileText, ExternalLink } from "lucide-react";
 import { clearAuthSession, getCurrentUiRole } from "@/lib/auth/session";
 
 const ROLE_LABELS: Record<string, { label: string; color: string; abbr: string }> = {
@@ -23,7 +21,6 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
   STUDENT: [
     { name: "Thông báo", path: "/student/notifications", icon: Bell },
     { name: "Thông tin sinh viên", path: "/student/profile", icon: Users },
-    { name: "Nộp báo cáo", path: "/student/submissions", icon: FileText },
     { name: "Kết quả điểm", path: "/student/scores", icon: CheckSquare },
     { name: "Đăng ký đề tài", path: "/student/topics/register", icon: BookOpen },
     { name: "Đề tài của tôi", path: "/student/topics", icon: ClipboardList },
@@ -62,16 +59,46 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
   ],
 };
 
+const TERMINAL_STATES = new Set(["COMPLETED", "CANCELLED", "REJECTED"]);
+
+interface ActiveTopicQuick {
+  id: string;
+  title: string;
+  type: string;
+  state: string;
+}
+
 export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (val: boolean) => void }) {
   const router = useRouter();
   const pathname = usePathname();
   const [role, setRole] = useState("STUDENT");
   const [mounted, setMounted] = useState(false);
+  // F4B: active topic quick-link
+  const [activeTopic, setActiveTopic] = useState<ActiveTopicQuick | null>(null);
 
   useEffect(() => {
     setMounted(true);
     setRole(getCurrentUiRole());
   }, []);
+
+  // F4B: fetch active topic for STUDENT
+  useEffect(() => {
+    if (!mounted || role !== "STUDENT") return;
+    const token = localStorage.getItem("kltn_access_token");
+    if (!token) return;
+    void fetch(
+      `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1"}/topics?role=student&page=1&size=20`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+      .then(r => r.ok ? r.json() : null)
+      .then((json: { data?: ActiveTopicQuick[] } | null) => {
+        if (!json) return;
+        const list = json.data ?? [];
+        const found = list.find(t => !TERMINAL_STATES.has(t.state)) ?? null;
+        setActiveTopic(found);
+      })
+      .catch(() => null);
+  }, [mounted, role]);
 
   const handleLogout = () => {
     clearAuthSession();
@@ -106,7 +133,7 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
               <Image src="/logo-ute.png" alt="UTE Logo" fill className="object-contain" />
             </div>
             <div>
-              <h1 className="text-white font-headline font-bold text-sm leading-tight">Sư Phạm KT TP.HCM</h1>
+              <h1 className="text-white font-headline font-bold text-sm leading-tight">Công Nghệ KT TP.HCM</h1>
               <p className="text-white/50 text-[10px] mt-0.5 font-label uppercase tracking-wider">KLTN Hub</p>
             </div>
           </div>
@@ -154,6 +181,29 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
               </Link>
             );
           })}
+
+          {/* F4B: Active topic quick-link (STUDENT only) */}
+          {role === "STUDENT" && activeTopic && (
+            <div className="mt-4 mx-1">
+              <p className="text-white/30 text-[10px] uppercase tracking-widest font-label px-2 mb-2">Đề tài hiện tại</p>
+              <Link
+                href={`/student/submissions?topicId=${activeTopic.id}`}
+                onClick={() => setIsOpen(false)}
+                className="block px-3 py-3 rounded-2xl bg-white/10 border border-white/20 hover:bg-white/15 transition-all group"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-xs font-semibold leading-snug truncate">{activeTopic.title}</p>
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/30 text-white">{activeTopic.type}</span>
+                      <span className="text-[9px] text-white/50">{activeTopic.state}</span>
+                    </div>
+                  </div>
+                  <ExternalLink className="w-3.5 h-3.5 text-white/40 group-hover:text-white/70 flex-shrink-0 mt-0.5 transition-colors" />
+                </div>
+              </Link>
+            </div>
+          )}
         </nav>
 
         {/* Footer: logout */}

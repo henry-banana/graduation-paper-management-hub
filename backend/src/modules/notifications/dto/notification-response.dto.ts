@@ -6,21 +6,35 @@ export type NotificationType =
   | 'TOPIC_PENDING'
   | 'DEADLINE_SET'
   | 'DEADLINE_REMINDER'
+  | 'DEADLINE_OVERDUE'
+  | 'REVISION_ROUND_OPENED'
+  | 'REVISION_ROUND_CLOSED'
   | 'SUBMISSION_UPLOADED'
+  | 'SUBMISSION_CONFIRMED'
   | 'SCORE_SUBMITTED'
   | 'SCORE_PUBLISHED'
   | 'ASSIGNMENT_ADDED'
+  | 'SYSTEM'
   | 'GENERAL';
+
+export type NotificationScope = 'PERSONAL' | 'GLOBAL';
 
 export class NotificationResponseDto {
   @ApiProperty({ description: 'Notification ID', example: 'nt_001' })
   id!: string;
 
   @ApiProperty({
-    description: 'User ID of the receiver',
+    description: 'User ID of the receiver. GLOBAL notifications can use COMMON.',
     example: 'USR001',
   })
   receiverUserId!: string;
+
+  @ApiProperty({
+    description: 'Notification audience scope',
+    enum: ['PERSONAL', 'GLOBAL'],
+    example: 'PERSONAL',
+  })
+  scope!: NotificationScope;
 
   @ApiPropertyOptional({
     description: 'Related topic ID',
@@ -36,10 +50,15 @@ export class NotificationResponseDto {
       'TOPIC_PENDING',
       'DEADLINE_SET',
       'DEADLINE_REMINDER',
+      'DEADLINE_OVERDUE',
+      'REVISION_ROUND_OPENED',
+      'REVISION_ROUND_CLOSED',
       'SUBMISSION_UPLOADED',
+      'SUBMISSION_CONFIRMED',
       'SCORE_SUBMITTED',
       'SCORE_PUBLISHED',
       'ASSIGNMENT_ADDED',
+      'SYSTEM',
       'GENERAL',
     ],
     example: 'TOPIC_APPROVED',

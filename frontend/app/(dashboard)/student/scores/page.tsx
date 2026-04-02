@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Award, TrendingUp, CheckCircle, Star, BarChart2, FileText } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
@@ -24,6 +25,17 @@ interface ScoreSummaryDto {
   published: boolean;
 }
 
+const SCORE_READY_STATES = new Set([
+  "GRADING",
+  "SCORING",
+  "DEFENSE",
+  "COMPLETED",
+]);
+
+function canFetchScoreSummary(topic: TopicDto | null): boolean {
+  return !!topic && SCORE_READY_STATES.has(topic.state);
+}
+
 function toLetterGrade(score: number): string {
   if (score >= 9) {
     return "A+";
@@ -43,7 +55,10 @@ function toLetterGrade(score: number): string {
   return "F";
 }
 
-export default function StudentScoresPage() {
+function StudentScoresContent() {
+  const searchParams = useSearchParams();
+  const requestedTopicId = searchParams.get("topicId")?.trim() ?? "";
+
   const [topics, setTopics] = useState<TopicDto[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string>("");
   const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
@@ -67,7 +82,10 @@ export default function StudentScoresPage() {
 
         setTopics(response.data);
         if (response.data.length > 0) {
-          setSelectedTopicId(response.data[0].id);
+          const requestedTopic = response.data.find(
+            (topic) => topic.id === requestedTopicId,
+          );
+          setSelectedTopicId(requestedTopic?.id ?? response.data[0].id);
         }
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : "Không thể tải danh sách đề tài.";
@@ -78,11 +96,19 @@ export default function StudentScoresPage() {
     };
 
     void loadTopics();
-  }, []);
+  }, [requestedTopicId]);
 
   useEffect(() => {
-    if (!selectedTopicId) {
+    if (!selectedTopicId || !selectedTopic) {
       setSummary(null);
+      setSummaryError(null);
+      return;
+    }
+
+    // Avoid noisy 403 responses for topics that are not in a scoring-ready state.
+    if (!canFetchScoreSummary(selectedTopic)) {
+      setSummary(null);
+      setSummaryError(null);
       return;
     }
 
@@ -96,22 +122,30 @@ export default function StudentScoresPage() {
         setSummary(response.data);
       } catch (loadError) {
         setSummary(null);
-        const message = loadError instanceof Error ? loadError.message : "Chưa có điểm được công bố cho đề tài này.";
+        const message =
+          loadError instanceof Error
+            ? loadError.message
+            : "Chưa có điểm được công bố cho đề tài này.";
+        const normalized = message.toLowerCase();
+
+        if (
+          normalized.includes("not yet published") ||
+          normalized.includes("chưa có điểm") ||
+          normalized.includes("chưa được công bố")
+        ) {
+          setSummaryError(null);
+          return;
+        }
+
         setSummaryError(message);
       }
     };
 
     void loadSummary();
-  }, [selectedTopicId]);
+  }, [selectedTopicId, selectedTopic]);
 
   const totalScore = summary?.finalScore ?? 0;
   const progress = (totalScore / 10) * 100;
-
-  const scoreMilestones = [
-    { label: "Điểm GVHD", icon: "GV", sub: "Giảng viên hướng dẫn", score: summary?.gvhdScore },
-    { label: "Điểm GVPB", icon: "PB", sub: "Giảng viên phản biện", score: summary?.gvpbScore },
-    { label: "Điểm Hội đồng", icon: "HD", sub: "Trung bình Hội đồng", score: summary?.councilAvgScore },
-  ];
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
@@ -139,7 +173,7 @@ export default function StudentScoresPage() {
           >
             {topics.map((topic) => (
               <option key={topic.id} value={topic.id}>
-                {topic.title} ({topic.type})
+                {topic.title} ({topic.type === "BCTT" ? "Báo cáo thực tập" : "Khóa luận tốt nghiệp"})
               </option>
             ))}
           </select>
@@ -208,29 +242,9 @@ export default function StudentScoresPage() {
           ))}
         </div>
 
-        {/* Score breakdown (visual only - student view) */}
-        <div className="px-8 py-6 border-t border-outline-variant/10 space-y-4">
-          <h3 className="text-sm font-semibold text-on-surface-variant uppercase tracking-wider font-label">
-            Các tiêu chí đánh giá
-          </h3>
-          <div className="grid sm:grid-cols-3 gap-4">
-            {scoreMilestones.map((m, i) => (
-              <div key={i} className="bg-surface-container-low rounded-2xl p-4 flex flex-col gap-2">
-                <span className="text-sm font-bold text-primary">{m.icon}</span>
-                <span className="text-sm font-semibold text-on-surface">{m.label}</span>
-                <span className="text-xs text-outline">{m.sub}</span>
-                <div className="w-full bg-surface-container h-1.5 rounded-full mt-2">
-                  <div
-                    className="bg-primary h-full rounded-full"
-                    style={{ width: `${Math.min(((m.score ?? 0) / 10) * 100, 100)}%` }}
-                  ></div>
-                </div>
-                <span className="text-xs text-outline">{m.score != null ? `${m.score.toFixed(2)}/10` : "Chưa có"}</span>
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-outline/60 text-center pt-2">
-            * Chi tiết rubric chấm điểm không được hiển thị với sinh viên theo quy định khoa.
+        <div className="px-8 py-6 border-t border-outline-variant/10">
+          <p className="text-xs text-outline/70 text-center">
+            Sinh viên chỉ được xem điểm tổng hợp sau khi hội đồng công bố chính thức.
           </p>
         </div>
 
@@ -267,5 +281,13 @@ export default function StudentScoresPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function StudentScoresPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-outline">Đang tải...</div>}>
+      <StudentScoresContent />
+    </Suspense>
   );
 }

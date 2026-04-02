@@ -1,0 +1,16 @@
+SV | u-sv-004 | haitrann218@gmail.com | Nguyễn Hải Trân
+SV | u-sv-001 | nguyen.van.an@student.hcmute.edu.vn | Nguyễn Văn An
+SV | u-sv-002 | tran.thi.bich@student.hcmute.edu.vn | Trần Thị Bích
+GV | u-gv-001 | phan.van.duc@hcmute.edu.vn | PGS.TS Phan Văn Đức
+GV | u-gv-002 | nguyen.thi.em@hcmute.edu.vn | TS. Nguyễn Thị Em
+GV | u-gv-003 | hoang.van.phu@hcmute.edu.vn | TS. Hoàng Văn Phú
+GV | u-gv-004 | vo.thi.giang@hcmute.edu.vn | ThS. Võ Thị Giang
+TBM | u-tbm-001 | tbm.cnpm@hcmute.edu.vn | Trưởng BM CNPM
+SV | u-sv-005 | haitrann_kltn@gmail.com | Lê Văn Kiên
+STUDENT | u-import-80323a56 | 323553@student.hcmute.edu.vn | ABC
+LECTURER | u-import-c97e22d2 | thiennd@hcmute.edu.vn | Thầy A
+TBM | u-import-1c74e111 | 123@@hcmute.edu.vn | ?
+LECTURER | u-import-aea22d81 | thienise@gmail.com | Thầy ABC
+STUDENT | u-import-925dcb03 | 23124121@student.hcmute.edu.vn | ?
+STUDENT | u-import-c510b910 | 23124173@student.hcmute.edu.vn | ?
+TBM | u-import-822a8adc | ise.thien@gmail.com | Thầy C

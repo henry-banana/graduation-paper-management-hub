@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
   Clock,
@@ -36,10 +37,15 @@ const UNKNOWN_STATE = {
   icon: Clock,
 };
 
-export default function StudentTopicsPage() {
+const TERMINAL_STATES = new Set(["COMPLETED", "CANCELLED"]);
+
+function StudentTopicsContent() {
+  const searchParams = useSearchParams();
   const [topics, setTopics] = useState<Topic[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const keyword = searchParams.get("q")?.trim().toLowerCase() ?? "";
 
   const loadTopics = useCallback(async () => {
     setIsLoading(true);
@@ -65,8 +71,23 @@ export default function StudentTopicsPage() {
     const total = topics.length;
     const pending = topics.filter((topic) => topic.state === "PENDING_GV").length;
     const completed = topics.filter((topic) => topic.state === "COMPLETED").length;
-    return { total, pending, completed };
+    const active = topics.filter((topic) => !TERMINAL_STATES.has(topic.state)).length;
+    return { total, pending, completed, active };
   }, [topics]);
+
+  const filteredTopics = useMemo(() => {
+    if (!keyword) {
+      return topics;
+    }
+
+    return topics.filter((topic) => {
+      const values = [topic.name, topic.company, topic.gvhdEmail, topic.periodCode, topic.type]
+        .filter(Boolean)
+        .map((value) => value!.toLowerCase());
+
+      return values.some((value) => value.includes(keyword));
+    });
+  }, [keyword, topics]);
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
@@ -76,13 +97,25 @@ export default function StudentTopicsPage() {
           <h1 className="text-2xl font-bold tracking-tight font-headline text-on-surface">Đề tài của tôi</h1>
           <p className="text-sm text-outline mt-1">Danh sách tất cả đề tài bạn đã đăng ký.</p>
         </div>
-        <Link
-          href="/student/topics/register"
-          className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
-        >
-          <PlusCircle className="w-4 h-4" />
-          Đăng ký mới
-        </Link>
+        {stats.active > 0 ? (
+          <button
+            type="button"
+            disabled
+            className="flex items-center gap-2 px-4 py-2.5 bg-surface-container text-outline text-sm font-semibold rounded-xl cursor-not-allowed"
+            title="Bạn đang có đề tài hoạt động, không thể đăng ký mới"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Đang có đề tài hoạt động
+          </button>
+        ) : (
+          <Link
+            href="/student/topics/register"
+            className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Đăng ký mới
+          </Link>
+        )}
       </div>
 
       {/* Stats */}
@@ -137,7 +170,7 @@ export default function StudentTopicsPage() {
                 </tr>
               </thead>
               <tbody>
-                {topics.map((topic) => {
+                {filteredTopics.map((topic) => {
                   const cfg = STATE_CONFIG[topic.state] ?? UNKNOWN_STATE;
                   const Icon = cfg.icon;
                   return (
@@ -177,15 +210,23 @@ export default function StudentTopicsPage() {
               </tbody>
             </table>
 
-            {topics.length === 0 && (
+            {filteredTopics.length === 0 && (
               <div className="flex flex-col items-center gap-3 py-16 text-outline">
                 <BookOpen className="w-10 h-10 text-outline/30" />
-                <p className="text-sm">Bạn chưa có đề tài nào. Hãy đăng ký ngay!</p>
+                <p className="text-sm">{keyword ? "Không tìm thấy đề tài phù hợp với từ khóa." : "Bạn chưa có đề tài nào. Hãy đăng ký ngay!"}</p>
               </div>
             )}
           </>
         )}
       </div>
     </div>
+  );
+}
+
+export default function StudentTopicsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-outline">Đang tải...</div>}>
+      <StudentTopicsContent />
+    </Suspense>
   );
 }

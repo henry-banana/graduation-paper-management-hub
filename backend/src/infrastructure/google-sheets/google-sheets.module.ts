@@ -6,10 +6,13 @@ import {
   ExportFilesRepository,
   NotificationsRepository,
   PeriodsRepository,
+  RevisionRoundsRepository,
+  RubricCriteriaRepository,
   SchedulesRepository,
   ScoreSummariesRepository,
   ScoresRepository,
   SubmissionsRepository,
+  SystemConfigRepository,
   TopicsRepository,
   UsersRepository,
 } from './repositories';
@@ -19,13 +22,16 @@ const repositories = [
   UsersRepository,
   PeriodsRepository,
   TopicsRepository,
+  RevisionRoundsRepository,
   AssignmentsRepository,
   SubmissionsRepository,
   ScoresRepository,
   ScoreSummariesRepository,
+  RubricCriteriaRepository,
   NotificationsRepository,
   ExportFilesRepository,
   SchedulesRepository,
+  SystemConfigRepository,
 ] as const;
 
 @Global()

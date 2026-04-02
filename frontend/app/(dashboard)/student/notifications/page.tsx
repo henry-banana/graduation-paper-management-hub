@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Search,
   Bell,
@@ -16,6 +16,7 @@ import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 
 interface NotificationDto {
   id: string;
+  scope?: "PERSONAL" | "GLOBAL";
   topicId?: string;
   type: string;
   title: string;
@@ -72,6 +73,7 @@ function mapTypeToUi(type: string): UiNotificationType {
     case "TOPIC_REJECTED":
       return "important";
     case "DEADLINE_REMINDER":
+    case "DEADLINE_OVERDUE":
       return "warning";
     case "TOPIC_APPROVED":
     case "SUBMISSION_UPLOADED":
@@ -92,22 +94,6 @@ function formatDateTime(value: string): { date: string; time: string } {
     date: date.toLocaleDateString("vi-VN"),
     time: date.toLocaleTimeString("vi-VN", { hour12: false }),
   };
-}
-
-function resolveNotificationLink(notification: NotificationDto): string | null {
-  if (notification.topicId) {
-    return `/student/topics/${notification.topicId}`;
-  }
-
-  if (!notification.deepLink) {
-    return null;
-  }
-
-  if (notification.deepLink.startsWith("/topics/")) {
-    return `/student${notification.deepLink}`;
-  }
-
-  return notification.deepLink;
 }
 
 function NotifRow({
@@ -150,7 +136,7 @@ function NotifRow({
           >
             {cfg.label}
           </span>
-          <span className="text-xs text-outline">Hệ thống</span>
+          <span className="text-xs text-outline">{item.scope === "GLOBAL" ? "Thông báo chung" : "Cá nhân"}</span>
           <span className="text-xs text-outline/60">
             {formatted.date} {formatted.time}
           </span>
@@ -161,13 +147,18 @@ function NotifRow({
   );
 }
 
-export default function StudentNotificationsPage() {
+function StudentNotificationsContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<"general" | "personal">("general");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(searchParams.get("q") ?? "");
   const [notifications, setNotifications] = useState<NotificationDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSearch(searchParams.get("q") ?? "");
+  }, [searchParams]);
 
   const loadNotifications = async () => {
     setIsLoading(true);
@@ -192,11 +183,19 @@ export default function StudentNotificationsPage() {
   }, []);
 
   const generalNotifications = useMemo(() => {
-    return notifications.filter((notification) => !notification.topicId);
+    return notifications.filter(
+      (notification) =>
+        notification.scope === "GLOBAL" ||
+        (!notification.scope && !notification.topicId),
+    );
   }, [notifications]);
 
   const personalNotifications = useMemo(() => {
-    return notifications.filter((notification) => Boolean(notification.topicId));
+    return notifications.filter(
+      (notification) =>
+        notification.scope === "PERSONAL" ||
+        (!notification.scope && Boolean(notification.topicId)),
+    );
   }, [notifications]);
 
   const list = tab === "general" ? generalNotifications : personalNotifications;
@@ -236,10 +235,7 @@ export default function StudentNotificationsPage() {
         );
       }
 
-      const link = resolveNotificationLink(notification);
-      if (link) {
-        router.push(link);
-      }
+      router.push(`/student/notifications/${notification.id}`);
     } catch (markError) {
       const message =
         markError instanceof Error
@@ -378,5 +374,13 @@ export default function StudentNotificationsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function StudentNotificationsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-outline">Đang tải...</div>}>
+      <StudentNotificationsContent />
+    </Suspense>
   );
 }
