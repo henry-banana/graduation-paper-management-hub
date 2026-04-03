@@ -6,6 +6,7 @@ import {
 import * as crypto from 'crypto';
 import {
   NotificationResponseDto,
+  NotificationScope,
   NotificationType,
   GetNotificationsQueryDto,
 } from './dto';
@@ -15,6 +16,7 @@ import { NotificationsRepository } from '../../infrastructure/google-sheets';
 export interface NotificationRecord {
   id: string;
   receiverUserId: string;
+  scope?: NotificationScope;
   topicId?: string;
   type: NotificationType;
   title: string;
@@ -55,9 +57,33 @@ const NOTIFICATION_TEMPLATES: Record<
     body: (ctx) => `Còn ${ctx.daysLeft} ngày để nộp bài cho đề tài "${ctx.topicTitle}".`,
     deepLinkPattern: '/topics/{topicId}/submissions',
   },
+  DEADLINE_OVERDUE: {
+    title: 'Đề tài đã quá hạn nộp',
+    body: (ctx) =>
+      `Đề tài "${ctx.topicTitle}" đã quá hạn nộp vào ${ctx.deadline}. Vui lòng liên hệ GVHD để được hướng dẫn tiếp theo.`,
+    deepLinkPattern: '/topics/{topicId}/submissions',
+  },
+  REVISION_ROUND_OPENED: {
+    title: 'Đợt chỉnh sửa mới đã mở',
+    body: (ctx) =>
+      `Đợt chỉnh sửa vòng ${ctx.roundNumber} cho đề tài "${ctx.topicTitle}" đã được mở. Hạn nộp: ${ctx.deadline}.`,
+    deepLinkPattern: '/topics/{topicId}/submissions',
+  },
+  REVISION_ROUND_CLOSED: {
+    title: 'Đợt chỉnh sửa đã đóng',
+    body: (ctx) =>
+      `Đợt chỉnh sửa vòng ${ctx.roundNumber} cho đề tài "${ctx.topicTitle}" đã được đóng.`,
+    deepLinkPattern: '/topics/{topicId}/submissions',
+  },
   SUBMISSION_UPLOADED: {
     title: 'File mới được nộp',
     body: (ctx) => `Sinh viên đã nộp ${ctx.fileType} phiên bản ${ctx.version} cho đề tài "${ctx.topicTitle}".`,
+    deepLinkPattern: '/topics/{topicId}/submissions',
+  },
+  SUBMISSION_CONFIRMED: {
+    title: 'Sinh viên đã xác nhận bài nộp',
+    body: (ctx) =>
+      `Sinh viên đã xác nhận phiên bản ${ctx.version} cho đề tài "${ctx.topicTitle}".`,
     deepLinkPattern: '/topics/{topicId}/submissions',
   },
   SCORE_SUBMITTED: {
@@ -75,6 +101,11 @@ const NOTIFICATION_TEMPLATES: Record<
     body: (ctx) => `Bạn đã được gán vai trò ${ctx.role} cho đề tài "${ctx.topicTitle}".`,
     deepLinkPattern: '/topics/{topicId}',
   },
+  SYSTEM: {
+    title: 'Thông báo hệ thống',
+    body: (ctx) => ctx.message || 'Bạn có thông báo hệ thống mới.',
+    deepLinkPattern: '/notifications',
+  },
   GENERAL: {
     title: 'Thông báo',
     body: (ctx) => ctx.message || 'Bạn có thông báo mới.',
@@ -84,6 +115,14 @@ const NOTIFICATION_TEMPLATES: Record<
 
 @Injectable()
 export class NotificationsService {
+  private static readonly GLOBAL_RECEIVER_IDS = new Set([
+    'ALL',
+    'COMMON',
+    'GLOBAL',
+    'PUBLIC',
+    '*',
+  ]);
+
   constructor(
     private readonly notificationsRepository: NotificationsRepository,
   ) {}
@@ -102,10 +141,9 @@ export class NotificationsService {
     data: NotificationResponseDto[];
     pagination: { page: number; size: number; total: number };
   }> {
-    // Filter notifications for current user
     const notifications = await this.notificationsRepository.findAll();
     let userNotifications = notifications.filter(
-      (n) => n.receiverUserId === user.userId,
+      (n) => this.canAccessNotification(n, user),
     );
 
     // Filter by read status if specified
@@ -147,8 +185,7 @@ export class NotificationsService {
     const notification = await this.notificationsRepository.findById(notificationId);
     if (!notification) return null;
 
-    // Only receiver can access the notification
-    if (notification.receiverUserId !== user.userId) {
+    if (!this.canAccessNotification(notification, user)) {
       throw new ForbiddenException('Cannot access this notification');
     }
 
@@ -170,7 +207,7 @@ export class NotificationsService {
       );
     }
 
-    if (notification.receiverUserId !== user.userId) {
+    if (!this.canAccessNotification(notification, user)) {
       throw new ForbiddenException('Cannot modify this notification');
     }
 
@@ -193,7 +230,7 @@ export class NotificationsService {
 
     for (const id of notificationIds) {
       const notification = notifications.find((n) => n.id === id);
-      if (notification && notification.receiverUserId === user.userId) {
+      if (notification && this.canAccessNotification(notification, user)) {
         if (!notification.isRead) {
           notification.isRead = true;
           notification.readAt = new Date().toISOString();
@@ -211,6 +248,7 @@ export class NotificationsService {
    */
   async create(params: {
     receiverUserId: string;
+    scope?: NotificationScope;
     type: NotificationType;
     context: Record<string, string>;
     topicId?: string;
@@ -224,6 +262,7 @@ export class NotificationsService {
     const notification: NotificationRecord = {
       id: this.generateId(),
       receiverUserId: params.receiverUserId,
+      scope: params.scope ?? 'PERSONAL',
       topicId: params.topicId,
       type: params.type,
       title: template.title,
@@ -244,7 +283,7 @@ export class NotificationsService {
   async getUnreadCount(user: AuthUser): Promise<number> {
     const notifications = await this.notificationsRepository.findAll();
     return notifications.filter(
-      (n) => n.receiverUserId === user.userId && !n.isRead,
+      (n) => this.canAccessNotification(n, user) && !n.isRead,
     ).length;
   }
 
@@ -264,6 +303,7 @@ export class NotificationsService {
     return {
       id: record.id,
       receiverUserId: record.receiverUserId,
+      scope: this.resolveScope(record),
       topicId: record.topicId,
       type: record.type,
       title: record.title,
@@ -273,5 +313,29 @@ export class NotificationsService {
       createdAt: record.createdAt,
       readAt: record.readAt,
     };
+  }
+
+  private canAccessNotification(
+    notification: NotificationRecord,
+    user: AuthUser,
+  ): boolean {
+    if (this.resolveScope(notification) === 'GLOBAL') {
+      return true;
+    }
+
+    return notification.receiverUserId === user.userId;
+  }
+
+  private resolveScope(notification: NotificationRecord): NotificationScope {
+    if (notification.scope === 'GLOBAL') {
+      return 'GLOBAL';
+    }
+
+    const receiver = notification.receiverUserId.trim().toUpperCase();
+    if (NotificationsService.GLOBAL_RECEIVER_IDS.has(receiver)) {
+      return 'GLOBAL';
+    }
+
+    return 'PERSONAL';
   }
 }

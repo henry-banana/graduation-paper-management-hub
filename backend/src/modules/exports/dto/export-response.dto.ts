@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export type ExportType = 'RUBRIC_BCTT' | 'RUBRIC_KLTN' | 'SCORE_SHEET' | 'TOPIC_LIST';
+export type ExportType = 'RUBRIC_BCTT' | 'RUBRIC_KLTN' | 'SCORE_SHEET' | 'TOPIC_LIST' | 'MINUTES';
 export type ExportStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
 export class ExportResponseDto {
@@ -11,8 +11,8 @@ export class ExportResponseDto {
   topicId!: string;
 
   @ApiProperty({
-    enum: ['RUBRIC_BCTT', 'RUBRIC_KLTN', 'SCORE_SHEET', 'TOPIC_LIST'],
-    example: 'RUBRIC_BCTT',
+    enum: ['RUBRIC_BCTT', 'RUBRIC_KLTN', 'SCORE_SHEET', 'TOPIC_LIST', 'MINUTES'],
+    example: 'MINUTES',
   })
   exportType!: ExportType;
 

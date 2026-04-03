@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import {
   ExportResponseDto,
@@ -25,17 +26,24 @@ import {
   ScoresRepository,
   TopicsRepository,
   UsersRepository,
+  AssignmentsRepository,
+  ScoreSummariesRepository,
 } from '../../infrastructure/google-sheets';
 import { GoogleDriveClient } from '../../infrastructure/google-drive';
 import {
   GeneratedDocument,
   RubricGeneratorService,
 } from './rubric-generator/rubric-generator.service';
+import { MinutesGeneratorService } from './minutes-generator/minutes-generator.service';
+import type { MinutesTemplateData } from './minutes-generator/minutes.template';
 import type { TopicRecord } from '../topics/topics.service';
 import type { ScoreRecord } from '../scores/scores.service';
 import type { UserRecord } from '../users/users.service';
 import type { PeriodRecord } from '../periods/periods.service';
 import type { RubricItem } from '../scores/dto';
+import type { AssignmentRecord } from '../assignments/assignments.service';
+import type { ScoreSummaryRecord } from '../scores/scores.service';
+
 
 export interface ExportRecord {
   id: string;
@@ -75,9 +83,88 @@ export class ExportsService {
     private readonly scoresRepository: ScoresRepository,
     private readonly usersRepository: UsersRepository,
     private readonly periodsRepository: PeriodsRepository,
+    private readonly assignmentsRepository: AssignmentsRepository,
+    private readonly scoreSummariesRepository: ScoreSummariesRepository,
     private readonly googleDriveClient: GoogleDriveClient,
     private readonly rubricGeneratorService: RubricGeneratorService,
+    private readonly minutesGeneratorService: MinutesGeneratorService,
+    private readonly configService: ConfigService,
   ) {}
+
+  /**
+   * Export biên bản họp hội đồng bảo vệ (MINUTES) as PDF
+   */
+  async exportMinutes(
+    topicId: string,
+    user: AuthUser,
+  ): Promise<ExportResponseDto> {
+    const topic = await this.getTopicOrThrow(topicId);
+
+    // Gather topic context
+    const [student, supervisor, period] = await Promise.all([
+      this.usersRepository.findById(topic.studentUserId),
+      this.usersRepository.findById(topic.supervisorUserId),
+      this.periodsRepository.findById(topic.periodId),
+    ]);
+
+    if (!student || !supervisor || !period) {
+      throw new NotFoundException('Không tìm thấy thông tin sinh viên hoặc GVHD');
+    }
+
+    // Get assignments to find council roles
+    const assignments = await this.assignmentsRepository.findByTopicId(topicId);
+    const chairAssignment = assignments.find((a) => a.topicRole === 'CT_HD' && a.status === 'ACTIVE');
+    const secretaryAssignment = assignments.find((a) => a.topicRole === 'TK_HD' && a.status === 'ACTIVE');
+    const reviewerAssignment = assignments.find((a) => a.topicRole === 'GVPB' && a.status === 'ACTIVE');
+    const tvhdAssignments = assignments.filter((a) => a.topicRole === 'TV_HD' && a.status === 'ACTIVE');
+
+    // Resolve council names
+    const chairUser = chairAssignment
+      ? await this.usersRepository.findById(chairAssignment.userId)
+      : null;
+    const secretaryUser = secretaryAssignment
+      ? await this.usersRepository.findById(secretaryAssignment.userId)
+      : null;
+    const reviewerUser = reviewerAssignment
+      ? await this.usersRepository.findById(reviewerAssignment.userId)
+      : null;
+    const tvhdUsers = await Promise.all(
+      tvhdAssignments.map((a) => this.usersRepository.findById(a.userId)),
+    );
+
+    // Get score summary for final score
+    const summaries = await this.scoreSummariesRepository.findWhere((s) => s.topicId === topicId);
+    const summary = summaries[0];
+
+    const templateData: MinutesTemplateData = {
+      topicTitle: topic.title,
+      topicType: topic.type as 'BCTT' | 'KLTN',
+      period: period.code,
+      studentName: student.name,
+      studentId: student.studentId ?? '',
+      chairName: chairUser?.name ?? '(Chưa phân công)',
+      secretaryName: secretaryUser?.name ?? '(Chưa phân công)',
+      supervisorName: supervisor.name,
+      reviewerName: reviewerUser?.name,
+      councilMembers: tvhdUsers.filter(Boolean).map((u) => u!.name),
+      defenseDate: new Date().toLocaleDateString('vi-VN', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+      }),
+      finalScore: summary?.finalScore ?? undefined,
+      result: (summary?.result as 'PASS' | 'FAIL' | 'PENDING') ?? 'PENDING',
+    };
+
+    // Generate PDF buffer
+    const generated = await this.minutesGeneratorService.generatePdf(templateData);
+
+    const generatedDoc: GeneratedDocument = {
+      filename: generated.filename,
+      mimeType: generated.mimeType,
+      buffer: generated.buffer,
+    };
+
+    return this.createExport(topicId, 'MINUTES', user, {}, generatedDoc);
+  }
 
   /**
    * Request rubric export for BCTT (Báo cáo tiến triển)
@@ -124,10 +211,10 @@ export class ExportsService {
       throw new BadRequestException('Chỉ hỗ trợ xuất phiếu KLTN cho đề tài loại KLTN');
     }
 
-    // KLTN rubric only available for topics in DEFENSE or PUBLISHED status
-    if (!['DEFENSE', 'COMPLETED'].includes(topic.state)) {
+    // KLTN rubric available for topics in scoring/defense/completed states
+    if (!['GRADING', 'DEFENSE', 'COMPLETED'].includes(topic.state)) {
       throw new BadRequestException(
-        'Phiếu chấm KLTN chỉ khả dụng cho đề tài đã bảo vệ hoặc đã công bố',
+        'Phiếu chấm KLTN chỉ khả dụng cho đề tài đang chấm điểm, đã bảo vệ hoặc đã công bố',
       );
     }
 
@@ -138,10 +225,7 @@ export class ExportsService {
       topicId,
       'RUBRIC_KLTN',
       user,
-      {
-        role,
-        scoreId,
-      },
+      { role, scoreId },
       generatedDoc,
     );
   }
@@ -264,7 +348,11 @@ export class ExportsService {
   }
 
   /**
-   * Create a new export request (internal)
+   * Create a new export request (internal).
+   *
+   * For RUBRIC exports: uploads the .docx file directly (preserving table layout)
+   * into a per-student subfolder under GOOGLE_DRIVE_RUBRIC_FOLDER_ID.
+   * For other exports: uploads to the default folder.
    */
   private async createExport(
     topicId: string,
@@ -279,45 +367,49 @@ export class ExportsService {
       generatedDoc ?? this.buildMetadataDocument(id, topicId, exportType, user, metadata, now);
 
     let uploadedFileName = fileToUpload.filename;
-    let uploadedMimeType = fileToUpload.mimeType;
+    const uploadedMimeType = fileToUpload.mimeType;
     let driveFileId: string;
     let driveLink: string;
     const warnings: string[] = [];
 
+    // Determine whether this is a rubric export
+    const isRubricExport = exportType.includes('RUBRIC');
+    const rubricRootFolderId = isRubricExport
+      ? (this.configService.get<string>('GOOGLE_DRIVE_RUBRIC_FOLDER_ID') ?? undefined)
+      : undefined;
+
     if (this.googleDriveClient.isReady()) {
       try {
-        if (fileToUpload.mimeType === EXPORT_DOCX_MIME_TYPE) {
+        // Resolve the target folder:
+        // - Rubric exports → GOOGLE_DRIVE_RUBRIC_FOLDER_ID/[user.userId]/
+        //   (subfolder = ID của người đang query — GV hoặc TBM)
+        // - Other exports  → GOOGLE_DRIVE_FOLDER_ID (default root)
+        let targetFolderId: string | undefined;
+        if (isRubricExport && rubricRootFolderId) {
           try {
-            const converted = await this.googleDriveClient.uploadDocxAndExportPdf(
-              fileToUpload.filename,
-              fileToUpload.buffer,
+            targetFolderId = await this.googleDriveClient.getOrCreateSubfolder(
+              rubricRootFolderId,
+              user.userId,
             );
-            driveFileId = converted.pdfFileId;
-            driveLink = converted.pdfLink;
-            uploadedMimeType = EXPORT_PDF_MIME_TYPE;
-            uploadedFileName = this.toPdfFilename(fileToUpload.filename);
-          } catch (error) {
-            const conversionWarning = `DOCX->PDF conversion failed, fallback DOCX upload: ${this.extractErrorMessage(error)}`;
-            warnings.push(conversionWarning);
-            this.logger.warn(conversionWarning);
-
-            const docUpload = await this.googleDriveClient.uploadFile(
-              fileToUpload.filename,
-              fileToUpload.mimeType,
-              fileToUpload.buffer,
-            );
-            driveFileId = docUpload.fileId;
-            driveLink = docUpload.webViewLink;
+          } catch (folderErr) {
+            const msg = `Could not create subfolder for user ${user.userId}: ${this.extractErrorMessage(folderErr)}. Falling back to rubric root.`;
+            warnings.push(msg);
+            this.logger.warn(msg);
+            targetFolderId = rubricRootFolderId;
           }
-        } else {
-          const upload = await this.googleDriveClient.uploadFile(
-            fileToUpload.filename,
-            fileToUpload.mimeType,
-            fileToUpload.buffer,
-          );
-          driveFileId = upload.fileId;
-          driveLink = upload.webViewLink;
         }
+
+        // Always upload as raw .docx (no Google Doc conversion).
+        // This preserves table column widths and formatting perfectly.
+        const upload = await this.googleDriveClient.uploadFile(
+          fileToUpload.filename,
+          fileToUpload.mimeType,
+          fileToUpload.buffer,
+          targetFolderId,
+        );
+        driveFileId = upload.fileId;
+        driveLink = upload.webViewLink;
+        uploadedFileName = fileToUpload.filename;
       } catch (error) {
         const uploadWarning = `Drive upload failed, use fallback link: ${this.extractErrorMessage(error)}`;
         warnings.push(uploadWarning);
@@ -354,6 +446,7 @@ export class ExportsService {
 
     return this.mapToDto(newExport);
   }
+
 
   /**
    * Map ExportRecord to DTO

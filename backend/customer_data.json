@@ -1,0 +1,267 @@
+{
+  "det": [
+    [
+      "Email",
+      "Tendetai",
+      "Dot"
+    ],
+    [
+      "Thiennd@hcmute.edu.vn",
+      "AI trong sản xuất",
+      "Đợt 1 HK1 26-27"
+    ],
+    [
+      "thienise@gmail.com",
+      "AI trong giáo dục",
+      "Đợt 2 HK1 26-27"
+    ],
+    [
+      "ise.thien@gmail.com",
+      "AI trong chất lượng",
+      "Đợt 1 HK1 26-27"
+    ],
+    [
+      "ise.thien@gmail.com",
+      "Test 1",
+      "Đợt 2 HK1 26-27"
+    ]
+  ],
+  "quota": [
+    [
+      "Email",
+      "Major",
+      "HeDaoTao",
+      "Quota"
+    ],
+    [
+      "thiennd@hcmute.edu.vn",
+      "QLCN",
+      "DaiTra",
+      7
+    ],
+    [
+      "thienise@gmail.com",
+      "QLCN",
+      "CLC",
+      8
+    ],
+    [
+      "ise.thien@gmail.com",
+      "ECom",
+      "DaiTra",
+      4
+    ],
+    [
+      "thienise@gmail.com",
+      "QLCN",
+      "DaiTra",
+      2
+    ]
+  ],
+  "major": [
+    [
+      "Email",
+      "Major",
+      "Field"
+    ],
+    [
+      "thiennd@hcmute.edu.vn",
+      "QLCN",
+      "Chất lượng"
+    ],
+    [
+      "thiennd@hcmute.edu.vn",
+      "QLCN",
+      "Sản xuất"
+    ],
+    [
+      "thiennd@hcmute.edu.vn",
+      "QLCN",
+      "Mô phỏng"
+    ],
+    [
+      "thienise@gmail.com",
+      "QLCN",
+      "TKWeb"
+    ],
+    [
+      "thiennd@hcmute.edu.vn",
+      "ECom",
+      "AI"
+    ],
+    [
+      "thienise@gmail.com",
+      "QLCN",
+      "KSCL"
+    ],
+    [
+      "thienise@gmail.com",
+      "QLCN",
+      "KSCL"
+    ],
+    [
+      "ise.thien@gmail.com",
+      "QLCN",
+      "HR"
+    ],
+    [
+      "ise.thien@gmail.com",
+      "QLCN",
+      "Marketing"
+    ],
+    [
+      "ise.thien@gmail.com",
+      "Logistics",
+      "Mô phỏng"
+    ],
+    [
+      "ise.thien@gmail.com",
+      "Logistics",
+      "Rủi ro"
+    ]
+  ],
+  "data": [
+    [
+      "Email",
+      "MS",
+      "Ten",
+      "Role",
+      "Major",
+      "HeDaoTao"
+    ],
+    [
+      "323553@student.hcmute.edu.vn",
+      "",
+      "ABC",
+      "Student",
+      "QLCN",
+      "CLC"
+    ],
+    [
+      "Thiennd@hcmute.edu.vn",
+      "",
+      "Thầy A",
+      "Lecturer",
+      "QLCN",
+      "Daitra"
+    ],
+    [
+      "123@@hcmute.edu.vn",
+      "",
+      "",
+      "TBM",
+      "QLCN"
+    ],
+    [
+      "thienise@gmail.com",
+      "",
+      "Thầy ABC",
+      "Lecturer",
+      "QLCN"
+    ],
+    [
+      "23124121@student.hcmute.edu.vn",
+      "",
+      "",
+      "Student",
+      "QLCN"
+    ],
+    [
+      "23124173@student.hcmute.edu.vn",
+      "",
+      "",
+      "Student"
+    ],
+    [
+      "ise.thien@gmail.com",
+      "",
+      "Thầy C",
+      "TBM",
+      "QLCN"
+    ]
+  ],
+  "dot": [
+    [
+      "StartReg",
+      "EndReg",
+      "Loaidetai",
+      "Major",
+      "Dot",
+      "Active",
+      "StartEx",
+      "EndEx"
+    ],
+    [
+      46110,
+      46119,
+      "KLTN",
+      "QLCN",
+      "Đợt 1 HK1 26-27",
+      "No"
+    ],
+    [
+      46110,
+      46119,
+      "BCTT",
+      "QLCN",
+      "Đợt 2 HK1 26-27",
+      "No"
+    ],
+    [
+      46110,
+      46119,
+      "KLTN",
+      "QLCN",
+      "Đợt 1 HK1 26-27",
+      "Yes"
+    ],
+    [
+      46110,
+      46119,
+      "BCTT",
+      "QLCN",
+      "Đợt 2 HK1 26-27",
+      "Yes"
+    ],
+    [
+      46110,
+      46119,
+      "KLTN",
+      "ECom",
+      "Đợt 1 HK1 26-27",
+      "Yes"
+    ],
+    [
+      46110,
+      46119,
+      "BCTT",
+      "ECom",
+      "Đợt 2 HK1 26-27",
+      "Yes"
+    ],
+    [
+      46110,
+      46119,
+      "KLTN",
+      "IntBus",
+      "Đợt 1 HK1 26-27",
+      "Yes"
+    ],
+    [
+      46110,
+      46119,
+      "BCTT",
+      "IntBus",
+      "Đợt 2 HK1 26-27",
+      "Yes"
+    ],
+    [
+      46110,
+      46119,
+      "KLTN",
+      "Log",
+      "Đợt 1 HK1 26-27",
+      "Yes"
+    ]
+  ]
+}

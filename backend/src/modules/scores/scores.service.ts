@@ -94,11 +94,23 @@ export class ScoresService {
     return topic;
   }
 
+  /**
+   * Check if user has a formal assignment for this topic (Trangthaidetai tab),
+   * OR if the user is the topic supervisor (supervisorUserId) which is equivalent to GVHD.
+   */
   private async hasAssignment(
     topicId: string,
     userId: string,
     topicRole?: TopicRole,
   ): Promise<boolean> {
+    // Check supervisor relationship first (fast path — avoids sheet read for GVHD)
+    const topic = await this.topicsRepository.findById(topicId);
+    if (topic && topic.supervisorUserId === userId) {
+      // Supervisor is implicitly GVHD — allow if no specific role filter, or role is GVHD
+      if (!topicRole || topicRole === 'GVHD') return true;
+    }
+
+    // Check formal Assignments sheet (for GVPB, TV_HD, CT_HD, TK_HD)
     const assignments = await this.assignmentsRepository.findAll();
     return assignments.some(
       (assignment) =>
@@ -122,11 +134,11 @@ export class ScoresService {
     }
 
     if (user.role === 'LECTURER') {
-      if (!(await this.hasAssignment(topic.id, user.userId))) {
-        throw new ForbiddenException('Cannot view scores for this topic');
-      }
-
-      return;
+      // Supervisor is always allowed to view their own topic's scores
+      if (topic.supervisorUserId === user.userId) return;
+      // Other lecturers must have a formal assignment
+      if (await this.hasAssignment(topic.id, user.userId)) return;
+      throw new ForbiddenException('Cannot view scores for this topic');
     }
 
     throw new ForbiddenException('Cannot view scores for this topic');
@@ -137,6 +149,29 @@ export class ScoresService {
       topic.state as (typeof SCORE_ALLOWED_TOPIC_STATES)[number];
     if (!SCORE_ALLOWED_TOPIC_STATES.includes(currentState)) {
       throw new ConflictException(`Cannot score topic in state: ${topic.state}`);
+    }
+
+    this.assertBcttDeadlineElapsed(topic);
+  }
+
+  private assertBcttDeadlineElapsed(topic: TopicRecord): void {
+    if (topic.type !== 'BCTT') {
+      return;
+    }
+
+    if (!topic.submitEndAt) {
+      throw new ConflictException(
+        'Cannot score BCTT before submission deadline is configured',
+      );
+    }
+
+    const submitEnd = new Date(topic.submitEndAt).getTime();
+    if (Number.isNaN(submitEnd)) {
+      throw new ConflictException('BCTT submission deadline is invalid');
+    }
+
+    if (Date.now() <= submitEnd) {
+      throw new ConflictException('Cannot score BCTT before submission deadline ends');
     }
   }
 
@@ -318,6 +353,9 @@ export class ScoresService {
     if (score.status === 'SUBMITTED') {
       throw new ConflictException('Score has already been submitted');
     }
+
+    const topic = await this.getTopicOrThrow(score.topicId);
+    this.assertScoringAllowed(topic);
 
     if (user.role !== 'LECTURER' || score.scorerUserId !== user.userId) {
       throw new ForbiddenException('Only the scorer can submit this score');
@@ -505,6 +543,175 @@ export class ScoresService {
       confirmed: true,
       published,
     };
+  }
+
+  /**
+   * Find current user's draft or submitted score for a topic
+   */
+  async findMyDraft(
+    topicId: string,
+    user: AuthUser,
+  ): Promise<{
+    scoreId?: string;
+    criteria: Record<string, number>;
+    turnitinLink?: string;
+    comments?: string;
+    questions?: string;
+    isSubmitted: boolean;
+    totalScore: number;
+  } | null> {
+    if (user.role !== 'LECTURER') {
+      throw new ForbiddenException('Only lecturers can access score drafts');
+    }
+
+    await this.getTopicOrThrow(topicId);
+
+    const scores = await this.scoresRepository.findAll();
+    const myScores = scores.filter(
+      (s) => s.topicId === topicId && s.scorerUserId === user.userId,
+    );
+
+    // Priority: SUBMITTED > DRAFT
+    const submitted = myScores.find((s) => s.status === 'SUBMITTED');
+    const draft = myScores.find((s) => s.status === 'DRAFT');
+    const score = submitted ?? draft;
+
+    if (!score) {
+      return null;
+    }
+
+    // Convert rubricData array back to flat criteria map
+    const criteria: Record<string, number> = {};
+    for (const item of score.rubricData) {
+      criteria[item.criterion] = item.score;
+    }
+
+    return {
+      scoreId: score.id,
+      criteria,
+      turnitinLink: undefined, // stored in notes if needed
+      comments: score.rubricData.find((r) => r.note)?.note,
+      isSubmitted: score.status === 'SUBMITTED',
+      totalScore: score.totalScore,
+    };
+  }
+
+  /**
+   * Create draft + submit directly, accepting flat criteria map from frontend
+   * @param isDraftOnly if true, only saves as draft (not submitted)
+   */
+  async createAndSubmitDirect(
+    topicId: string,
+    criteriaMap: Record<string, number>,
+    scorerRole: ScorerRole,
+    rubricDefinition: Array<{ id: string; max: number }>,
+    user: AuthUser,
+    options: { isDraftOnly?: boolean; turnitinLink?: string; comments?: string; questions?: string } = {},
+  ): Promise<{ scoreId: string; status: 'DRAFT' | 'SUBMITTED'; totalScore: number }> {
+    if (user.role !== 'LECTURER') {
+      throw new ForbiddenException('Only lecturers can score topics');
+    }
+
+    const topic = await this.getTopicOrThrow(topicId);
+    this.assertScoringAllowed(topic);
+    this.assertScorerRoleAllowed(topic, scorerRole);
+
+    if (!(await this.hasAssignment(topicId, user.userId, scorerRole))) {
+      throw new ForbiddenException(
+        `You do not have ${scorerRole} role on this topic`,
+      );
+    }
+
+    // Convert flat criteria map → rubricData array
+    const rubricData: RubricItem[] = rubricDefinition.map((def) => ({
+      criterion: def.id,
+      score: Math.min(def.max, Math.max(0, criteriaMap[def.id] ?? 0)),
+      max: def.max,
+      note: def.id === rubricDefinition[rubricDefinition.length - 1].id
+        ? (options.comments ?? options.questions)
+        : undefined,
+    }));
+
+    this.validateRubricData(rubricData);
+
+    const totalScore = this.calculateTotalScore(rubricData);
+
+    const scores = await this.scoresRepository.findAll();
+
+    // Check if already submitted — cannot overwrite
+    const submittedScore = scores.find(
+      (s) =>
+        s.topicId === topicId &&
+        s.scorerRole === scorerRole &&
+        s.scorerUserId === user.userId &&
+        s.status === 'SUBMITTED',
+    );
+    if (submittedScore && !options.isDraftOnly) {
+      throw new ConflictException(
+        `Score for ${scorerRole} has already been submitted`,
+      );
+    }
+    if (submittedScore) {
+      return {
+        scoreId: submittedScore.id,
+        status: 'SUBMITTED',
+        totalScore: submittedScore.totalScore,
+      };
+    }
+
+    // Upsert draft
+    const existingDraft = scores.find(
+      (s) =>
+        s.topicId === topicId &&
+        s.scorerRole === scorerRole &&
+        s.scorerUserId === user.userId &&
+        s.status === 'DRAFT',
+    );
+
+    let scoreRecord: ScoreRecord;
+    if (existingDraft) {
+      existingDraft.rubricData = rubricData;
+      existingDraft.totalScore = totalScore;
+      existingDraft.updatedAt = new Date().toISOString();
+      await this.scoresRepository.update(existingDraft.id, existingDraft);
+      scoreRecord = existingDraft;
+    } else {
+      scoreRecord = {
+        id: this.generateId(),
+        topicId,
+        scorerUserId: user.userId,
+        scorerRole,
+        status: 'DRAFT',
+        totalScore,
+        rubricData,
+        updatedAt: new Date().toISOString(),
+      };
+      await this.scoresRepository.create(scoreRecord);
+    }
+
+    if (options.isDraftOnly) {
+      return { scoreId: scoreRecord.id, status: 'DRAFT', totalScore };
+    }
+
+    // Submit: make immutable
+    scoreRecord.status = 'SUBMITTED';
+    scoreRecord.submittedAt = new Date().toISOString();
+    scoreRecord.updatedAt = new Date().toISOString();
+    await this.scoresRepository.update(scoreRecord.id, scoreRecord);
+
+    await this.auditIfAvailable({
+      action: 'SCORE_SUBMITTED',
+      actorId: user.userId,
+      actorRole: user.role,
+      topicId,
+      detail: {
+        scoreId: scoreRecord.id,
+        scorerRole,
+        totalScore,
+      },
+    });
+
+    return { scoreId: scoreRecord.id, status: 'SUBMITTED', totalScore };
   }
 
   /**

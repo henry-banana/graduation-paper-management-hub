@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   Optional,
   NotFoundException,
   ConflictException,
@@ -13,6 +14,9 @@ import {
   UpdateTopicDto,
   GetTopicsQueryDto,
   SetDeadlineDto,
+  CreateRevisionRoundDto,
+  RevisionRoundResponseDto,
+  CloseRevisionRoundDto,
 } from './dto';
 import {
   TopicType,
@@ -26,8 +30,11 @@ import {
 import { AuthUser } from '../../common/types';
 import {
   PeriodsRepository,
+  RevisionRoundRecord,
+  RevisionRoundsRepository,
   TopicsRepository,
   UsersRepository,
+  AssignmentsRepository,
 } from '../../infrastructure/google-sheets';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
@@ -45,6 +52,8 @@ export interface TopicRecord {
   approvalDeadlineAt?: string;
   submitStartAt?: string;
   submitEndAt?: string;
+  reasonRejected?: string;
+  revisionsAllowed?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,12 +69,16 @@ interface PaginatedResult<T> {
 
 @Injectable()
 export class TopicsService {
+  private readonly logger = new Logger(TopicsService.name);
   private readonly terminalStates: TopicState[] = ['COMPLETED', 'CANCELLED'];
 
   constructor(
     private readonly topicsRepository: TopicsRepository,
+    private readonly revisionRoundsRepository: RevisionRoundsRepository,
     private readonly periodsRepository: PeriodsRepository,
     private readonly usersRepository: UsersRepository,
+    @Optional()
+    private readonly assignmentsRepository?: AssignmentsRepository,
     @Optional()
     private readonly notificationsService?: NotificationsService,
     @Optional()
@@ -91,8 +104,20 @@ export class TopicsService {
     // Filter by role context
     if (query.role === 'student') {
       topics = topics.filter((t) => t.studentUserId === currentUser.userId);
-    } else if (query.role === 'supervisor') {
+    } else if (query.role === 'supervisor' || query.role === 'gvhd') {
+      // GVHD: xem đề tài mình đang hướng dẫn
       topics = topics.filter((t) => t.supervisorUserId === currentUser.userId);
+    } else if (query.role === 'reviewer' || query.role === 'gvpb' || query.role === 'tv_hd' || query.role === 'ct_hd') {
+      // GVPB/TV_HD/CT_HD: xem đề tài qua assignments
+      if (this.assignmentsRepository) {
+        const assignments = await this.assignmentsRepository.findAll();
+        const myTopicIds = new Set(
+          assignments
+            .filter((a) => a.userId === currentUser.userId)
+            .map((a) => a.topicId),
+        );
+        topics = topics.filter((t) => myTopicIds.has(t.id));
+      }
     }
 
     // Students can only see their own topics
@@ -122,6 +147,167 @@ export class TopicsService {
     return this.topicsRepository.findById(id);
   }
 
+  async listRevisionRounds(
+    topicId: string,
+    currentUser: AuthUser,
+  ): Promise<RevisionRoundResponseDto[]> {
+    const topic = await this.topicsRepository.findById(topicId);
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    this.ensureCanReadTopic(topic, currentUser);
+
+    const rounds = await this.revisionRoundsRepository.findWhere(
+      (round) => round.topicId === topicId,
+    );
+
+    return rounds
+      .sort((a, b) => a.roundNumber - b.roundNumber)
+      .map((round) => this.mapRevisionRoundToDto(round));
+  }
+
+  async openRevisionRound(
+    topicId: string,
+    dto: CreateRevisionRoundDto,
+    currentUser: AuthUser,
+  ): Promise<RevisionRoundResponseDto> {
+    if (currentUser.role !== 'TBM') {
+      throw new ForbiddenException('Only TBM can open revision rounds');
+    }
+
+    const topic = await this.topicsRepository.findById(topicId);
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    const startAt = new Date(dto.startAt);
+    const endAt = new Date(dto.endAt);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
+      throw new BadRequestException('Invalid revision round time window');
+    }
+    if (startAt.getTime() >= endAt.getTime()) {
+      throw new BadRequestException('Revision round endAt must be after startAt');
+    }
+
+    const rounds = await this.revisionRoundsRepository.findWhere(
+      (round) => round.topicId === topicId,
+    );
+    const activeRound = rounds.find((round) => round.status === 'OPEN');
+    if (activeRound) {
+      throw new ConflictException('Another revision round is already open');
+    }
+
+    const highestRoundNumber = rounds.reduce(
+      (max, round) => Math.max(max, round.roundNumber),
+      1,
+    );
+
+    const now = new Date().toISOString();
+    const newRound: RevisionRoundRecord = {
+      id: `rr_${crypto.randomBytes(6).toString('hex')}`,
+      topicId,
+      roundNumber: Math.max(2, highestRoundNumber + 1),
+      status: 'OPEN',
+      startAt: startAt.toISOString(),
+      endAt: endAt.toISOString(),
+      requestedBy: currentUser.userId,
+      reason: dto.reason?.trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await this.revisionRoundsRepository.create(newRound);
+
+    await this.notifyIfAvailable({
+      receiverUserId: topic.studentUserId,
+      type: 'REVISION_ROUND_OPENED',
+      topicId,
+      context: {
+        topicTitle: topic.title,
+        roundNumber: String(newRound.roundNumber),
+        deadline: endAt.toLocaleDateString('vi-VN'),
+      },
+    });
+
+    await this.auditIfAvailable({
+      action: 'REVISION_ROUND_OPENED',
+      actorId: currentUser.userId,
+      actorRole: currentUser.role,
+      topicId,
+      detail: {
+        revisionRoundId: newRound.id,
+        roundNumber: newRound.roundNumber,
+        startAt: newRound.startAt,
+        endAt: newRound.endAt,
+        reason: newRound.reason,
+      },
+    });
+
+    return this.mapRevisionRoundToDto(newRound);
+  }
+
+  async closeRevisionRound(
+    topicId: string,
+    roundId: string,
+    dto: CloseRevisionRoundDto,
+    currentUser: AuthUser,
+  ): Promise<RevisionRoundResponseDto> {
+    if (currentUser.role !== 'TBM') {
+      throw new ForbiddenException('Only TBM can close revision rounds');
+    }
+
+    const topic = await this.topicsRepository.findById(topicId);
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    const round = await this.revisionRoundsRepository.findById(roundId);
+    if (!round || round.topicId !== topicId) {
+      throw new NotFoundException('Revision round not found');
+    }
+
+    if (round.status === 'CLOSED') {
+      throw new ConflictException({
+        error: 'REVISION_ROUND_ALREADY_CLOSED',
+        message: 'Revision round is already closed',
+        code: 'REVISION_ROUND_ALREADY_CLOSED',
+      });
+    }
+
+    round.status = 'CLOSED';
+    round.updatedAt = new Date().toISOString();
+    if (dto.reason?.trim()) {
+      round.reason = dto.reason.trim();
+    }
+
+    await this.revisionRoundsRepository.update(round.id, round);
+
+    await this.notifyIfAvailable({
+      receiverUserId: topic.studentUserId,
+      type: 'REVISION_ROUND_CLOSED',
+      topicId,
+      context: {
+        topicTitle: topic.title,
+        roundNumber: String(round.roundNumber),
+      },
+    });
+
+    await this.auditIfAvailable({
+      action: 'REVISION_ROUND_CLOSED',
+      actorId: currentUser.userId,
+      actorRole: currentUser.role,
+      topicId,
+      detail: {
+        revisionRoundId: round.id,
+        roundNumber: round.roundNumber,
+        reason: round.reason,
+      },
+    });
+
+    return this.mapRevisionRoundToDto(round);
+  }
+
   async create(
     dto: CreateTopicDto,
     currentUser: AuthUser,
@@ -133,18 +319,39 @@ export class TopicsService {
 
     const period = await this.periodsRepository.findById(dto.periodId);
     if (!period) {
-      throw new BadRequestException('Period not found');
+      this.logger.error(
+        `[create] Period NOT FOUND: id='${dto.periodId}'. Student=${currentUser.userId}, type=${dto.type}`,
+      );
+      throw new BadRequestException(`Period not found: ${dto.periodId}`);
     }
+    this.logger.log(
+      `[create] Period found: id='${period.id}' code='${period.code}' type=${period.type} status=${period.status} open=${period.openDate} close=${period.closeDate}`,
+    );
 
     if (period.type !== dto.type) {
+      this.logger.warn(
+        `[create] Type mismatch: period.type=${period.type} but dto.type=${dto.type}`,
+      );
       throw new BadRequestException(
         `Period ${dto.periodId} does not accept topic type ${dto.type}`,
       );
     }
 
     if (period.status !== 'OPEN') {
+      this.logger.warn(`[create] Period status=${period.status} (not OPEN)`);
       throw new ConflictException('Registration period is not open');
     }
+
+    if (!this.isCurrentDateWithinPeriod(period.openDate, period.closeDate)) {
+      this.logger.warn(
+        `[create] Date window check failed: today=${this.getCurrentLocalDate()} not in [${period.openDate}, ${period.closeDate}]`,
+      );
+      throw new ConflictException(
+        'Registration period is outside the configured date window',
+      );
+    }
+
+    await this.validateSupervisor(dto.supervisorUserId, true);
 
     // A student cannot run any active workflow concurrently.
     const existingActive = await this.topicsRepository.findFirst(
@@ -270,8 +477,39 @@ export class TopicsService {
     if (dto.title) topic.title = dto.title;
     if (dto.domain) topic.domain = dto.domain;
     if (dto.companyName !== undefined) topic.companyName = dto.companyName;
-    if (dto.supervisorUserId) topic.supervisorUserId = dto.supervisorUserId;
-    topic.updatedAt = new Date().toISOString();
+
+    const now = new Date();
+    let supervisorChanged = false;
+    if (dto.supervisorUserId !== undefined) {
+      const nextSupervisorId = dto.supervisorUserId.trim();
+      if (!nextSupervisorId) {
+        throw new BadRequestException('Supervisor is required');
+      }
+
+      await this.validateSupervisor(nextSupervisorId, true);
+      supervisorChanged = nextSupervisorId !== topic.supervisorUserId;
+      topic.supervisorUserId = nextSupervisorId;
+    }
+
+    if (supervisorChanged && topic.state === 'PENDING_GV') {
+      topic.approvalDeadlineAt = new Date(
+        now.getTime() + 3 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+
+      const student = await this.usersRepository.findById(topic.studentUserId);
+      await this.notifyIfAvailable({
+        receiverUserId: topic.supervisorUserId,
+        type: 'TOPIC_PENDING',
+        topicId: topic.id,
+        context: {
+          topicTitle: topic.title,
+          studentName:
+            student?.name ?? student?.email ?? topic.studentUserId,
+        },
+      });
+    }
+
+    topic.updatedAt = now.toISOString();
 
     await this.topicsRepository.update(topic.id, topic);
 
@@ -303,9 +541,16 @@ export class TopicsService {
       );
     }
 
+    await this.consumeSupervisorQuota(topic.supervisorUserId);
+
     topic.state = 'CONFIRMED';
     topic.updatedAt = new Date().toISOString();
-    await this.topicsRepository.update(topic.id, topic);
+    try {
+      await this.topicsRepository.update(topic.id, topic);
+    } catch (error) {
+      await this.releaseSupervisorQuota(topic.supervisorUserId);
+      throw error;
+    }
 
     await this.notifyIfAvailable({
       receiverUserId: topic.studentUserId,
@@ -355,6 +600,7 @@ export class TopicsService {
     }
 
     topic.state = 'CANCELLED';
+    topic.reasonRejected = reason?.trim() || undefined;
     topic.updatedAt = new Date().toISOString();
     await this.topicsRepository.update(topic.id, topic);
 
@@ -481,6 +727,13 @@ export class TopicsService {
     topic.updatedAt = new Date().toISOString();
     await this.topicsRepository.update(topic.id, topic);
 
+    if (
+      (toState === 'COMPLETED' && fromState !== 'COMPLETED') ||
+      (toState === 'CANCELLED' && this.shouldReleaseQuotaOnCancel(fromState))
+    ) {
+      await this.releaseSupervisorQuota(topic.supervisorUserId);
+    }
+
     await this.auditIfAvailable({
       action: 'TOPIC_TRANSITION',
       actorId: currentUser.userId,
@@ -510,9 +763,44 @@ export class TopicsService {
       approvalDeadlineAt: topic.approvalDeadlineAt,
       submitStartAt: topic.submitStartAt,
       submitEndAt: topic.submitEndAt,
+      reasonRejected: topic.reasonRejected,
+      revisionsAllowed: topic.revisionsAllowed,
       createdAt: topic.createdAt,
       updatedAt: topic.updatedAt,
     };
+  }
+
+  private mapRevisionRoundToDto(
+    round: RevisionRoundRecord,
+  ): RevisionRoundResponseDto {
+    return {
+      id: round.id,
+      topicId: round.topicId,
+      roundNumber: round.roundNumber,
+      status: round.status,
+      startAt: round.startAt,
+      endAt: round.endAt,
+      requestedBy: round.requestedBy,
+      reason: round.reason,
+      createdAt: round.createdAt,
+      updatedAt: round.updatedAt,
+    };
+  }
+
+  private ensureCanReadTopic(topic: TopicRecord, user: AuthUser): void {
+    if (user.role === 'TBM') {
+      return;
+    }
+
+    if (user.role === 'STUDENT' && topic.studentUserId === user.userId) {
+      return;
+    }
+
+    if (user.role === 'LECTURER' && topic.supervisorUserId === user.userId) {
+      return;
+    }
+
+    throw new ForbiddenException('Cannot access this topic');
   }
 
   private canUserTransition(
@@ -536,16 +824,10 @@ export class TopicsService {
       case 'START_PROGRESS':
       case 'MOVE_TO_GRADING':
       case 'REQUEST_CONFIRM':
-        // Supervisor or student
-        return (
-          topic.supervisorUserId === user.userId ||
-          topic.studentUserId === user.userId
-        );
-
       case 'CONFIRM_DEFENSE':
       case 'START_SCORING':
       case 'COMPLETE':
-        // Only supervisor or TBM
+        // Only supervisor
         return topic.supervisorUserId === user.userId;
 
       case 'CANCEL':
@@ -566,7 +848,9 @@ export class TopicsService {
       | 'TOPIC_PENDING'
       | 'TOPIC_APPROVED'
       | 'TOPIC_REJECTED'
-      | 'DEADLINE_SET';
+      | 'DEADLINE_SET'
+      | 'REVISION_ROUND_OPENED'
+      | 'REVISION_ROUND_CLOSED';
     context: Record<string, string>;
     topicId?: string;
   }): Promise<void> {
@@ -584,7 +868,9 @@ export class TopicsService {
       | 'TOPIC_REJECTED'
       | 'TOPIC_TRANSITION'
       | 'DEADLINE_SET'
-      | 'DEADLINE_EXTENDED';
+      | 'DEADLINE_EXTENDED'
+      | 'REVISION_ROUND_OPENED'
+      | 'REVISION_ROUND_CLOSED';
     actorId: string;
     actorRole: string;
     topicId?: string;
@@ -595,5 +881,108 @@ export class TopicsService {
     }
 
     await this.auditService.log(params);
+  }
+
+  private async validateSupervisor(
+    supervisorUserId: string,
+    ensureHasAvailableQuota = false,
+  ): Promise<void> {
+    const supervisor = await this.usersRepository.findById(supervisorUserId);
+
+    if (!supervisor) {
+      throw new BadRequestException('Supervisor not found');
+    }
+
+    if (supervisor.role !== 'LECTURER') {
+      throw new BadRequestException('Supervisor must be a lecturer account');
+    }
+
+    if (supervisor.isActive === false) {
+      throw new BadRequestException('Supervisor account is inactive');
+    }
+
+    if (ensureHasAvailableQuota) {
+      const totalQuota = supervisor.totalQuota ?? 0;
+      const quotaUsed = supervisor.quotaUsed ?? 0;
+      if (totalQuota - quotaUsed <= 0) {
+        throw new BadRequestException('Selected supervisor has no available quota');
+      }
+    }
+  }
+
+  private async consumeSupervisorQuota(supervisorUserId: string): Promise<void> {
+    const supervisor = await this.usersRepository.findById(supervisorUserId);
+    if (!supervisor) {
+      throw new BadRequestException('Supervisor not found');
+    }
+
+    const totalQuota = supervisor.totalQuota ?? 0;
+    const quotaUsed = supervisor.quotaUsed ?? 0;
+    if (totalQuota - quotaUsed <= 0) {
+      throw new BadRequestException('Selected supervisor has no available quota');
+    }
+
+    supervisor.quotaUsed = quotaUsed + 1;
+    await this.usersRepository.update(supervisor.id, supervisor);
+  }
+
+  private async releaseSupervisorQuota(supervisorUserId: string): Promise<void> {
+    const supervisor = await this.usersRepository.findById(supervisorUserId);
+    if (!supervisor) {
+      return;
+    }
+
+    const quotaUsed = supervisor.quotaUsed ?? 0;
+    if (quotaUsed <= 0) {
+      return;
+    }
+
+    supervisor.quotaUsed = quotaUsed - 1;
+    await this.usersRepository.update(supervisor.id, supervisor);
+  }
+
+  private shouldReleaseQuotaOnCancel(fromState: TopicState): boolean {
+    return fromState !== 'PENDING_GV' && fromState !== 'CANCELLED';
+  }
+
+  private isCurrentDateWithinPeriod(openDate: string, closeDate: string): boolean {
+    const today = this.getCurrentLocalDate();
+    const normalizedOpenDate = this.normalizeDateOnly(openDate);
+    const normalizedCloseDate = this.normalizeDateOnly(closeDate);
+
+    if (!normalizedOpenDate || !normalizedCloseDate) {
+      this.logger.warn(
+        `[isCurrentDateWithinPeriod] Could not normalize dates: openDate='${openDate}' closeDate='${closeDate}'`,
+      );
+      return false;
+    }
+
+    const inWindow = today >= normalizedOpenDate && today <= normalizedCloseDate;
+    this.logger.debug(
+      `[isCurrentDateWithinPeriod] today=${today} in [${normalizedOpenDate}, ${normalizedCloseDate}] => ${inWindow}`,
+    );
+    return inWindow;
+  }
+
+  private getCurrentLocalDate(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  private normalizeDateOnly(value?: string): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const datePart = value.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      return null;
+    }
+
+    return datePart;
   }
 }

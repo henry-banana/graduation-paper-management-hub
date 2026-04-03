@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
   Clock,
@@ -18,34 +19,33 @@ import { Topic } from "@/lib/domain/repositories/topic.repository";
 import { RepositoryFactory } from "@/lib/factory";
 
 const STATE_CONFIG: Record<string, { label: string; color: string; icon: LucideIcon; bg: string }> = {
-  // Current backend enum values
-  PENDING_APPROVAL: { label: "Chờ duyệt", color: "text-amber-700", bg: "bg-amber-100", icon: Clock },
-  APPROVED:         { label: "Đã được duyệt", color: "text-blue-700", bg: "bg-blue-100", icon: CheckCircle2 },
-  IN_PROGRESS:      { label: "Đang thực hiện", color: "text-primary", bg: "bg-primary/10", icon: BookOpen },
-  SUBMITTED:        { label: "Đã nộp bài", color: "text-cyan-700", bg: "bg-cyan-100", icon: CheckCircle2 },
-  GRADING:          { label: "Đang chấm điểm", color: "text-purple-700", bg: "bg-purple-100", icon: Clock },
-  COMPLETED:        { label: "Hoàn thành", color: "text-green-700", bg: "bg-green-100", icon: CheckCircle2 },
-  CANCELLED:        { label: "Đã hủy", color: "text-red-700", bg: "bg-red-100", icon: XCircle },
-  REJECTED:         { label: "Bị từ chối", color: "text-red-700", bg: "bg-red-100", icon: XCircle },
-  // Legacy aliases (backward compat)
-  PENDING_GV:      { label: "Chờ duyệt", color: "text-amber-700", bg: "bg-amber-100", icon: Clock },
-  CONFIRMED:       { label: "Đã xác nhận", color: "text-blue-700", bg: "bg-blue-100", icon: CheckCircle2 },
-  SCORING:         { label: "Đang chấm điểm", color: "text-purple-700", bg: "bg-purple-100", icon: Clock },
-  DEFENSE:         { label: "Đang bảo vệ", color: "text-indigo-700", bg: "bg-indigo-100", icon: Clock },
+  PENDING_GV: { label: "Chờ duyệt", color: "text-amber-700", bg: "bg-amber-100", icon: Clock },
+  CONFIRMED: { label: "Đã xác nhận", color: "text-blue-700", bg: "bg-blue-100", icon: CheckCircle2 },
+  IN_PROGRESS: { label: "Đang thực hiện", color: "text-primary", bg: "bg-primary/10", icon: BookOpen },
+  GRADING: { label: "Đang chấm điểm", color: "text-purple-700", bg: "bg-purple-100", icon: Clock },
+  SCORING: { label: "Đang chấm điểm", color: "text-purple-700", bg: "bg-purple-100", icon: Clock },
+  DEFENSE: { label: "Đang bảo vệ", color: "text-indigo-700", bg: "bg-indigo-100", icon: Clock },
   PENDING_CONFIRM: { label: "Chờ xác nhận", color: "text-cyan-700", bg: "bg-cyan-100", icon: Clock },
+  COMPLETED: { label: "Hoàn thành", color: "text-green-700", bg: "bg-green-100", icon: CheckCircle2 },
+  CANCELLED: { label: "Đã hủy", color: "text-red-700", bg: "bg-red-100", icon: XCircle },
 };
 
 const UNKNOWN_STATE = {
-  label: "—",
+  label: "Không xác định",
   color: "text-outline",
   bg: "bg-surface-container",
   icon: Clock,
 };
 
-export default function StudentTopicsPage() {
+const TERMINAL_STATES = new Set(["COMPLETED", "CANCELLED"]);
+
+function StudentTopicsContent() {
+  const searchParams = useSearchParams();
   const [topics, setTopics] = useState<Topic[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const keyword = searchParams.get("q")?.trim().toLowerCase() ?? "";
 
   const loadTopics = useCallback(async () => {
     setIsLoading(true);
@@ -69,10 +69,25 @@ export default function StudentTopicsPage() {
 
   const stats = useMemo(() => {
     const total = topics.length;
-    const pending = topics.filter((topic) => topic.state === "PENDING_APPROVAL" || topic.state === "PENDING_GV").length;
+    const pending = topics.filter((topic) => topic.state === "PENDING_GV").length;
     const completed = topics.filter((topic) => topic.state === "COMPLETED").length;
-    return { total, pending, completed };
+    const active = topics.filter((topic) => !TERMINAL_STATES.has(topic.state)).length;
+    return { total, pending, completed, active };
   }, [topics]);
+
+  const filteredTopics = useMemo(() => {
+    if (!keyword) {
+      return topics;
+    }
+
+    return topics.filter((topic) => {
+      const values = [topic.name, topic.company, topic.gvhdEmail, topic.periodCode, topic.type]
+        .filter(Boolean)
+        .map((value) => value!.toLowerCase());
+
+      return values.some((value) => value.includes(keyword));
+    });
+  }, [keyword, topics]);
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
@@ -82,13 +97,25 @@ export default function StudentTopicsPage() {
           <h1 className="text-2xl font-bold tracking-tight font-headline text-on-surface">Đề tài của tôi</h1>
           <p className="text-sm text-outline mt-1">Danh sách tất cả đề tài bạn đã đăng ký.</p>
         </div>
-        <Link
-          href="/student/topics/register"
-          className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
-        >
-          <PlusCircle className="w-4 h-4" />
-          Đăng ký mới
-        </Link>
+        {stats.active > 0 ? (
+          <button
+            type="button"
+            disabled
+            className="flex items-center gap-2 px-4 py-2.5 bg-surface-container text-outline text-sm font-semibold rounded-xl cursor-not-allowed"
+            title="Bạn đang có đề tài hoạt động, không thể đăng ký mới"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Đang có đề tài hoạt động
+          </button>
+        ) : (
+          <Link
+            href="/student/topics/register"
+            className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Đăng ký mới
+          </Link>
+        )}
       </div>
 
       {/* Stats */}
@@ -143,7 +170,7 @@ export default function StudentTopicsPage() {
                 </tr>
               </thead>
               <tbody>
-                {topics.map((topic) => {
+                {filteredTopics.map((topic) => {
                   const cfg = STATE_CONFIG[topic.state] ?? UNKNOWN_STATE;
                   const Icon = cfg.icon;
                   return (
@@ -183,15 +210,23 @@ export default function StudentTopicsPage() {
               </tbody>
             </table>
 
-            {topics.length === 0 && (
+            {filteredTopics.length === 0 && (
               <div className="flex flex-col items-center gap-3 py-16 text-outline">
                 <BookOpen className="w-10 h-10 text-outline/30" />
-                <p className="text-sm">Bạn chưa có đề tài nào. Hãy đăng ký ngay!</p>
+                <p className="text-sm">{keyword ? "Không tìm thấy đề tài phù hợp với từ khóa." : "Bạn chưa có đề tài nào. Hãy đăng ký ngay!"}</p>
               </div>
             )}
           </>
         )}
       </div>
     </div>
+  );
+}
+
+export default function StudentTopicsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-outline">Đang tải...</div>}>
+      <StudentTopicsContent />
+    </Suspense>
   );
 }

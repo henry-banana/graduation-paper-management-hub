@@ -26,6 +26,8 @@ import {
   CreateSubmissionDto,
   CreateSubmissionResponseDto,
   DownloadResponseDto,
+  ConfirmSubmissionDto,
+  ReplaceSubmissionDto,
 } from './dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -148,6 +150,10 @@ export class SubmissionsController {
       throw new BadRequestException('file is required');
     }
 
+    if (!file.buffer || file.buffer.length === 0) {
+      throw new BadRequestException('Uploaded file content is empty');
+    }
+
     const fileInfo: SubmissionFileInfo = {
       originalFileName: file.originalname,
       fileSize: file.size,
@@ -159,6 +165,120 @@ export class SubmissionsController {
       dto.fileType,
       user,
       fileInfo,
+      file.buffer,
+    );
+
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Post('submissions/:submissionId/confirm')
+  @Roles('STUDENT', 'LECTURER', 'TBM')
+  @ApiOperation({ summary: 'Confirm a submission version' })
+  @ApiParam({ name: 'submissionId', description: 'Submission ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Submission confirmed',
+    type: SubmissionResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Submission not found' })
+  @ApiResponse({ status: 409, description: 'Submission is locked or immutable' })
+  async confirmSubmission(
+    @Param('submissionId') submissionId: string,
+    @Body() dto: ConfirmSubmissionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const submission = await this.submissionsService.confirm(
+      submissionId,
+      user,
+      dto.note,
+    );
+
+    return {
+      data: submission,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Post('submissions/:submissionId/replace')
+  @Roles('STUDENT', 'LECTURER', 'TBM')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: MAX_SUBMISSION_FILE_SIZE,
+      },
+      fileFilter: (_req, file, cb) => {
+        if (file.mimetype !== PDF_MIME_TYPE) {
+          cb(new BadRequestException('Only PDF files are allowed'), false);
+          return;
+        }
+
+        cb(null, true);
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Replace an existing submission file in allowed window' })
+  @ApiParam({ name: 'submissionId', description: 'Submission ID' })
+  @ApiBody({
+    description: 'Replacement file with optional reason',
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Replacement PDF file',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional replacement reason',
+          example: 'Sửa lỗi chính tả và cập nhật nội dung',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Submission replaced successfully',
+    type: CreateSubmissionResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid file or request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Submission not found' })
+  @ApiResponse({ status: 409, description: 'Submission is locked or immutable' })
+  async replaceSubmission(
+    @Param('submissionId') submissionId: string,
+    @Body() dto: ReplaceSubmissionDto,
+    @UploadedFile() file: MulterFile | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+
+    if (!file.buffer || file.buffer.length === 0) {
+      throw new BadRequestException('Uploaded file content is empty');
+    }
+
+    const fileInfo: SubmissionFileInfo = {
+      originalFileName: file.originalname,
+      fileSize: file.size,
+      mimeType: file.mimetype,
+    };
+
+    const result = await this.submissionsService.replace(
+      submissionId,
+      user,
+      fileInfo,
+      file.buffer,
+      dto.reason,
     );
 
     return {

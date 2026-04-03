@@ -1,10 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   FileType,
+  SUBMISSION_STATUSES,
   SUBMISSION_FILE_TYPES,
+  SubmissionStatus,
+  VersionLabel,
 } from '../submission.constants';
 
-export { FileType } from '../submission.constants';
+export { FileType, SubmissionStatus, VersionLabel } from '../submission.constants';
 
 export class SubmissionResponseDto {
   @ApiProperty({ description: 'Submission ID', example: 'sub_001' })
@@ -31,6 +34,55 @@ export class SubmissionResponseDto {
     example: 1,
   })
   version!: number;
+
+  @ApiPropertyOptional({
+    description: 'Revision round ID for this submission',
+    example: 'rr_ab12cd34ef56',
+  })
+  revisionRoundId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Revision round number',
+    example: 2,
+  })
+  revisionRoundNumber?: number;
+
+  @ApiProperty({
+    description: 'Submission version label',
+    example: 'V2',
+  })
+  versionLabel!: VersionLabel;
+
+  @ApiProperty({
+    description: 'Submission lifecycle status',
+    enum: SUBMISSION_STATUSES,
+    example: 'DRAFT',
+  })
+  status!: SubmissionStatus;
+
+  @ApiPropertyOptional({
+    description: 'Deadline timestamp for this submission version',
+    example: '2026-04-10T16:59:59.000Z',
+  })
+  deadlineAt?: string;
+
+  @ApiPropertyOptional({
+    description: 'Confirm submit timestamp',
+    example: '2026-04-05T09:30:00.000Z',
+  })
+  confirmedAt?: string;
+
+  @ApiProperty({
+    description: 'Whether this submission is locked immutable',
+    example: false,
+  })
+  isLocked!: boolean;
+
+  @ApiProperty({
+    description: 'Whether student can replace the submission file now',
+    example: true,
+  })
+  canReplace!: boolean;
 
   @ApiPropertyOptional({
     description: 'Google Drive file ID',
@@ -70,11 +122,29 @@ export class CreateSubmissionResponseDto {
   @ApiProperty({ description: 'Version number', example: 2 })
   version!: number;
 
+  @ApiPropertyOptional({ description: 'Revision round number', example: 2 })
+  revisionRoundNumber?: number;
+
+  @ApiProperty({
+    description: 'Submission version label',
+    example: 'V2',
+  })
+  versionLabel!: VersionLabel;
+
   @ApiPropertyOptional({
     description: 'Google Drive file ID',
     example: 'drv_123abc',
   })
   driveFileId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Submission deadline timestamp',
+    example: '2026-04-10T16:59:59.000Z',
+  })
+  deadlineAt?: string;
+
+  @ApiProperty({ description: 'Whether this submission can be replaced', example: true })
+  canReplace!: boolean;
 }
 
 export class DownloadResponseDto {

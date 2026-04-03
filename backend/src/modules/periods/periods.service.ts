@@ -19,9 +19,13 @@ export interface PeriodRecord {
   id: string;
   code: string;
   type: PeriodType;
+  major?: string;
   openDate: string;
   closeDate: string;
+  submitStartAt?: string; // Teacher's StartEx — submission window start
+  submitEndAt?: string;   // Teacher's EndEx   — submission window end
   status: PeriodStatus;
+  isActive?: boolean;
   createdAt: string;
   updatedAt: string;
 }

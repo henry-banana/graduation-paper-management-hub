@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Menu, Search, Bell, ChevronDown, LogOut, Settings, UserCircle } from "lucide-react";
-import { getApiBaseUrl } from "@/lib/api";
+import { Menu, Bell, ChevronDown, LogOut, Settings, UserCircle } from "lucide-react";
+import { ApiResponse, getApiBaseUrl, api } from "@/lib/api";
 import {
   clearAuthSession,
   getCurrentUiRole,
@@ -28,15 +28,32 @@ export function Header({ setIsSidebarOpen }: { setIsSidebarOpen: (val: boolean) 
   const [role, setRole] = useState("STUDENT");
   const [fullName, setFullName] = useState("Tài khoản");
   const [showDropdown, setShowDropdown] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    setRole(getCurrentUiRole());
+    const currentRole = getCurrentUiRole();
+    setRole(currentRole);
 
     const profile = getUserProfile();
     if (profile?.fullName) {
       setFullName(profile.fullName);
     }
+
+    const loadUnreadCount = async () => {
+      try {
+        const response = await api.get<ApiResponse<{ unreadCount: number }>>(
+          "/notifications/unread-count",
+        );
+        setUnreadCount(response.data.unreadCount);
+      } catch {
+        setUnreadCount(0);
+      }
+    };
+
+    void loadUnreadCount();
   }, []);
+
+  const notificationPath = role === "STUDENT" ? "/student/notifications" : "/notifications";
 
   const handleLogout = async () => {
     const refreshToken = getRefreshToken();
@@ -64,7 +81,7 @@ export function Header({ setIsSidebarOpen }: { setIsSidebarOpen: (val: boolean) 
   return (
     <header className="bg-surface/80 backdrop-blur-xl sticky top-0 z-40 w-full border-b border-outline-variant/10 shadow-[0_4px_30px_rgba(11,28,48,0.04)]">
       <div className="flex items-center justify-between px-4 md:px-6 h-16">
-        {/* Left: hamburger + search */}
+        {/* Left: hamburger */}
         <div className="flex items-center gap-3">
           <button
             className="md:hidden p-2 -ml-1 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors active:scale-95"
@@ -73,33 +90,23 @@ export function Header({ setIsSidebarOpen }: { setIsSidebarOpen: (val: boolean) 
           >
             <Menu className="w-5 h-5" />
           </button>
-
-          {/* Search */}
-          <div className="hidden sm:flex bg-surface-container-low px-4 py-2 rounded-full items-center gap-2 border border-outline-variant/15 transition-all hover:border-outline-variant/40 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 shadow-sm">
-            <Search className="w-4 h-4 text-outline flex-shrink-0" />
-            <input
-              type="text"
-              placeholder="Tìm kiếm nhanh..."
-              className="bg-transparent border-none focus:ring-0 text-sm w-40 md:w-56 font-body placeholder:text-outline/60 focus:outline-none text-on-surface"
-            />
-            <kbd className="hidden md:flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono text-outline bg-surface-container border border-outline-variant/20">
-              ⌘K
-            </kbd>
-          </div>
         </div>
 
         {/* Right: notifications + user */}
         <div className="flex items-center gap-1">
           {/* Notification bell */}
-            <button
-              type="button"
-              className="relative p-2 text-on-surface-variant hover:bg-primary/5 hover:text-primary rounded-full transition-colors active:scale-95"
-              aria-label="Thông báo"
-            >
+          <Link
+            href={notificationPath}
+            className="relative p-2 text-on-surface-variant hover:bg-primary/5 hover:text-primary rounded-full transition-colors active:scale-95"
+            aria-label="Thông báo"
+          >
             <Bell className="w-5 h-5" />
-            {/* Badge */}
-            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-error rounded-full"></span>
-          </button>
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-error text-white text-[10px] font-bold flex items-center justify-center">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
+          </Link>
 
           {/* User dropdown */}
           <div className="relative">

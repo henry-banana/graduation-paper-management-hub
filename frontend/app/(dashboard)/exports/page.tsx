@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+<<<<<<< HEAD
 import { FileDown, RefreshCcw, CheckCircle2, Clock, FileWarning, RefreshCw, Plus, ChevronDown, X, Loader2 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+=======
+import { FileDown, RefreshCcw, CheckCircle2, Clock, FileWarning, RefreshCw } from "lucide-react";
+import { ApiListResponse, api } from "@/lib/api";
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
 
 interface ExportJob {
   id: string;
   filename?: string;
   type?: string;
+<<<<<<< HEAD
   name?: string;
   status: "COMPLETED" | "PROCESSING" | "FAILED";
   requestedAt?: string;
@@ -46,11 +52,20 @@ const EXPORT_ENDPOINT: Record<string, Record<RubricRole, string>> = {
   },
 };
 
+=======
+  status: "COMPLETED" | "PROCESSING" | "FAILED" | "PENDING";
+  createdAt?: string;
+  driveLink?: string;
+  errorMessage?: string;
+}
+
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
 export default function ExportsPage() {
   const [exports, setExports] = useState<ExportJob[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+<<<<<<< HEAD
   // Create rubric panel state
   const [showCreate, setShowCreate] = useState(false);
   const [topics, setTopics] = useState<TopicOption[]>([]);
@@ -61,6 +76,8 @@ export default function ExportsPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
 
+=======
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
   const load = async () => {
     setIsLoading(true);
     setError(null);
@@ -76,6 +93,7 @@ export default function ExportsPage() {
 
   useEffect(() => { void load(); }, []);
 
+<<<<<<< HEAD
   // Load topics when create panel opens
   useEffect(() => {
     if (!showCreate || topics.length > 0) return;
@@ -133,6 +151,13 @@ export default function ExportsPage() {
     switch (status) {
       case "COMPLETED": return <CheckCircle2 className="w-5 h-5 text-green-500" />;
       case "PROCESSING": return <Clock className="w-5 h-5 text-yellow-500" />;
+=======
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "COMPLETED": return <CheckCircle2 className="w-5 h-5 text-green-500" />;
+      case "PROCESSING":
+      case "PENDING": return <Clock className="w-5 h-5 text-yellow-500" />;
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
       case "FAILED": return <FileWarning className="w-5 h-5 text-red-500" />;
       default: return null;
     }
@@ -140,15 +165,23 @@ export default function ExportsPage() {
 
   const getStatusText = (status: string) => {
     switch (status) {
+<<<<<<< HEAD
       case "COMPLETED": return <span className="text-green-700">Đã hoàn thành</span>;
       case "PROCESSING": return <span className="text-yellow-700">Đang xử lý...</span>;
       case "FAILED": return <span className="text-red-700">Thất bại</span>;
+=======
+      case "COMPLETED": return <span className="text-green-700 font-medium">Đã hoàn thành</span>;
+      case "PROCESSING": return <span className="text-yellow-700 font-medium">Đang xử lý...</span>;
+      case "PENDING": return <span className="text-yellow-600 font-medium">Đang chờ...</span>;
+      case "FAILED": return <span className="text-red-700 font-medium">Thất bại</span>;
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
       default: return null;
     }
   };
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
+<<<<<<< HEAD
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -286,12 +319,29 @@ export default function ExportsPage() {
         </div>
       )}
 
+=======
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight font-headline text-on-surface">Quản lý Xuất File</h1>
+          <p className="text-sm text-outline mt-1">Lịch sử xuất file Word Rubric và bảng điểm sang Google Drive.</p>
+        </div>
+        <button
+          onClick={() => void load()}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant/20 text-sm font-medium text-on-surface hover:bg-surface-container transition-colors"
+        >
+          <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+          Làm mới
+        </button>
+      </div>
+
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
       {error && (
         <div className="bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3 text-sm text-error">
           {error}
         </div>
       )}
 
+<<<<<<< HEAD
       {/* Export history table */}
       <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 overflow-hidden">
         <div className="px-6 py-4 border-b border-outline-variant/10 flex items-center justify-between">
@@ -299,6 +349,9 @@ export default function ExportsPage() {
           <span className="text-xs text-outline">{exports.length} file</span>
         </div>
 
+=======
+      <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 overflow-hidden">
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
             <RefreshCw className="w-6 h-6 text-outline animate-spin" />
@@ -307,8 +360,12 @@ export default function ExportsPage() {
         ) : exports.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <FileDown className="w-10 h-10 text-outline/40" />
+<<<<<<< HEAD
             <p className="text-sm text-on-surface-variant font-medium">Chưa có file export nào.</p>
             <p className="text-xs text-outline">Nhấn &quot;Tạo Rubric mới&quot; để bắt đầu.</p>
+=======
+            <p className="text-sm text-on-surface-variant">Chưa có file export nào.</p>
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -325,7 +382,11 @@ export default function ExportsPage() {
                 {exports.map((job) => (
                   <tr key={job.id} className="hover:bg-surface-container-low/50 transition-colors">
                     <td className="px-6 py-4">
+<<<<<<< HEAD
                       <div className="text-sm font-medium text-on-surface">{job.filename ?? job.type ?? job.name ?? job.id}</div>
+=======
+                      <div className="text-sm font-medium text-on-surface">{job.filename ?? job.type ?? job.id}</div>
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
                       {job.errorMessage && <div className="text-xs text-error mt-1">{job.errorMessage}</div>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -335,6 +396,7 @@ export default function ExportsPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-outline">
+<<<<<<< HEAD
                       {job.createdAt ? new Date(job.createdAt).toLocaleString("vi-VN") : job.requestedAt ? new Date(job.requestedAt).toLocaleString("vi-VN") : "—"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -344,6 +406,16 @@ export default function ExportsPage() {
                           target="_blank"
                           rel="noreferrer"
                           aria-label={`Tải xuống ${job.filename ?? "file"}`}
+=======
+                      {job.createdAt ? new Date(job.createdAt).toLocaleString("vi-VN") : "—"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      {job.status === "COMPLETED" && job.driveLink ? (
+                        <a
+                          href={job.driveLink}
+                          target="_blank"
+                          rel="noreferrer"
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
                           className="inline-flex items-center gap-1.5 text-primary hover:underline font-semibold"
                         >
                           <FileDown className="w-4 h-4" /> Tải xuống
@@ -351,7 +423,10 @@ export default function ExportsPage() {
                       ) : job.status === "FAILED" ? (
                         <button
                           onClick={() => void load()}
+<<<<<<< HEAD
                           aria-label="Làm mới danh sách"
+=======
+>>>>>>> 804651cf5f35edc134525edcc188c1ba1812cf7c
                           className="inline-flex items-center gap-1.5 text-outline hover:text-on-surface"
                         >
                           <RefreshCcw className="w-4 h-4" /> Làm mới

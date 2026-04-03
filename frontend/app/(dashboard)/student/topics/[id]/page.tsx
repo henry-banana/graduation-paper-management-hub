@@ -18,6 +18,12 @@ import {
 import Link from "next/link";
 import { FileUpload } from "@/components/ui/file-upload";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import {
+  TOPIC_DOMAIN_OPTIONS,
+  TOPIC_STATE_LABELS,
+  TOPIC_TYPE_LABELS,
+  formatDeadlineStatus,
+} from "@/lib/constants/vi-labels";
 
 type SubmissionFileType = "REPORT" | "TURNITIN" | "REVISION";
 
@@ -30,6 +36,7 @@ interface TopicDto {
   state: string;
   supervisorUserId: string;
   periodId: string;
+  submitStartAt?: string;
   submitEndAt?: string;
 }
 
@@ -67,6 +74,23 @@ interface NotificationDto {
   body?: string;
   createdAt: string;
 }
+
+interface SupervisorOptionDto {
+  id: string;
+  fullName: string;
+  department?: string;
+  totalQuota?: number;
+  quotaUsed?: number;
+}
+
+const SCORE_READY_STATES = new Set([
+  "GRADING",
+  "SCORING",
+  "DEFENSE",
+  "COMPLETED",
+]);
+
+const SCHEDULE_READY_STATES = new Set(["DEFENSE", "SCORING", "COMPLETED"]);
 
 const BCTT_STEPS = [
   { key: "DRAFT", label: "ĐĂNG KÝ" },
@@ -108,6 +132,56 @@ function formatFileSize(size?: number): string {
   return `${(size / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function getSubmissionWindowStatus(
+  topic: Pick<TopicDto, "state" | "submitStartAt" | "submitEndAt">,
+): {
+  canUpload: boolean;
+  reason: string;
+} {
+  if (topic.state !== "IN_PROGRESS") {
+    return {
+      canUpload: false,
+      reason: "Tính năng nộp bài sẽ mở khi đề tài ở trạng thái THỰC HIỆN ĐỀ TÀI.",
+    };
+  }
+
+  if (!topic.submitStartAt || !topic.submitEndAt) {
+    return {
+      canUpload: false,
+      reason: "Hệ thống chưa thiết lập cửa sổ nộp bài cho đề tài này.",
+    };
+  }
+
+  const startAt = new Date(topic.submitStartAt).getTime();
+  const endAt = new Date(topic.submitEndAt).getTime();
+  if (Number.isNaN(startAt) || Number.isNaN(endAt)) {
+    return {
+      canUpload: false,
+      reason: "Cửa sổ nộp bài không hợp lệ. Vui lòng liên hệ TBM.",
+    };
+  }
+
+  const now = Date.now();
+  if (now < startAt) {
+    return {
+      canUpload: false,
+      reason: "Chưa đến thời gian cho phép nộp bài.",
+    };
+  }
+
+  if (now > endAt) {
+    return {
+      canUpload: false,
+      reason: "Đã quá hạn nộp bài.",
+    };
+  }
+
+  return {
+    canUpload: true,
+    reason: "",
+  };
+}
+
 function ProgressStepper({
   steps,
   activeIdx,
@@ -147,20 +221,17 @@ function ProgressStepper({
 function SubmissionPanel({
   topic,
   submissions,
-  fileType,
-  onFileTypeChange,
   onUpload,
   isUploading,
 }: {
   topic: TopicDto;
   submissions: SubmissionDto[];
-  fileType: SubmissionFileType;
-  onFileTypeChange: (value: SubmissionFileType) => void;
   onUpload: (file: File) => Promise<void>;
   isUploading: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const isLocked = topic.state !== "IN_PROGRESS";
+  const submissionWindow = getSubmissionWindowStatus(topic);
+  const isLocked = !submissionWindow.canUpload;
 
   return (
     <div className={`rounded-2xl border overflow-hidden transition-all ${isLocked ? "border-outline-variant/15 bg-surface-container/30" : "border-primary/20 bg-primary/5 shadow-sm"}`}>
@@ -174,7 +245,7 @@ function SubmissionPanel({
             <span className="text-sm font-semibold text-on-surface">Nộp báo cáo cuối kỳ</span>
             {submissions.length > 0 && <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full uppercase">Đã có bài nộp</span>}
           </div>
-          <span className="text-xs text-outline">{isLocked ? "Tính năng đang bị khóa" : "Mở nộp bài"}</span>
+          <span className="text-xs text-outline">{isLocked ? submissionWindow.reason : "Mở nộp bài"}</span>
         </div>
         <div className="flex items-center gap-4">
           {!isLocked && topic.submitEndAt && (
@@ -193,30 +264,29 @@ function SubmissionPanel({
               <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center">
                 <Lock className="w-5 h-5 text-outline/40" />
               </div>
-              <p className="text-sm">Tính năng nộp bài sẽ mở khi hệ thống chuyển sang trạng thái <strong>THỰC HIỆN ĐỀ TÀI</strong>.</p>
+              <p className="text-sm text-center">{submissionWindow.reason}</p>
             </div>
           ) : (
             <div className="px-6 py-5 bg-surface-container-lowest flex flex-col gap-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+                <div className="flex flex-col gap-1 text-sm text-on-surface-variant">
                   <span className="font-semibold">Loại file</span>
-                  <select
-                    value={fileType}
-                    onChange={(event) => onFileTypeChange(event.target.value as SubmissionFileType)}
-                    className="px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface"
-                    disabled={isUploading}
-                  >
-                    <option value="REPORT">REPORT</option>
-                    <option value="TURNITIN">TURNITIN</option>
-                    <option value="REVISION">REVISION</option>
-                  </select>
-                </label>
+                  <div className="px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface font-semibold">
+                    REPORT
+                  </div>
+                </div>
                 <div className="flex items-end text-xs text-outline">
-                  Nộp file PDF, dung lượng tối đa 50MB.
+                  Chỉ hỗ trợ nộp báo cáo PDF, dung lượng tối đa 50MB.
                 </div>
               </div>
 
-              <FileUpload onUpload={onUpload} accept=".pdf" maxSize={50} />
+              <FileUpload
+                onUpload={onUpload}
+                accept=".pdf"
+                maxSize={50}
+                requireConfirmation
+                confirmButtonText="Xác nhận nộp báo cáo"
+              />
 
               <div className="w-full border border-outline-variant/15 rounded-xl overflow-hidden">
                 <div className="px-4 py-2.5 bg-surface-container/40 text-xs font-bold uppercase tracking-wide text-outline">
@@ -283,10 +353,21 @@ export default function StudentTopicDetailPage() {
   const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
   const [schedule, setSchedule] = useState<ScheduleDto | null>(null);
   const [notifications, setNotifications] = useState<NotificationDto[]>([]);
-  const [fileType, setFileType] = useState<SubmissionFileType>("REPORT");
+  const [supervisors, setSupervisors] = useState<SupervisorOptionDto[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scoreError, setScoreError] = useState<string | null>(null);
+  
+  // Topic Edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
+  const [editForm, setEditForm] = useState({
+    title: "",
+    domain: "",
+    companyName: "",
+    supervisorUserId: "",
+  });
 
   useEffect(() => {
     if (!topicId) {
@@ -300,34 +381,62 @@ export default function StudentTopicDetailPage() {
       try {
         const topicRes = await api.get<ApiResponse<TopicDto>>(`/topics/${topicId}`);
         setTopic(topicRes.data);
+        setEditForm({
+          title: topicRes.data.title || "",
+          domain: topicRes.data.domain || "",
+          companyName: topicRes.data.companyName || "",
+          supervisorUserId: topicRes.data.supervisorUserId || "",
+        });
 
-        const [submissionsRes, notificationsRes] = await Promise.all([
+        const [submissionsRes, notificationsRes, supervisorsRes] = await Promise.all([
           api.get<ApiResponse<SubmissionDto[]>>(`/topics/${topicId}/submissions`),
           api.get<ApiListResponse<NotificationDto>>("/notifications?page=1&size=100"),
+          api.get<ApiResponse<SupervisorOptionDto[]>>("/users/supervisors/options"),
         ]);
 
         setSubmissions(submissionsRes.data);
         setNotifications(
           notificationsRes.data.filter((notification) => notification.topicId === topicId),
         );
+        setSupervisors(supervisorsRes.data);
 
-        try {
-          const summaryRes = await api.get<ApiResponse<ScoreSummaryDto>>(
-            `/topics/${topicId}/scores/summary`,
-          );
-          setSummary(summaryRes.data);
-        } catch (summaryLoadError) {
-          setSummary(null);
-          if (summaryLoadError instanceof Error) {
-            setScoreError(summaryLoadError.message);
+        const scoreReady = SCORE_READY_STATES.has(topicRes.data.state);
+        if (scoreReady) {
+          try {
+            const summaryRes = await api.get<ApiResponse<ScoreSummaryDto>>(
+              `/topics/${topicId}/scores/summary`,
+            );
+            setSummary(summaryRes.data);
+          } catch (summaryLoadError) {
+            setSummary(null);
+            if (summaryLoadError instanceof Error) {
+              const normalized = summaryLoadError.message.toLowerCase();
+              if (
+                normalized.includes("not yet published") ||
+                normalized.includes("chưa có điểm") ||
+                normalized.includes("chưa được công bố")
+              ) {
+                setScoreError(null);
+              } else {
+                setScoreError(summaryLoadError.message);
+              }
+            }
           }
+        } else {
+          setSummary(null);
+          setScoreError(null);
         }
 
-        try {
-          const scheduleRes = await api.get<ScheduleDto>(`/topics/${topicId}/schedule`);
-          setSchedule(scheduleRes);
-        } catch {
+        const scheduleReady = SCHEDULE_READY_STATES.has(topicRes.data.state);
+        if (!scheduleReady) {
           setSchedule(null);
+        } else {
+          try {
+            const scheduleRes = await api.get<ScheduleDto>(`/topics/${topicId}/schedule`);
+            setSchedule(scheduleRes);
+          } catch {
+            setSchedule(null);
+          }
         }
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : "Không thể tải chi tiết đề tài.";
@@ -347,13 +456,22 @@ export default function StudentTopicDetailPage() {
     return index >= 0 ? index : 0;
   }, [steps, topic]);
 
+  const selectedSupervisor = useMemo(() => {
+    if (!topic) {
+      return null;
+    }
+
+    return supervisors.find((supervisor) => supervisor.id === topic.supervisorUserId) ?? null;
+  }, [supervisors, topic]);
+
   const handleUpload = async (file: File) => {
     if (!topic) {
       throw new Error("Không tìm thấy đề tài.");
     }
 
-    if (topic.state !== "IN_PROGRESS") {
-      throw new Error("Chỉ nộp file khi đề tài đang ở trạng thái IN_PROGRESS.");
+    const submissionWindow = getSubmissionWindowStatus(topic);
+    if (!submissionWindow.canUpload) {
+      throw new Error(submissionWindow.reason);
     }
 
     setIsUploading(true);
@@ -362,7 +480,7 @@ export default function StudentTopicDetailPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("fileType", fileType);
+      formData.append("fileType", "REPORT");
 
       await api.postForm<ApiResponse<{ id: string; version: number }>>(
         `/topics/${topic.id}/submissions`,
@@ -379,6 +497,47 @@ export default function StudentTopicDetailPage() {
       throw uploadError;
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleEditTopic = async () => {
+    if (!topic) return;
+    setIsSubmittingEdit(true);
+    setError(null);
+    try {
+      await api.patch(`/topics/${topic.id}`, {
+        title: editForm.title,
+        domain: editForm.domain,
+        companyName: editForm.companyName,
+        supervisorUserId: editForm.supervisorUserId,
+      });
+
+      setTopic({
+        ...topic,
+        title: editForm.title,
+        domain: editForm.domain,
+        companyName: editForm.companyName,
+        supervisorUserId: editForm.supervisorUserId,
+      });
+      setIsEditing(false);
+    } catch (err: any) {
+      setError(err.message || "Lưu thông tin thất bại");
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
+  const handleCancelTopic = async () => {
+    if (!topic || !confirm("Bạn có chắc chắn muốn hủy đăng ký đề tài này không? Hành động này không thể hoàn tác.")) return;
+    setIsCanceling(true);
+    setError(null);
+    try {
+      await api.post(`/topics/${topic.id}/transition`, { action: "CANCEL" });
+      setTopic({ ...topic, state: "CANCELLED" });
+    } catch (err: any) {
+      setError(err.message || "Hủy đề tài thất bại");
+    } finally {
+      setIsCanceling(false);
     }
   };
 
@@ -408,52 +567,158 @@ export default function StudentTopicDetailPage() {
         </div>
       )}
 
+      {/* Stepper Section (Full Width Top) */}
+      <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 shadow-sm p-6 overflow-hidden">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div>
+            <span className="inline-block px-3 py-1 bg-primary/10 text-primary text-[10px] font-bold tracking-widest uppercase rounded-full mb-2">
+              {TOPIC_TYPE_LABELS[topic.type] || topic.type}
+            </span>
+            <h1 className="text-xl md:text-2xl font-bold font-headline text-on-surface leading-snug">{topic.title}</h1>
+          </div>
+          
+          <div className="flex gap-2 shrink-0">
+             {["DRAFT", "PENDING_GV"].includes(topic.state) && !isEditing && (
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="px-4 py-2 border border-primary text-primary font-semibold text-sm rounded-xl hover:bg-primary/5 transition-colors"
+                >
+                  Sửa thông tin
+                </button>
+             )}
+             {["DRAFT", "PENDING_GV"].includes(topic.state) && (
+                <button
+                  onClick={handleCancelTopic}
+                  disabled={isCanceling}
+                  className="px-4 py-2 bg-error text-white font-semibold text-sm rounded-xl hover:bg-error/90 transition-colors disabled:opacity-50"
+                >
+                  {isCanceling ? "Đang hủy..." : "Hủy đăng ký"}
+                </button>
+             )}
+          </div>
+        </div>
+        
+        <div className="bg-surface-container/30 rounded-2xl border border-outline-variant/10 p-2 relative">
+          <ProgressStepper steps={steps} activeIdx={activeStepIndex} />
+        </div>
+      </div>
+
       <div className="grid lg:grid-cols-3 gap-6 items-start">
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Header & Stepper */}
+          {/* Detail Info Card */}
           <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 shadow-sm overflow-hidden">
-            <div className="p-6 bg-gradient-to-br from-primary/5 to-transparent">
-              <span className="inline-block px-3 py-1 bg-primary/10 text-primary text-[10px] font-bold tracking-widest uppercase rounded-full mb-3">
-                {topic.type}
-              </span>
-              <h1 className="text-xl md:text-2xl font-bold font-headline text-on-surface leading-snug">{topic.title}</h1>
-              
-              <div className="mt-8 bg-surface-container-lowest rounded-2xl border border-outline-variant/10 p-4 shadow-sm overflow-hidden relative">
-                <span className="absolute top-0 right-0 px-3 py-1 bg-primary rounded-bl-xl text-[10px] font-bold text-white uppercase shadow-sm">
-                  Tiến độ
-                </span>
-                <ProgressStepper steps={steps} activeIdx={activeStepIndex} />
+            {/* Status Alert */}
+            <div className={`px-6 py-4 flex items-center gap-3 border-b ${TOPIC_STATE_LABELS[topic.state]?.bg || 'bg-surface-container-low'} ${TOPIC_STATE_LABELS[topic.state]?.color?.replace('text-', 'border-') || 'border-outline-variant/20'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-white/50`}>
+                <Clock className={`w-4 h-4 ${TOPIC_STATE_LABELS[topic.state]?.color || 'text-outline'}`} />
               </div>
-            </div>
-
-            {/* Status Alert from slides */}
-            <div className="px-6 py-4 bg-amber-50/50 border-t border-b border-amber-100 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                <Clock className="w-4 h-4 text-amber-600" />
-              </div>
-              <p className="text-sm font-semibold text-amber-800">Trạng thái hiện tại: {topic.state}</p>
+              <p className={`text-sm font-semibold ${TOPIC_STATE_LABELS[topic.state]?.color || 'text-on-surface'}`}>
+                Trạng thái: {TOPIC_STATE_LABELS[topic.state]?.label || topic.state}
+              </p>
             </div>
 
             <div className="px-6 py-5">
               <h4 className="text-xs font-bold uppercase tracking-widest text-outline mb-4">Thông tin đề tài</h4>
-              <div className="grid sm:grid-cols-2 gap-y-4 gap-x-8 text-sm">
-                <div><span className="block text-xs text-outline mb-1">GV Hướng dẫn</span><span className="font-semibold text-on-surface">{topic.supervisorUserId}</span></div>
-                <div><span className="block text-xs text-outline mb-1">Mảng đề tài</span><span className="font-semibold text-on-surface">{topic.domain}</span></div>
-                <div><span className="block text-xs text-outline mb-1">Đợt</span><span className="font-semibold text-on-surface">{topic.periodId}</span></div>
-                <div><span className="block text-xs text-outline mb-1">Hạn nộp</span><span className="font-semibold text-on-surface">{formatDateTime(topic.submitEndAt)}</span></div>
-                {topic.companyName && (
-                  <div className="sm:col-span-2"><span className="block text-xs text-outline mb-1">Công ty</span><span className="font-semibold text-on-surface">{topic.companyName}</span></div>
-                )}
-              </div>
+              {isEditing ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs text-on-surface-variant mb-1 font-semibold">Tên đề tài</label>
+                    <input className="w-full px-3 py-2 border rounded-xl" value={editForm.title} onChange={e => setEditForm({...editForm, title: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-on-surface-variant mb-1 font-semibold">Ngành/Chuyên ngành</label>
+                    <select
+                      className="w-full px-3 py-2 border rounded-xl bg-surface-container"
+                      value={editForm.domain}
+                      onChange={e => setEditForm({ ...editForm, domain: e.target.value })}
+                    >
+                      <option value="">Chọn ngành/chuyên ngành</option>
+                      {TOPIC_DOMAIN_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-on-surface-variant mb-1 font-semibold">Công ty</label>
+                    <input className="w-full px-3 py-2 border rounded-xl" value={editForm.companyName} onChange={e => setEditForm({...editForm, companyName: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-on-surface-variant mb-1 font-semibold">GV hướng dẫn</label>
+                    <select
+                      className="w-full px-3 py-2 border rounded-xl bg-surface-container"
+                      value={editForm.supervisorUserId}
+                      onChange={(e) =>
+                        setEditForm({
+                          ...editForm,
+                          supervisorUserId: e.target.value,
+                        })
+                      }
+                    >
+                      {supervisors.map((supervisor) => {
+                        const isFull =
+                          (supervisor.quotaUsed ?? 0) >=
+                            (supervisor.totalQuota ?? 0) &&
+                          supervisor.id !== topic.supervisorUserId;
+
+                        return (
+                          <option
+                            key={supervisor.id}
+                            value={supervisor.id}
+                            disabled={isFull}
+                          >
+                            {supervisor.fullName}
+                            {supervisor.department
+                              ? ` (${supervisor.department})`
+                              : ""}
+                            {typeof supervisor.quotaUsed === "number" &&
+                            typeof supervisor.totalQuota === "number"
+                              ? ` - ${supervisor.quotaUsed}/${supervisor.totalQuota}`
+                              : ""}
+                            {isFull ? " (Đã đầy)" : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button onClick={() => setIsEditing(false)} className="px-4 py-2 text-sm text-outline border rounded-xl">Hủy</button>
+                    <button onClick={handleEditTopic} disabled={isSubmittingEdit} className="px-4 py-2 text-sm text-white bg-primary rounded-xl disabled:opacity-50">Lưu</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid sm:grid-cols-2 gap-y-4 gap-x-8 text-sm">
+                  <div>
+                    <span className="block text-xs text-on-surface-variant mb-1">GV Hướng dẫn</span>
+                    <span className="font-semibold text-on-surface text-[15px]">
+                      {selectedSupervisor?.fullName ?? topic.supervisorUserId}
+                    </span>
+                    {selectedSupervisor?.department && (
+                      <p className="text-xs text-outline mt-1">{selectedSupervisor.department}</p>
+                    )}
+                  </div>
+                  <div><span className="block text-xs text-on-surface-variant mb-1">Ngành/Chuyên ngành</span><span className="font-semibold text-on-surface text-[15px]">{topic.domain}</span></div>
+                  <div><span className="block text-xs text-on-surface-variant mb-1">Đợt</span><span className="font-semibold text-on-surface text-[15px]">{topic.periodId}</span></div>
+                  <div>
+                     <span className="block text-xs text-on-surface-variant mb-1">Hạn nộp báo cáo</span>
+                     <span className={`font-semibold ${formatDeadlineStatus(topic.submitEndAt).urgency === 'urgent' ? 'text-amber-600' : 'text-on-surface'}`}>
+                       {formatDeadlineStatus(topic.submitEndAt).display} 
+                       <span className="font-normal text-xs ml-2">({formatDeadlineStatus(topic.submitEndAt).label})</span>
+                     </span>
+                  </div>
+                  {topic.companyName && (
+                    <div className="sm:col-span-2"><span className="block text-xs text-on-surface-variant mb-1">Công ty</span><span className="font-semibold text-on-surface text-[15px]">{topic.companyName}</span></div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           <SubmissionPanel
             topic={topic}
             submissions={submissions}
-            fileType={fileType}
-            onFileTypeChange={setFileType}
             onUpload={handleUpload}
             isUploading={isUploading}
           />

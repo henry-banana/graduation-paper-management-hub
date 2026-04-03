@@ -13,7 +13,11 @@ describe('SubmissionsController', () => {
     topicId: 'tp_001',
     uploaderUserId: 'USR001',
     fileType: 'REPORT',
-    version: 1,
+    versionNumber: 1,
+    versionLabel: 'V1',
+    status: 'DRAFT',
+    isLocked: false,
+    canReplace: true,
     driveFileId: 'drv_abc123',
     driveLink: 'https://drive.google.com/file/d/drv_abc123',
     uploadedAt: '2026-05-10T10:00:00Z',
@@ -54,7 +58,11 @@ describe('SubmissionsController', () => {
         topicId: record.topicId,
         uploaderUserId: record.uploaderUserId,
         fileType: record.fileType,
-        version: record.version,
+        version: record.versionNumber,
+        versionLabel: record.versionLabel,
+        status: record.status,
+        isLocked: record.isLocked,
+        canReplace: record.canReplace,
         driveFileId: record.driveFileId,
         driveLink: record.driveLink,
         uploadedAt: record.uploadedAt,
@@ -112,7 +120,9 @@ describe('SubmissionsController', () => {
       submissionsService.create.mockResolvedValue({
         id: 'sub_new',
         version: 3,
+        versionLabel: 'V3',
         driveFileId: 'drv_new',
+        canReplace: true,
       });
 
       const result = await controller.uploadSubmission(
@@ -124,6 +134,7 @@ describe('SubmissionsController', () => {
 
       expect(result.data.id).toBe('sub_new');
       expect(result.data.version).toBe(3);
+      expect(result.data.versionLabel).toBe('V3');
       expect(result.meta.requestId).toBeDefined();
     });
 

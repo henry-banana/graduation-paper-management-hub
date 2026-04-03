@@ -223,6 +223,26 @@ export class GoogleSheetsClient implements OnModuleInit {
     }
   }
 
+  async getHeaderRow(sheetName: string): Promise<string[]> {
+    this.assertReady();
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: `${sheetName}!A1:ZZ1`,
+      valueRenderOption: 'UNFORMATTED_VALUE',
+    });
+
+    const header = (response.data.values?.[0] ?? []) as unknown[];
+    return header.map((value) => (value == null ? '' : String(value)));
+  }
+
+  async clearDataRows(sheetName: string): Promise<void> {
+    this.assertReady();
+    await this.sheets.spreadsheets.values.clear({
+      spreadsheetId: this.spreadsheetId,
+      range: `${sheetName}!A2:ZZ`,
+    });
+  }
+
   private columnNumberToName(columnNumber: number): string {
     let dividend = columnNumber;
     let columnName = '';

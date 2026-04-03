@@ -72,6 +72,22 @@ describe('ExportsService', () => {
     >(),
   };
 
+  const assignmentsRepository = {
+    findByTopicId: jest.fn<(topicId: string) => Promise<unknown[]>>(),
+  };
+
+  const scoreSummariesRepository = {
+    findWhere: jest.fn<(predicate: unknown) => Promise<unknown[]>>(),
+  };
+
+  const minutesGeneratorService = {
+    generatePdf: jest.fn<(...args: unknown[]) => Promise<{
+      buffer: Buffer;
+      filename: string;
+      mimeType: string;
+    }>>(),
+  };
+
   const lecturerUser: AuthUser = {
     userId: 'USR002',
     email: 'gvhd1@hcmute.edu.vn',
@@ -183,8 +199,12 @@ describe('ExportsService', () => {
       scoresRepository as never,
       usersRepository as never,
       periodsRepository as never,
+      assignmentsRepository as never,
+      scoreSummariesRepository as never,
       googleDriveClient as never,
       rubricGeneratorService as never,
+      minutesGeneratorService as never,
+      { get: jest.fn().mockReturnValue(undefined) } as never, // configService
     );
 
     exportFilesRepository.create.mockImplementation(

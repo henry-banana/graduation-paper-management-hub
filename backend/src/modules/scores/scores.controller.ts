@@ -7,6 +7,8 @@ import {
   UseGuards,
   NotFoundException,
   BadRequestException,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,7 +26,9 @@ import {
   ConfirmScoreResponseDto,
 } from './dto';
 import { CreateDraftScoreDto } from './dto/create-score.dto';
-import { SubmitScoreDto, ConfirmScoreDto, RequestSummaryDto } from './dto/submit-score.dto';
+import { SubmitScoreDto, ConfirmScoreDto, RequestSummaryDto, ConfirmScoreRole } from './dto/submit-score.dto';
+
+import { DirectScoreDto } from './dto/direct-score.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -226,4 +230,141 @@ export class ScoresController {
       meta: { requestId: generateRequestId() },
     };
   }
+
+  /**
+   * Shorthand for CT_HD to confirm-publish scores.
+   * Called by CouncilFinalConfirmPage: POST /topics/:topicId/scores/confirm-publish
+   */
+  @Post('topics/:topicId/scores/confirm-publish')
+  @Roles('LECTURER', 'TBM')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'CT_HĐ xác nhận và công bố điểm (shorthand confirm as CT_HD)' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({ status: 200, description: 'Score published' })
+  @ApiResponse({ status: 400, description: 'Invalid request' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async confirmPublish(
+    @Param('topicId') topicId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    // CT_HD confirms and publishes. If user is TBM they also get this role.
+    const role: ConfirmScoreRole = 'CT_HD';
+    const result = await this.scoresService.confirm(topicId, role, user);
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Get('topics/:topicId/scores/my-draft')
+  @Roles('LECTURER')
+  @ApiOperation({ summary: 'Get current user\'s draft or submitted score for a topic' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({ status: 200, description: 'My draft/submitted score (flat criteria map)' })
+  @ApiResponse({ status: 404, description: 'No score found' })
+  async getMyDraft(
+    @Param('topicId') topicId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const result = await this.scoresService.findMyDraft(topicId, user);
+    if (!result) {
+      throw new NotFoundException(`No score draft found for topic ${topicId}`);
+    }
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Post('topics/:topicId/scores/draft-direct')
+  @Roles('LECTURER')
+  @ApiOperation({ summary: 'Save draft score using flat criteria map (frontend-friendly)' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({ status: 200, description: 'Draft saved' })
+  async saveDraftDirect(
+    @Param('topicId') topicId: string,
+    @Body() dto: DirectScoreDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const rubricDefinition = RUBRIC_DEFINITIONS[dto.role];
+    if (!rubricDefinition) {
+      throw new BadRequestException(`No rubric definition for role ${dto.role}`);
+    }
+    const result = await this.scoresService.createAndSubmitDirect(
+      topicId,
+      dto.criteria,
+      dto.role,
+      rubricDefinition,
+      user,
+      { isDraftOnly: true, turnitinLink: dto.turnitinLink, comments: dto.comments, questions: dto.questions },
+    );
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Post('topics/:topicId/scores/submit-direct')
+  @Roles('LECTURER')
+  @ApiOperation({ summary: 'Create and submit score using flat criteria map (frontend-friendly)' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({ status: 200, description: 'Score submitted' })
+  async submitDirect(
+    @Param('topicId') topicId: string,
+    @Body() dto: DirectScoreDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const rubricDefinition = RUBRIC_DEFINITIONS[dto.role];
+    if (!rubricDefinition) {
+      throw new BadRequestException(`No rubric definition for role ${dto.role}`);
+    }
+    const result = await this.scoresService.createAndSubmitDirect(
+      topicId,
+      dto.criteria,
+      dto.role,
+      rubricDefinition,
+      user,
+      { isDraftOnly: false, turnitinLink: dto.turnitinLink, comments: dto.comments, questions: dto.questions },
+    );
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
 }
+
+/** Server-side rubric definitions (mirrors frontend RUBRIC_* constants) */
+const RUBRIC_DEFINITIONS: Record<string, Array<{ id: string; max: number }>> = {
+  GVHD_BCTT: [
+    { id: 'attitude', max: 2.0 },
+    { id: 'presentation', max: 2.0 },
+    { id: 'content', max: 6.0 },
+  ],
+  GVHD_KLTN: [
+    { id: 'attitude', max: 1.0 },
+    { id: 'presentation', max: 1.0 },
+    { id: 'content', max: 5.0 },
+    { id: 'innovation', max: 2.0 },
+    { id: 'defense', max: 1.0 },
+  ],
+  GVHD: [
+    { id: 'attitude', max: 2.0 },
+    { id: 'presentation', max: 2.0 },
+    { id: 'content', max: 6.0 },
+  ],
+  GVPB: [
+    { id: 'content', max: 5.0 },
+    { id: 'presentation', max: 2.0 },
+    { id: 'defense', max: 3.0 },
+  ],
+  TV_HD: [
+    { id: 'presentation', max: 2.0 },
+    { id: 'content', max: 5.0 },
+    { id: 'defense', max: 3.0 },
+  ],
+  COUNCIL: [
+    { id: 'presentation', max: 2.0 },
+    { id: 'content', max: 5.0 },
+    { id: 'defense', max: 3.0 },
+  ],
+};
