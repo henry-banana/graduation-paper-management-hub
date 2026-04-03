@@ -1,27 +1,74 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, X, Search, Eye, Clock, BookOpen, GraduationCap, Filter } from "lucide-react";
-import { MOCK_PENDING_TOPICS } from "../mock-data";
+import { ApiListResponse, api } from "@/lib/api";
+
+interface TopicDto {
+  id: string;
+  title: string;
+  type: "BCTT" | "KLTN";
+  state: string;
+  domain?: string;
+  companyName?: string;
+  submittedAt?: string;
+  student?: { id: string; fullName: string; studentId?: string };
+}
 
 export default function GVHDPendingPage() {
-  const [topics, setTopics] = useState(MOCK_PENDING_TOPICS);
+  const [topics, setTopics] = useState<TopicDto[]>([]);
   const [search, setSearch] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isActing, setIsActing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [rejectModal, setRejectModal] = useState<{ topicId: string; title: string } | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
-  const handleApprove = (id: string) => {
-    alert(`Đã duyệt đề tài ${id}`);
-    setTopics(topics.filter(t => t.id !== id));
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=gvhd&page=1&size=100&state=PENDING_APPROVAL");
+      setTopics(res.data ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không thể tải danh sách đề tài.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const handleApprove = async (id: string) => {
+    setIsActing(id);
+    try {
+      await api.post(`/topics/${id}/approve`, {});
+      setTopics(prev => prev.filter(t => t.id !== id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Duyệt thất bại.");
+    } finally {
+      setIsActing(null);
+    }
   };
 
-  const handleReject = (id: string) => {
-    const reason = prompt("Lý do từ chối (Optional):");
-    alert(`Đã từ chối đề tài ${id}. Lý do: ${reason || "Không có"}`);
-    setTopics(topics.filter(t => t.id !== id));
+  const handleReject = async () => {
+    if (!rejectModal) return;
+    setIsActing(rejectModal.topicId);
+    try {
+      await api.post(`/topics/${rejectModal.topicId}/reject`, { reason: rejectReason });
+      setTopics(prev => prev.filter(t => t.id !== rejectModal.topicId));
+      setRejectModal(null);
+      setRejectReason("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Từ chối thất bại.");
+    } finally {
+      setIsActing(null);
+    }
   };
 
   const filtered = topics.filter(t =>
-    t.studentName?.toLowerCase().includes(search.toLowerCase()) ||
-    t.topicName?.toLowerCase().includes(search.toLowerCase())
+    t.student?.fullName?.toLowerCase().includes(search.toLowerCase()) ||
+    t.title?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -50,6 +97,12 @@ export default function GVHDPendingPage() {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3 text-sm text-error">
+          {error}
+        </div>
+      )}
+
       {/* Filter bar */}
       <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/10 p-4 flex flex-col sm:flex-row gap-4 items-center">
         <div className="relative flex-1 w-full sm:max-w-sm">
@@ -69,7 +122,11 @@ export default function GVHDPendingPage() {
       </div>
 
       {/* Topics list */}
-      {filtered.length === 0 ? (
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20 text-sm text-outline">
+          <Clock className="w-5 h-5 animate-spin mr-2" />Đang tải...
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 p-16 flex flex-col items-center gap-4">
           <div className="w-16 h-16 rounded-2xl bg-surface-container flex items-center justify-center">
             <GraduationCap className="w-8 h-8 text-outline/50" />
@@ -87,12 +144,12 @@ export default function GVHDPendingPage() {
                 {/* Student info */}
                 <div className="flex items-center gap-4 md:w-52 flex-shrink-0">
                   <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
-                    {topic.studentName?.charAt(0)}
+                    {topic.student?.fullName?.charAt(0)}
                   </div>
                   <div className="min-w-0">
-                    <p className="font-semibold text-sm text-on-surface truncate">{topic.studentName}</p>
-                    <p className="text-xs text-outline mt-0.5">{topic.studentId}</p>
-                    <p className="text-xs text-outline/70">{new Date(topic.submittedAt).toLocaleDateString("vi-VN")}</p>
+                    <p className="font-semibold text-sm text-on-surface truncate">{topic.student?.fullName}</p>
+                    <p className="text-xs text-outline mt-0.5">{topic.student?.studentId}</p>
+                    <p className="text-xs text-outline/70">{topic.submittedAt ? new Date(topic.submittedAt).toLocaleDateString("vi-VN") : "—"}</p>
                   </div>
                 </div>
 
@@ -102,11 +159,11 @@ export default function GVHDPendingPage() {
                     <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${topic.type === "KLTN" ? "bg-purple-100 text-purple-700" : "bg-primary/10 text-primary"}`}>
                       {topic.type}
                     </span>
-                    <p className="text-sm font-semibold text-on-surface leading-snug">{topic.topicName}</p>
+                    <p className="text-sm font-semibold text-on-surface leading-snug">{topic.title}</p>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-outline">
                     <BookOpen className="w-3.5 h-3.5" />
-                    <span>{topic.category}</span>
+                    <span>{topic.domain ?? "—"}</span>
                     {topic.companyName && (
                       <>
                         <span>·</span>
@@ -119,15 +176,17 @@ export default function GVHDPendingPage() {
                 {/* Actions */}
                 <div className="flex items-center gap-2 flex-shrink-0 md:pt-0">
                   <button
-                    onClick={() => handleApprove(topic.id)}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-xs font-semibold rounded-xl hover:bg-green-700 hover:shadow-lg hover:shadow-green-200 transition-all active:scale-95"
+                    onClick={() => void handleApprove(topic.id)}
+                    disabled={isActing === topic.id}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-xs font-semibold rounded-xl hover:bg-green-700 hover:shadow-lg hover:shadow-green-200 transition-all active:scale-95 disabled:opacity-60"
                   >
                     <Check className="w-3.5 h-3.5" />
-                    Duyệt
+                    {isActing === topic.id ? "Đang xử lý..." : "Duyệt"}
                   </button>
                   <button
-                    onClick={() => handleReject(topic.id)}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-surface-container-low border border-outline-variant/30 text-on-surface-variant text-xs font-semibold rounded-xl hover:bg-error-container/20 hover:text-error hover:border-error/30 transition-all active:scale-95"
+                    onClick={() => { setRejectModal({ topicId: topic.id, title: topic.title }); setRejectReason(""); }}
+                    disabled={isActing === topic.id}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-surface-container-low border border-outline-variant/30 text-on-surface-variant text-xs font-semibold rounded-xl hover:bg-error-container/20 hover:text-error hover:border-error/30 transition-all active:scale-95 disabled:opacity-60"
                   >
                     <X className="w-3.5 h-3.5" />
                     Từ chối
@@ -142,6 +201,39 @@ export default function GVHDPendingPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Reject Modal */}
+      {rejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="font-bold text-on-surface text-lg mb-1">Từ chối đề tài</h3>
+            <p className="text-sm text-outline mb-4 truncate">&quot;{rejectModal.title}&quot;</p>
+            <label className="block text-sm font-semibold text-on-surface mb-2">Lý do từ chối</label>
+            <textarea
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              rows={3}
+              placeholder="Ví dụ: Tên đề tài chưa rõ ràng, cần điều chỉnh..."
+              className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
+            />
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => setRejectModal(null)}
+                className="flex-1 px-4 py-2.5 border border-outline-variant/20 rounded-xl text-sm font-semibold text-on-surface hover:bg-surface-container transition-colors"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => void handleReject()}
+                disabled={isActing === rejectModal.topicId}
+                className="flex-1 px-4 py-2.5 bg-error text-white rounded-xl text-sm font-semibold hover:bg-error/90 transition-colors disabled:opacity-60"
+              >
+                {isActing === rejectModal.topicId ? "Đang xử lý..." : "Xác nhận từ chối"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

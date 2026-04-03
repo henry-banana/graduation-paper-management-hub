@@ -1,0 +1,10 @@
+
+══════════════════════════════════════════════════════
+  KLTN Rubric Seed & Test (All 5 Rubric Types)
+══════════════════════════════════════════════════════
+  BCTT topic: tp_seed_bctt_1775146879084
+  KLTN topic: tp_seed_kltn_1775146879084
+
+── SETUP: Seed test topics into Google Sheet ─────────
+  ℹ  Adding topics directly to Sheets (bypassing topic registration flow)...
+  ✅  Seeded 2 topics (BCTT + KLTN) to Topics sheet

@@ -6,10 +6,17 @@ import { Check, ShieldAlert } from "lucide-react";
 export default function CouncilFinalConfirmPage() {
   const [confirmed, setConfirmed] = useState(false);
 
-  const handleConfirm = () => {
-    if (window.confirm("Tôi xác nhận bảng điểm tổng hợp do Thư ký Hội đồng trình lên là chính xác và đồng ý công bố điểm cho Khóa luận này. Thao tác này là không thể hoàn tác.")) {
-      setConfirmed(true);
-      alert("Đã xác nhận thành công!");
+  const load = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      // Include both GRADING (awaiting publish) and COMPLETED (already published) so CT-HĐ sees full list
+      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=council&page=1&size=100");
+      setTopics(res.data ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không thể tải tổng hợp điểm.");
+    } finally {
+      setIsLoading(false);
     }
   };
 

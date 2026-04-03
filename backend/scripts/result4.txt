@@ -1,0 +1,61 @@
+
+══════════════════════════════════════════════════════
+  KLTN Rubric Seed & Test (All 5 Rubric Types)
+══════════════════════════════════════════════════════
+  BCTT topic: tp_seed_bctt_1775146983730
+  KLTN topic: tp_seed_kltn_1775146983730
+
+── SETUP: Seed test topics into Google Sheet ─────────
+  ℹ  Adding topics directly to Sheets (bypassing topic registration flow)...
+  ✅  Seeded 2 topics (BCTT + KLTN) to Topics sheet
+  ✅  Seeded GVPB assignment for KLTN topic
+  ℹ  Waiting 5s for server cache to expire...
+
+── VERIFY: GV can see seeded topics ──────────────────
+  ✅  BCTT seed topic visible to GV — state=GRADING
+  ✅  KLTN seed topic visible to GV — state=DEFENSE
+
+── A. BCTT Rubric — GVHD scores ──────────────────────
+  ℹ  Draft save: 201
+  ✅  Save BCTT draft score (GVHD) — got 201: 
+  ℹ  My draft: 200, isSubmitted=false
+  ✅  Get BCTT my-draft
+  ℹ  Submit: 201 {"scoreId":"sc_c64b2116e0cb","status":"SUBMITTED","totalScore":8.7}
+  ✅  Submit BCTT score (GVHD) — got 201
+  ℹ  Scores: 200, count=1
+  ✅  GET BCTT scores list
+  ℹ  Using scoreId for export: sc_c64b2116e0cb
+  ℹ  BCTT rubric export: 404 {"type":"https://kltn.hcmute.edu.vn/errors/404","title":"Not Found","status":404,"detail":"Không tìm thấy đợt đăng ký period-hk2-2526 cho đề tài tp_seed_bctt_1775146983730","instance":"/api/v1/exports/rubric/bctt/tp_seed_bctt_1775146983730"}
+  ✅  Export BCTT rubric (GVHD) — status=404
+
+── B. KLTN Rubric — GVHD pre-defense scoring ─────────
+  ℹ  KLTN-GVHD submit: 201
+  ✅  Submit KLTN score (GVHD)
+  ℹ  KLTN-GVHD export: 404 {"type":"https://kltn.hcmute.edu.vn/errors/404","title":"Not Found","status":404,"detail":"Không tìm thấy đợt đăng ký period-hk2-2526 cho đề tài tp_seed_kltn_1775146983730","instance":"/api/v1/exports
+  ✅  Export KLTN rubric (GVHD)
+
+── C. KLTN Rubric — GVPB review scoring ──────────────
+  ℹ  KLTN-GVPB submit: 201 {"scoreId":"sc_ee0ea7711612","status":"SUBMITTED","totalScore":8.6}
+  ✅  Submit KLTN score (GVPB)
+  ℹ  KLTN-GVPB export: 404
+  ✅  Export KLTN rubric (GVPB)
+
+── D. KLTN Council — TV_HD scoring ───────────────────
+  ℹ  TV_HD submit: 403
+  ✅  Submit KLTN score (TV_HD)
+
+── E. Score Sheet Export (JSON summary) ──────────────
+  ℹ  Score sheet: 201 {"id":"exp_edfe1953ceab1aa7","topicId":"tp_seed_kltn_1775146983730","exportType":"SCORE_SHEET","status":"COMPLETED","driveFileId":"1Ignua62Z1W8WIdxVh3YLMNUyvXcIMcFR","driveLink":"https://drive.google.
+  ✅  Export score sheet
+  ✅  Score sheet has driveLink
+
+── F. GVPB assignment-based access to submissions ────
+  ℹ  GVPB read submissions: 200
+  ✅  GVPB can read KLTN submissions (assigned) — count=0
+
+── CLEANUP: Remove seeded rows from Sheets ───────────
+  ✅  Cleaned up seeded test rows
+
+══════════════════════════════════════════════════════
+  Results: 15 passed, 0 failed (15 total)
+══════════════════════════════════════════════════════

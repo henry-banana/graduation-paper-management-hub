@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { X, BookOpen, Clock, CheckSquare, Users, FileText, Bell, ClipboardList, ChevronRight, LogOut } from "lucide-react";
+import { X, BookOpen, Clock, CheckSquare, Users, Bell, ClipboardList, ChevronRight, LogOut, FileText, ExternalLink, FileDown } from "lucide-react";
 import { clearAuthSession, getCurrentUiRole } from "@/lib/auth/session";
 
 const ROLE_LABELS: Record<string, { label: string; color: string; abbr: string }> = {
@@ -33,11 +33,14 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
     { name: "Tiến độ hướng dẫn", path: "/gvhd/topics", icon: BookOpen },
     { name: "Chấm điểm (Rubric)", path: "/gvhd/scoring", icon: CheckSquare },
     { name: "Hồ sơ phản biện", path: "/gvpb/reviews", icon: FileText },
+    { name: "Lịch sử xuất file", path: "/exports", icon: FileDown },
+    { name: "Thông báo", path: "/notifications", icon: Bell },
   ],
   GVHD: [
     { name: "Duyệt đề tài", path: "/gvhd/pending", icon: Clock },
     { name: "Tiến độ hướng dẫn", path: "/gvhd/topics", icon: BookOpen },
     { name: "Chấm điểm (Rubric)", path: "/gvhd/scoring", icon: CheckSquare },
+    { name: "Lịch sử xuất file", path: "/exports", icon: FileDown },
     { name: "Thông báo", path: "/notifications", icon: Bell },
   ],
   GVPB: [
@@ -74,6 +77,7 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
   }, []);
 
   const handleLogout = () => {
+    if (!window.confirm("Bạn có chắc muốn đăng xuất không?")) return;
     clearAuthSession();
     setIsOpen(false);
     router.replace("/login");
@@ -110,7 +114,11 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
               <p className="text-white/50 text-[10px] mt-0.5 font-label uppercase tracking-wider">KLTN Hub</p>
             </div>
           </div>
-          <button className="md:hidden text-white/60 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors" onClick={() => setIsOpen(false)}>
+          <button
+            className="md:hidden text-white/60 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
+            aria-label="Đóng menu điều hướng"
+            onClick={() => setIsOpen(false)}
+          >
             <X className="w-5 h-5" />
           </button>
         </div>

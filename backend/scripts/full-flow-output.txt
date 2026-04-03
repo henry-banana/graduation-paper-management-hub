@@ -1,0 +1,56 @@
+
+══════════════════════════════════════════
+  KLTN Full Flow Test
+══════════════════════════════════════════
+
+  ✅  GET /topics student → 200
+  ℹ  Found topics: tp_b4a1c142 (GRADING)
+
+── A. Submission flow (topicId=tp_b4a1c142, state=GRADING)
+
+  A1. Attempt file upload (POST /topics/:id/submissions)
+  ❌  POST /submissions → 201 (success) or 409/403 (state/window blocked — expected) — got 0: undici not available — skipped
+  ℹ  Upload blocked (0): undici not available — skipped — this is expected if topic is not IN_PROGRESS or window closed
+
+  A2. GET submission history
+  ✅  GET submissions history → 200 — got 200
+  ℹ  Found 0 submissions
+
+── B. Teacher (GVHD/GVPB) can view submission links
+
+  B1. GVHD (supervisor u-gv-001) views submissions
+  ✅  GV can list their GVHD topics
+  ℹ  Found 2 GVHD topics: tp_b4a1c142 (GRADING), topic-001 (GRADING)
+  ✅  GVHD can view submissions → 200 — got 200
+  ℹ  GVHD sees 0 submissions
+
+  B2. GVPB (u-gv-002) tries to view submissions of another topic
+  ℹ  GVPB access result: 403 — OK
+  ⚠  GVPB gets 403 — ensureCanReadTopic only allows supervisor.
+     This is a bug: GVPB/Council role should be able to view submissions.
+  ✅  GVPB 403 = known access restriction (needs fix)
+
+── C. Export PDF rubric
+  ✅  GET /exports → 200 — got 200
+  ℹ  Found 0 existing exports
+
+  C2. POST /exports/rubric/bctt/:topicId (with dummy scoreId)
+  ℹ  BCTT rubric export: 404 — ""
+  ℹ  404: scoreId not found (expected if no score exists in sheet yet)
+  ✅  BCTT export 404 = no score in DB (expected)
+
+  C3. POST /exports/rubric/kltn/:topicId/GVHD
+  ℹ  KLTN/GVHD export: 400 — ""
+  ❌  KLTN/GVHD export → 200/201 or informative error (404/403) — got 400
+
+  C4. POST /exports/scores/:topicId
+  ℹ  Score sheet export: 201 — {"id":"exp_eb0278260851e4c2","topicId":"tp_b4a1c142","exportType":"SCORE_SHEET","status":"COMPLETED","driveFileId":"1HEODLnAY21HKYal2n3d3fcoB__AYcAg_","driveLink":"https://drive.google.com/file/d/1HEODLnAY21HKYal2n3d3fcoB__AYcAg_/view?usp=drivesdk","downloadUrl":"https://drive.google.com/file/d/1HEODLnAY21HKYal2n3d3fcoB__AYcAg_/view?usp=drivesdk","fileName":"score_sheet_tp_b4a1c142_1775125435269.json","mimeType":"application/json","requestedBy":"u-gv-001","createdAt":"2026-04-02T10:23:55.269Z","completedAt":"2026-04-02T10:23:55.269Z","expiresAt":"2026-04-02T22:23:58.440Z"}
+  ✅  Score sheet export → 200/201 or informative error — got 201
+
+══════════════════════════════════════════
+  Results: 8 passed, 2 failed (10 total)
+══════════════════════════════════════════
+
+Failed tests:
+  ❌ POST /submissions → 201 (success) or 409/403 (state/window blocked — expected): got 0: undici not available — skipped
+  ❌ KLTN/GVHD export → 200/201 or informative error (404/403): got 400

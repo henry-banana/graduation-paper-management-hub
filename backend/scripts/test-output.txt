@@ -1,0 +1,48 @@
+
+══════════════════════════════════════════
+  KLTN API Flow Test
+══════════════════════════════════════════
+
+── 1. Health check
+  ✅  GET /health → 200
+
+── 2. Student: GET /topics?role=student
+  ✅  GET /topics (student) → 200
+     Found 1 student topics
+  ✅  Has at least 1 topic
+
+── 3. Student: GET /topics/tp_b4a1c142/submissions
+  ✅  GET submissions → 200
+     Found 0 submissions
+
+── 4. GV: GET /topics?role=gvhd
+  ✅  GET /topics (gvhd) → 200
+     Found 2 GVHD topics
+
+── 5. GV: GET /topics/tp_b4a1c142/scores/my-draft
+  ✅  GET my-draft → 200 or 403 or 404 (valid status)
+     → No existing draft (404 expected if not assigned)
+
+── 6. GV: POST /topics/tp_b4a1c142/scores/draft-direct
+  ✅  POST draft-direct → 200 or 403 or 409 (valid response — 409 = business rule)
+     → 409 Conflict: Cannot score BCTT before submission deadline ends (business rule — OK for test env)
+
+── 7. TBM: GET /exports
+  ✅  GET /exports → 200
+     Found 0 exports
+  ✅  Response has data array
+  ✅  Response has pagination
+
+── 8. GV: GET /topics?role=gvpb
+  ✅  GET /topics (gvpb) → 200
+     Found 1 GVPB topics
+
+── 9. Check new score endpoints are registered (not 404 routing error)
+  ✅  GET my-draft route is registered
+  ✅  POST draft-direct route is registered
+  ✅  POST submit-direct route is registered
+
+══════════════════════════════════════════
+  Results: 14 passed, 0 failed
+══════════════════════════════════════════
+

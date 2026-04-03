@@ -90,6 +90,61 @@ export default function StudentTopicRegisterPage() {
     void loadData();
   }, []);
 
+  // F4A: Debounced fetch suggestions
+  useEffect(() => {
+    const q = form.topicName.trim();
+    if (q.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    setIsFetchingSuggestions(true);
+    const timer = setTimeout(async () => {
+      try {
+        const token = typeof window !== "undefined" ? localStorage.getItem("kltn_access_token") : "";
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1"}/topics/suggestions?q=${encodeURIComponent(q)}`,
+          { headers: { Authorization: `Bearer ${token ?? ""}` } },
+        );
+        if (res.ok) {
+          const json = (await res.json()) as unknown;
+          const items = (Array.isArray(json) ? json : ((json as Record<string, unknown>)?.data ?? [])) as TopicSuggestionDto[];
+          setSuggestions(items.slice(0, 8));
+          setShowSuggestions(items.length > 0);
+        }
+      } catch { /* silent */ } finally {
+        setIsFetchingSuggestions(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [form.topicName]);
+
+  // F4A: Click-outside to close suggestions
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node) &&
+        inputRef.current && !inputRef.current.contains(e.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelectSuggestion = (s: TopicSuggestionDto) => {
+    setForm(prev => ({
+      ...prev,
+      topicName: s.title,
+      domain: s.domain ?? prev.domain,
+      supervisorUserId: supervisors.find(sv => sv.email === s.supervisorEmail)?.id ?? prev.supervisorUserId,
+    }));
+    setShowSuggestions(false);
+  };
+
   useEffect(() => {
     if (!availablePeriods.length) {
       setForm((prev) => ({ ...prev, periodId: "" }));

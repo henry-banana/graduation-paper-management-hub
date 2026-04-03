@@ -18,19 +18,25 @@ import { Topic } from "@/lib/domain/repositories/topic.repository";
 import { RepositoryFactory } from "@/lib/factory";
 
 const STATE_CONFIG: Record<string, { label: string; color: string; icon: LucideIcon; bg: string }> = {
-  PENDING_GV: { label: "Chờ duyệt", color: "text-amber-700", bg: "bg-amber-100", icon: Clock },
-  CONFIRMED: { label: "Đã xác nhận", color: "text-blue-700", bg: "bg-blue-100", icon: CheckCircle2 },
-  IN_PROGRESS: { label: "Đang thực hiện", color: "text-primary", bg: "bg-primary/10", icon: BookOpen },
-  GRADING: { label: "Đang chấm điểm", color: "text-purple-700", bg: "bg-purple-100", icon: Clock },
-  SCORING: { label: "Đang chấm điểm", color: "text-purple-700", bg: "bg-purple-100", icon: Clock },
-  DEFENSE: { label: "Đang bảo vệ", color: "text-indigo-700", bg: "bg-indigo-100", icon: Clock },
+  // Current backend enum values
+  PENDING_APPROVAL: { label: "Chờ duyệt", color: "text-amber-700", bg: "bg-amber-100", icon: Clock },
+  APPROVED:         { label: "Đã được duyệt", color: "text-blue-700", bg: "bg-blue-100", icon: CheckCircle2 },
+  IN_PROGRESS:      { label: "Đang thực hiện", color: "text-primary", bg: "bg-primary/10", icon: BookOpen },
+  SUBMITTED:        { label: "Đã nộp bài", color: "text-cyan-700", bg: "bg-cyan-100", icon: CheckCircle2 },
+  GRADING:          { label: "Đang chấm điểm", color: "text-purple-700", bg: "bg-purple-100", icon: Clock },
+  COMPLETED:        { label: "Hoàn thành", color: "text-green-700", bg: "bg-green-100", icon: CheckCircle2 },
+  CANCELLED:        { label: "Đã hủy", color: "text-red-700", bg: "bg-red-100", icon: XCircle },
+  REJECTED:         { label: "Bị từ chối", color: "text-red-700", bg: "bg-red-100", icon: XCircle },
+  // Legacy aliases (backward compat)
+  PENDING_GV:      { label: "Chờ duyệt", color: "text-amber-700", bg: "bg-amber-100", icon: Clock },
+  CONFIRMED:       { label: "Đã xác nhận", color: "text-blue-700", bg: "bg-blue-100", icon: CheckCircle2 },
+  SCORING:         { label: "Đang chấm điểm", color: "text-purple-700", bg: "bg-purple-100", icon: Clock },
+  DEFENSE:         { label: "Đang bảo vệ", color: "text-indigo-700", bg: "bg-indigo-100", icon: Clock },
   PENDING_CONFIRM: { label: "Chờ xác nhận", color: "text-cyan-700", bg: "bg-cyan-100", icon: Clock },
-  COMPLETED: { label: "Hoàn thành", color: "text-green-700", bg: "bg-green-100", icon: CheckCircle2 },
-  CANCELLED: { label: "Đã hủy", color: "text-red-700", bg: "bg-red-100", icon: XCircle },
 };
 
 const UNKNOWN_STATE = {
-  label: "Không xác định",
+  label: "—",
   color: "text-outline",
   bg: "bg-surface-container",
   icon: Clock,
@@ -63,7 +69,7 @@ export default function StudentTopicsPage() {
 
   const stats = useMemo(() => {
     const total = topics.length;
-    const pending = topics.filter((topic) => topic.state === "PENDING_GV").length;
+    const pending = topics.filter((topic) => topic.state === "PENDING_APPROVAL" || topic.state === "PENDING_GV").length;
     const completed = topics.filter((topic) => topic.state === "COMPLETED").length;
     return { total, pending, completed };
   }, [topics]);

@@ -1,0 +1,195 @@
+
+🔬 KLTN Flow Test — giả lập thao tác người dùng qua API
+   Flow: all | Time: 14:37:00 2/4/2026
+   Backend: ✅ running at http://localhost:3001/api/v1
+
+═════════════════════════════════════════════════════════════════
+  🎓 STUDENT FLOW — haitrann218@gmail.com
+═════════════════════════════════════════════════════════════════
+
+[Step 1] Health check + login
+  ✅ Health  →  HTTP 200
+  ✅ Token: Nguyễn Hải Trân  →  role=STUDENT id=u-sv-004
+
+[Step 2] Xem thông tin sinh viên (/users/me)
+  ✅ GET /users/me  →  HTTP 200
+     ℹ️  Nguyễn Hải Trân | haitrann218@gmail.com | MSSV=SV21004
+     ℹ️  Tín chỉ: 120/120 | KL: canRegister=false (BCTT_INCOMPLETE)
+  ✅ earnedCredits exists
+
+[Step 3] Xem danh sách đề tài
+  ✅ GET /topics?role=student  →  HTTP 200
+     ℹ️  Đề tài hiện có: 1
+     ℹ️    [BCTT] tp_b4a1c142 "Ung dung quan ly sinh vien thuc tap" [GRADING]
+
+[Step 4] Load trang đăng ký (periods + supervisors)
+  ✅ GET /periods  →  HTTP 200
+  ✅ GET /users/supervisors/options  →  HTTP 200
+     ℹ️  OPEN periods: 3 | Supervisors: 4
+
+[Step 5] Gợi ý đề tài (type "AI" → autocomplete)
+  ✅ GET /topics/suggestions?q=AI  →  HTTP 200
+     ℹ️  3 gợi ý
+     ℹ️    "AI trong sản xuất" — GV: thiennd@hcmute.edu.vn
+     ℹ️    "AI trong giáo dục" — GV: thienise@gmail.com
+     ℹ️    "AI trong chất lượng" — GV: ise.thien@gmail.com
+  ✅ Có gợi ý
+
+[Step 6] Đã có topic active — skip đăng ký
+     ℹ️  tp_b4a1c142 "Ung dung quan ly sinh vien thuc tap" [GRADING]
+
+[Step 7] Xem chi tiết topic tp_b4a1c142
+  ✅ GET /topics/:id  →  HTTP 200
+     ℹ️  Title: Ung dung quan ly sinh vien thuc tap | Type: BCTT | State: GRADING
+     ℹ️  Submit: 2026-04-01T00:00:00.000Z → 2026-05-01T00:00:00.000Z
+
+[Step 8] Xem lịch sử nộp bài
+  ✅ GET submissions  →  HTTP 200
+     ℹ️  0 submissions
+
+[Step 9] Xem thông báo
+  ✅ GET notifications  →  HTTP 200
+     ℹ️  2 thông báo
+
+[Step 10] Xem điểm
+  ✅ Scores endpoint reachable  →  HTTP 403 (chưa publish)
+
+────────────────────────────────────────
+  Student flow complete!
+────────────────────────────────────────
+
+═════════════════════════════════════════════════════════════════
+  👨‍🏫 GVHD FLOW — phan.van.duc@hcmute.edu.vn
+═════════════════════════════════════════════════════════════════
+
+[Step 1] Login
+  ✅ Token: PGS.TS Phan Văn Đức  →  role=LECTURER
+
+[Step 2] Xem profile
+  ✅ GET /users/me  →  HTTP 200
+     ℹ️  PGS.TS Phan Văn Đức [LECTURER]
+
+[Step 3] Xem đề tài đang hướng dẫn (GET /topics?role=gvhd)
+  ✅ GET /topics?role=gvhd  →  HTTP 200
+     ℹ️  Đề tài đang HD: 2
+     ℹ️    [BCTT] tp_b4a1c142 "Ung dung quan ly sinh vien thuc tap" [GRADING]
+     ℹ️    [BCTT] topic-001 "Xây dựng hệ thống quản lý tài liệu nội bộ cho doanh nghiệp" [IN_PROGRESS]
+
+[Step 4] Duyệt đề tài từ student flow: tp_b4a1c142
+  ✅ POST /topics/:id/approve  →  HTTP 409
+     ℹ️  Có thể không phải GVHD của topic này — 409
+
+[Step 5] Set deadline cho topic-001
+  ✅ POST /topics/:id/deadline  →  HTTP 200
+     ℹ️  Deadline set: submitEndAt=undefined
+
+[Step 6] Xem submissions cho tp_b4a1c142
+  ✅ GET submissions (GVHD view)  →  HTTP 200
+     ℹ️  0 submissions
+
+[Step 7] Xem assignments cho tp_b4a1c142
+  ✅ GET assignments (GVHD view)  →  HTTP 200
+     ℹ️  0 assignments
+
+[Step 8] Chấm điểm GVHD cho topic tp_b4a1c142
+  ✅ POST scores/draft (GVHD)  →  HTTP 409
+
+────────────────────────────────────────
+  GVHD flow complete!
+────────────────────────────────────────
+
+═════════════════════════════════════════════════════════════════
+  📝 GVPB FLOW — nguyen.thi.em@hcmute.edu.vn
+═════════════════════════════════════════════════════════════════
+
+[Step 1] Login
+  ✅ Token: TS. Nguyễn Thị Em  →  role=LECTURER
+
+[Step 2] Xem đề tài phản biện (GET /topics?role=gvpb)
+  ✅ GET /topics?role=gvpb  →  HTTP 200
+     ℹ️  Đề tài phản biện: 0
+
+────────────────────────────────────────
+  GVPB flow complete!
+────────────────────────────────────────
+
+═════════════════════════════════════════════════════════════════
+  🏛️ TBM FLOW — tbm.cnpm@hcmute.edu.vn
+═════════════════════════════════════════════════════════════════
+
+[Step 1] Login
+  ✅ Token: Trưởng BM CNPM  →  role=TBM
+
+[Step 2] Xem tất cả đề tài (GET /topics?role=tbm)
+  ✅ GET /topics (TBM view all)  →  HTTP 200
+     ℹ️  Tổng đề tài: 2
+     ℹ️    GRADING: 1
+     ℹ️    IN_PROGRESS: 1
+
+[Step 3] Phân công GVPB cho topic tp_b4a1c142
+  ✅ POST assignments/gvpb  →  HTTP 400
+     ℹ️  GVPB assign result: HTTP 400 — {"type":"https://kltn.hcmute.edu.vn/errors/400","title":"Bad Request","status":400,"detail":"GVPB ca
+
+[Step 4] Phân công HĐ bảo vệ cho topic tp_b4a1c142
+  ✅ POST assignments/council  →  HTTP 400
+     ℹ️  Council assign: HTTP 400
+
+[Step 5] Xem tất cả assignments cho topic tp_b4a1c142
+  ✅ GET assignments (TBM)  →  HTTP 200
+
+[Step 6] Chuyển BCTT → GRADING (topic-001)
+  ✅ MOVE_TO_GRADING  →  HTTP 200
+
+[Step 7] Mở revision round cho topic tp_b4a1c142
+  ✅ POST revisions/rounds  →  HTTP 400
+
+[Step 8] Xem revision rounds cho topic tp_b4a1c142
+  ✅ GET revisions/rounds  →  HTTP 200
+
+[Step 9] Xem score summary cho topic tp_b4a1c142
+  ✅ GET scores/summary (TBM)  →  HTTP 409
+
+────────────────────────────────────────
+  TBM flow complete!
+────────────────────────────────────────
+
+═════════════════════════════════════════════════════════════════
+  ⚖️ COUNCIL (TV_HD) FLOW — hoang.van.phu@hcmute.edu.vn
+═════════════════════════════════════════════════════════════════
+
+[Step 1] Login
+  ✅ Token: TS. Hoàng Văn Phú  →  role=LECTURER
+
+[Step 2] Xem đề tài hội đồng
+     ℹ️  0 topics assigned as TV_HD
+
+────────────────────────────────────────
+  Council TV_HD flow complete!
+────────────────────────────────────────
+
+═════════════════════════════════════════════════════════════════
+  ⚖️ COUNCIL (CT_HD) FLOW — phan.van.duc@hcmute.edu.vn
+═════════════════════════════════════════════════════════════════
+
+[Step 1] Login
+  ✅ Token: PGS.TS Phan Văn Đức  →  role=LECTURER
+
+[Step 2] Xem đề tài hội đồng
+     ℹ️  1 topics assigned as CT_HD
+     ℹ️    [BCTT] topic-001 "Xây dựng hệ thống quản lý tài liệu nội bộ cho doanh nghiệp" [GRADING]
+
+[Step 3] CT_HD confirm score cho topic topic-001
+  ✅ POST scores/confirm (CT_HD)  →  HTTP 409
+
+────────────────────────────────────────
+  Council CT_HD flow complete!
+────────────────────────────────────────
+
+═════════════════════════════════════════════════════════════════
+  📊 KẾT QUẢ TỔNG QUAN
+═════════════════════════════════════════════════════════════════
+  ✅ PASSED : 35
+  ❌ FAILED : 0
+  Total    : 35
+═════════════════════════════════════════════════════════════════
+

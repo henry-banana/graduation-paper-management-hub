@@ -153,19 +153,39 @@ export class RubricGeneratorService {
       const templateBinary = fs.readFileSync(templatePath, 'binary');
       const zip = new PizZip(templateBinary);
       const documentXml = zip.file('word/document.xml')?.asText() ?? '';
-      const templatePayload = this.buildTemplatePayload(payload);
 
+      // ── Path A: template already has {{placeholders}} ──────────────────────
+      // Just render directly — no XML injection needed.
       if (this.hasPlaceholder(documentXml)) {
+        const templatePayload = this.buildTemplatePayload(payload);
         const doc = new Docxtemplater(zip, {
           paragraphLoop: true,
           linebreaks: true,
         });
-
         doc.render(templatePayload);
         const rendered = doc
           .getZip()
           .generate({ type: 'nodebuffer', compression: 'DEFLATE' }) as Buffer;
+        this.logger.log(`Template rendered (placeholder mode) for ${rubricType}`);
+        return Buffer.from(rendered);
+      }
 
+      // ── Path B: legacy template with dotted (.....) markers ────────────────
+      // Inject {{placeholders}} at runtime into the XML, then render.
+      const templatePayload = this.buildTemplatePayload(payload);
+      let injectedXml = this.injectPlaceholders(documentXml, rubricType);
+
+      if (this.hasPlaceholder(injectedXml)) {
+        zip.file('word/document.xml', injectedXml);
+        const doc = new Docxtemplater(zip, {
+          paragraphLoop: true,
+          linebreaks: true,
+        });
+        doc.render(templatePayload);
+        const rendered = doc
+          .getZip()
+          .generate({ type: 'nodebuffer', compression: 'DEFLATE' }) as Buffer;
+        this.logger.log(`Template rendered (injected mode) for ${rubricType}`);
         return Buffer.from(rendered);
       }
 
@@ -190,6 +210,240 @@ export class RubricGeneratorService {
       );
       return null;
     }
+  }
+
+  /**
+   * Inject {{mustache}} placeholders into the raw document XML.
+   * This allows docxtemplater to fill in dynamic values even when
+   * the original .docx template was created without placeholders.
+   *
+   * Strategy:
+   * 1. Find score cells (column "Điểm") in rubric rows → inject {{score_xxx}}
+   * 2. Find "Tổng điểm" cell → inject {{totalScoreFixed}}
+   * 3. Find "Cho SV bảo vệ" checkbox text → prefix with {{cho_bao_ve_mark}}
+   * 4. Find "Không cho SV bảo vệ" checkbox text → prefix with {{khong_bao_ve_mark}}
+   * 5. Find date pattern "Ngày ….tháng…..năm" → replace with formatted date
+   */
+  private injectPlaceholders(xml: string, rubricType: RubricType): string {
+    let result = xml;
+
+    // ── 1. Score cells injection ─────────────────────────────────────────────
+    // Tables in OOXML: each <w:tr> is a row, each <w:tc> is a cell.
+    // The score cells (rightmost "Điểm" column) are typically empty <w:tc>
+    // at the end of criterion rows. We identify rows by their criterion text
+    // (normalized) and inject the correct placeholder into the last empty cell.
+    const configs = SCORE_INJECTION_MAP[rubricType] ?? [];
+
+    for (const config of configs) {
+      result = this.injectScoreCellPlaceholder(result, config);
+    }
+
+    // ── 2. Tổng điểm cell injection ──────────────────────────────────────────
+    result = this.injectTotalScorePlaceholder(result);
+
+    // ── 3 & 4. Defense checkbox marks ────────────────────────────────────────
+    result = this.injectDefenseCheckboxMarks(result);
+
+    // ── 5. Date injection ─────────────────────────────────────────────────────
+    result = this.injectDatePlaceholders(result);
+
+    // ── 6. Student name / MSSV / topic (fill blank dotted areas) ─────────────
+    result = this.injectHeaderFields(result, rubricType);
+
+    return result;
+  }
+
+  /**
+   * Find a table row containing a criterion keyword and inject a score
+   * placeholder into its last (score) cell if it is empty.
+   */
+  private injectScoreCellPlaceholder(
+    xml: string,
+    config: ScorePlaceholderConfig,
+  ): string {
+    // Match <w:tr>...</w:tr> table rows
+    const rowPattern = /(<w:tr[ >][\s\S]*?<\/w:tr>)/g;
+    const normalizedKeyword = this.normalizeVietnamese(config.criterionKeyword);
+
+    return xml.replace(rowPattern, (row) => {
+      const rowText = (row.replace(/<[^>]+>/g, ' ') + ' ').toLowerCase();
+      const normalizedRowText = this.normalizeVietnamese(rowText);
+
+      // Check if this row contains the criterion keyword
+      if (!normalizedRowText.includes(normalizedKeyword)) {
+        return row;
+      }
+
+      // Check if row contains the max score text (to avoid matching header row)
+      // The max score cell contains just the number like "1", "2", "3"
+      const cellTexts = this.extractCellTexts(row);
+      const hasMaxScore = cellTexts.some(
+        (t) => t.trim() === config.maxScoreText,
+      );
+      if (!hasMaxScore) {
+        return row;
+      }
+
+      // Find the last <w:tc> (score cell) and inject placeholder if empty
+      return this.injectIntoLastEmptyCell(row, `{{${config.placeholderKey}}}`);
+    });
+  }
+
+  /**
+   * Find the "Tổng điểm" row and inject {{totalScoreFixed}} into its last cell.
+   */
+  private injectTotalScorePlaceholder(xml: string): string {
+    const rowPattern = /(<w:tr[ >][\s\S]*?<\/w:tr>)/g;
+
+    return xml.replace(rowPattern, (row) => {
+      const rowText = row.replace(/<[^>]+>/g, ' ');
+      const normalized = this.normalizeVietnamese(rowText);
+
+      if (
+        !normalized.includes('tong diem') &&
+        !normalized.includes('tổng điểm')
+      ) {
+        return row;
+      }
+
+      return this.injectIntoLastEmptyCell(row, '{{totalScoreFixed}}');
+    });
+  }
+
+  /**
+   * Inject ☑/☐ markers before "Cho SV bảo vệ" and "Không cho SV bảo vệ" text.
+   * We replace the checkbox area text with {{cho_bao_ve_mark}} and {{khong_bao_ve_mark}}
+   * which will be filled from the payload.
+   */
+  private injectDefenseCheckboxMarks(xml: string): string {
+    // Match the text run containing "Cho SV bảo vệ" (with or without "Không")
+    // Strategy: replace the dotted checkbox area / spacing before these texts
+
+    // Pattern for "□ Cho SV bảo vệ trước hội đồng" area
+    // The template has checkbox chars (□ = U+25A1) before the text, or just spaces
+    let result = xml;
+
+    // Replace "Cho SV bảo vệ trước hội đồng" text node (without "Không" prefix)
+    // We look for the text content in <w:t>
+    result = result.replace(
+      /(<w:t[^>]*>)(\s*(?:□\s*)?Cho SV bảo vệ trước hội đồng\s*)(<\/w:t>)/g,
+      '$1{{cho_bao_ve_mark}} Cho SV bảo vệ trước hội đồng$3',
+    );
+
+    result = result.replace(
+      /(<w:t[^>]*>)(\s*(?:□\s*)?Không cho SV bảo vệ trước hội đồng\s*)(<\/w:t>)/g,
+      '$1{{khong_bao_ve_mark}} Không cho SV bảo vệ trước hội đồng$3',
+    );
+
+    return result;
+  }
+
+  /**
+   * Replace "Ngày ….tháng…..năm ……" date pattern with {{ngayCham}} placeholder.
+   */
+  private injectDatePlaceholders(xml: string): string {
+    // Match various Vietnamese date patterns in template
+    let result = xml;
+
+    // Pattern: "Ngày ....tháng.....năm ......" (dots as placeholders)
+    result = result.replace(
+      /(<w:t[^>]*>)([^<]*Ngày\s*[.…\u2026]+\s*tháng\s*[.…\u2026]+\s*năm\s*[.…\u2026]*[^<]*)(<\/w:t>)/gi,
+      '$1Ngày {{ngay}} tháng {{thang}} năm {{nam}}$3',
+    );
+
+    return result;
+  }
+
+  /**
+   * Inject header field placeholders for student name, MSSV, and topic title.
+   * These replace the existing dotted (.....) patterns in the template.
+   */
+  private injectHeaderFields(xml: string, rubricType: RubricType): string {
+    let result = xml;
+
+    // "Sinh viên thực hiện: ....." → inject studentName + MSSV placeholder
+    result = result.replace(
+      /(<w:t[^>]*>)([^<]*Sinh viên thực hiện:\s*)([.]{5,})([^<]*)(<\/w:t>)/gi,
+      '$1$2{{studentName}}  MSSV: {{studentId}}$4$5',
+    );
+
+    // Standalone dotted sequences near MSSV label become studentId
+    result = result.replace(
+      /(<w:t[^>]*>)(MSSV:\s*)([.]{5,})([^<]*)(<\/w:t>)/gi,
+      '$1$2{{studentId}}$4$5',
+    );
+
+    // Topic title dotted: "Tên KLTN: ....."
+    result = result.replace(
+      /(<w:t[^>]*>)([^<]*(?:Tên KLTN|Tên đề tài|Tên KL):\s*)([.]{5,})([^<]*)(<\/w:t>)/gi,
+      '$1$2{{topicTitle}}$4$5',
+    );
+
+    return result;
+  }
+
+  // ─── XML Utility Helpers ──────────────────────────────────────────────────
+
+  private extractCellTexts(rowXml: string): string[] {
+    const cellPattern = /<w:tc[ >][\s\S]*?<\/w:tc>/g;
+    const texts: string[] = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = cellPattern.exec(rowXml)) !== null) {
+      const cellText = match[0].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      texts.push(cellText);
+    }
+
+    return texts;
+  }
+
+  /**
+   * Inject a placeholder into the last <w:t> element of the last <w:tc> in a row,
+   * but only if that cell currently appears empty (no meaningful text).
+   */
+  private injectIntoLastEmptyCell(rowXml: string, placeholder: string): string {
+    const cellMatches = [...rowXml.matchAll(/<w:tc[ >][\s\S]*?<\/w:tc>/g)];
+    if (cellMatches.length === 0) return rowXml;
+
+    const lastCellMatch = cellMatches[cellMatches.length - 1];
+    const lastCell = lastCellMatch[0];
+    const lastCellText = lastCell.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // Only inject if the cell is empty or contains only whitespace/dots
+    if (lastCellText && !/^[.\s]*$/.test(lastCellText)) {
+      return rowXml;
+    }
+
+    // Find the <w:t> element in the last cell and inject placeholder
+    const injected = lastCell.replace(
+      /(<w:t(?:\s[^>]*)?>)([^<]*)(<\/w:t>)/,
+      (_, open, content, close) => {
+        return `${open}${content.trim() ? content : ''}${placeholder}${close}`;
+      },
+    );
+
+    // If no <w:t> found (cell has no text run), add one
+    const result =
+      injected === lastCell
+        ? lastCell.replace(
+            /<\/w:tc>/,
+            `<w:p><w:r><w:t>${placeholder}</w:t></w:r></w:p></w:tc>`,
+          )
+        : injected;
+
+    return (
+      rowXml.slice(0, lastCellMatch.index) +
+      result +
+      rowXml.slice(lastCellMatch.index + lastCellMatch[0].length)
+    );
+  }
+
+  private normalizeVietnamese(text: string): string {
+    return text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/đ/g, 'd');
   }
 
   private hasPlaceholder(xmlContent: string): boolean {
