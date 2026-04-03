@@ -218,10 +218,9 @@ export default function StudentTopicRegisterPage() {
           { headers: { Authorization: `Bearer ${token ?? ""}` } },
         );
         if (res.ok) {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          const json = await res.json();
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-          const items = (Array.isArray(json) ? json : (json?.data ?? [])) as TopicSuggestionDto[];
+          const json = (await res.json()) as unknown;
+          const data = (json as Record<string, unknown>)?.data;
+          const items = (Array.isArray(json) ? json : (Array.isArray(data) ? data : [])) as TopicSuggestionDto[];
           setSuggestions(items.slice(0, 8));
           setShowSuggestions(items.length > 0);
         }
