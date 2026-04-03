@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen, CheckCircle2, FileCheck, MessageSquare, RefreshCw, Save, Search, Sliders, User, AlertCircle, ChevronRight } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
@@ -49,21 +49,21 @@ export default function GVPBReviewsPage() {
   const maxScore = RUBRIC_GVPB.reduce((s, c) => s + c.max, 0);
   const isPassed = totalScore >= 5.0;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=gvpb&page=1&size=100");
       setTopics(res.data);
-      if (!selectedId && res.data[0]) setSelectedId(res.data[0].id);
+      setSelectedId((current) => current || res.data[0]?.id || null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải danh sách phản biện.");
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
     if (!selectedId) return;

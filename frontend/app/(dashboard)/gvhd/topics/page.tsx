@@ -18,13 +18,15 @@ interface TopicDto {
 }
 
 const STATE_LABELS: Record<string, { label: string; color: string }> = {
-  PENDING_APPROVAL: { label: "Chờ duyệt", color: "bg-amber-100 text-amber-700" },
-  APPROVED: { label: "Đã duyệt", color: "bg-primary/10 text-primary" },
+  PENDING_GV: { label: "Chờ duyệt", color: "bg-amber-100 text-amber-700" },
+  CONFIRMED: { label: "Đã duyệt", color: "bg-primary/10 text-primary" },
   IN_PROGRESS: { label: "Đang thực hiện", color: "bg-blue-100 text-blue-700" },
-  SUBMITTED: { label: "Đã nộp", color: "bg-cyan-100 text-cyan-700" },
+  PENDING_CONFIRM: { label: "Chờ bảo vệ", color: "bg-cyan-100 text-cyan-700" },
+  DEFENSE: { label: "Bảo vệ", color: "bg-indigo-100 text-indigo-700" },
   GRADING: { label: "Đang chấm điểm", color: "bg-purple-100 text-purple-700" },
+  SCORING: { label: "Đang chấm điểm", color: "bg-purple-100 text-purple-700" },
   COMPLETED: { label: "Hoàn thành", color: "bg-green-100 text-green-700" },
-  REJECTED: { label: "Từ chối", color: "bg-red-100 text-red-700" },
+  CANCELLED: { label: "Từ chối", color: "bg-red-100 text-red-700" },
 };
 
 export default function GVHDTopicsPage() {
@@ -65,7 +67,7 @@ export default function GVHDTopicsPage() {
     bctt: topics.filter(t => t.type === "BCTT").length,
     kltn: topics.filter(t => t.type === "KLTN").length,
     grading: topics.filter(t => t.state === "GRADING").length,
-    needsAction: topics.filter(t => t.state === "PENDING_APPROVAL").length,
+    needsAction: topics.filter(t => t.state === "PENDING_GV").length,
   }), [topics]);
 
   return (
@@ -210,7 +212,7 @@ export default function GVHDTopicsPage() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {(topic.state === "SUBMITTED" || topic.state === "GRADING") && (
+                    {(topic.state === "DEFENSE" || topic.state === "SCORING" || topic.state === "GRADING") && (
                       <Link
                         href={`/gvhd/scoring?topicId=${topic.id}`}
                         className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white text-xs font-semibold rounded-xl hover:bg-primary/90 transition-all"
@@ -219,7 +221,7 @@ export default function GVHDTopicsPage() {
                         Chấm điểm
                       </Link>
                     )}
-                    {topic.state === "PENDING_APPROVAL" && (
+                    {topic.state === "PENDING_GV" && (
                       <Link
                         href="/gvhd/pending"
                         className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 text-white text-xs font-semibold rounded-xl hover:bg-amber-600 transition-all"

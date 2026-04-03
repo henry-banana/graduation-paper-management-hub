@@ -81,7 +81,7 @@ function GVHDScoringContent() {
         const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=gvhd&page=1&size=100");
         const scoreable = res.data.filter(t => ["SUBMITTED", "GRADING", "COMPLETED"].includes(t.state));
         setTopics(scoreable);
-        if (!selectedId && scoreable[0]) setSelectedId(scoreable[0].id);
+        setSelectedId((current) => current || scoreable[0]?.id || "");
       } catch {
         setError("Không thể tải danh sách đề tài.");
       } finally {

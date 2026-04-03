@@ -64,9 +64,9 @@ function CouncilScoringContent() {
     void (async () => {
       setIsLoadingTopics(true);
       try {
-        const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=council&page=1&size=100&state=GRADING");
+        const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=tv_hd&page=1&size=100&state=GRADING");
         setTopics(res.data ?? []);
-        if (!selectedId && res.data[0]) setSelectedId(res.data[0].id);
+        setSelectedId((current) => current || res.data?.[0]?.id || "");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Không thể tải danh sách đề tài.");
       } finally {

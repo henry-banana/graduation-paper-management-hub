@@ -65,7 +65,7 @@ export default function GVHDFinalConfirmPage() {
     setIsConfirming(topicId);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/scores/gvhd-confirm`, {});
+      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/scores/confirm`, { role: "GVHD" });
       setTopics(prev => prev.map(t =>
         t.id === topicId
           ? { ...t, scores: { ...(t.scores ?? {}), gvhdConfirmed: true } }

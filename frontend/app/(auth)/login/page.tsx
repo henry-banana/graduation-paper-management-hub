@@ -18,6 +18,7 @@ export default function LoginPage() {
           src="/background-login.webp"
           alt="UTE Campus Background"
           fill
+          sizes="100vw"
           className="object-cover object-center"
           priority
           quality={90}
@@ -34,6 +35,7 @@ export default function LoginPage() {
               src="/logo-ute.png"
               alt="Logo UTE"
               fill
+              sizes="80px"
               className="object-contain"
               priority
             />

@@ -52,9 +52,11 @@ export function getApiBaseUrl(): string {
 class ApiClient {
   private token: string | null = null;
   private refreshPromise: Promise<void> | null = null;
+  private authFailureRedirecting = false;
 
   setToken(token: string) {
     this.token = token;
+    this.authFailureRedirecting = false;
   }
 
   clearToken() {
@@ -63,12 +65,30 @@ class ApiClient {
 
   private resolveAccessToken(): string | null {
     if (this.token && !isAccessTokenExpired()) {
+      this.authFailureRedirecting = false;
       return this.token;
     }
 
     const stored = getAccessToken();
     this.token = stored;
+    if (stored && !isAccessTokenExpired()) {
+      this.authFailureRedirecting = false;
+    }
     return stored;
+  }
+
+  private handleAuthFailure(message: string): never {
+    clearAuthSession();
+    this.clearToken();
+
+    if (typeof window !== "undefined" && !this.authFailureRedirecting) {
+      this.authFailureRedirecting = true;
+      if (window.location.pathname !== "/login") {
+        window.location.assign("/login?reason=session-expired");
+      }
+    }
+
+    throw new Error(message);
   }
 
   private async tryRefreshToken(): Promise<void> {
@@ -79,9 +99,7 @@ class ApiClient {
 
     const refreshToken = getRefreshToken();
     if (!refreshToken) {
-      clearAuthSession();
-      this.clearToken();
-      throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+      return this.handleAuthFailure("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
     }
 
     this.refreshPromise = (async () => {
@@ -95,14 +113,13 @@ class ApiClient {
       });
 
       if (!response.ok) {
-        clearAuthSession();
-        this.clearToken();
-        throw new Error("Không thể làm mới phiên đăng nhập.");
+        return this.handleAuthFailure("Không thể làm mới phiên đăng nhập.");
       }
 
       const payload = (await response.json()) as RefreshResponse;
       updateAccessToken(payload.data.accessToken, payload.data.expiresIn);
       this.token = payload.data.accessToken;
+      this.authFailureRedirecting = false;
     })();
 
     try {
@@ -148,6 +165,10 @@ class ApiClient {
     if (response.status === 401 && canRetryAuth) {
       await this.tryRefreshToken();
       return this.request<T>(endpoint, options, false);
+    }
+
+    if (response.status === 401 && !canRetryAuth) {
+      return this.handleAuthFailure("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
     }
 
     const contentType = response.headers.get("content-type") || "";

@@ -17,10 +17,8 @@ import {
   generateKltnCouncilRubricDocx,
   KltnCouncilRubricData,
 } from './kltn-council-rubric.generator';
-
-// Use CommonJS require for compatibility with strict TS projects.
-const Docxtemplater = require('docxtemplater');
-const PizZip = require('pizzip');
+import Docxtemplater = require('docxtemplater');
+import PizZip = require('pizzip');
 
 export type RubricType = 'BCTT' | 'KLTN_GVHD' | 'KLTN_GVPB' | 'KLTN_COUNCIL';
 
@@ -210,7 +208,7 @@ export class RubricGeneratorService {
       // ── Path B: legacy template with dotted (.....) markers ────────────────
       // Inject {{placeholders}} at runtime into the XML, then render.
       const templatePayload = this.buildTemplatePayload(payload);
-      let injectedXml = this.injectPlaceholders(documentXml, rubricType);
+      const injectedXml = this.injectPlaceholders(documentXml, rubricType);
 
       if (this.hasPlaceholder(injectedXml)) {
         zip.file('word/document.xml', injectedXml);

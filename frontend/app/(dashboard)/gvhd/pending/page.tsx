@@ -43,7 +43,7 @@ export default function GVHDPendingPage() {
     setError(null);
     try {
       const res = await api.get<ApiListResponse<TopicDto>>(
-        "/topics?role=gvhd&page=1&size=100&state=PENDING_APPROVAL",
+        "/topics?role=gvhd&page=1&size=100&state=PENDING_GV",
       );
       setTopics(res.data);
     } catch (e) {

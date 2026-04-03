@@ -5,6 +5,7 @@ import { Settings2, UserCircle, X } from "lucide-react";
 
 const ROLES = [
   { id: "STUDENT", label: "Sinh viên" },
+  { id: "LECTURER", label: "Giảng viên (tổng quát)" },
   { id: "GVHD", label: "Giảng viên HD" },
   { id: "GVPB", label: "Giảng viên PB" },
   { id: "TBM", label: "Trưởng bộ môn" },
@@ -12,6 +13,12 @@ const ROLES = [
   { id: "CT_HD", label: "Chủ tịch HĐ" },
   { id: "TK_HD", label: "Thư ký HĐ" },
 ];
+
+function inferAccountRole(roleId: string): "STUDENT" | "LECTURER" | "TBM" {
+  if (roleId === "STUDENT") return "STUDENT";
+  if (roleId === "TBM") return "TBM";
+  return "LECTURER";
+}
 
 export function RoleSwitcher() {
   const [isOpen, setIsOpen] = useState(false);
@@ -26,7 +33,15 @@ export function RoleSwitcher() {
   }, []);
 
   const handleSwitch = (roleId: string) => {
-    document.cookie = `user_role=${roleId}; path=/; max-age=86400`;
+    const accountRole = inferAccountRole(roleId);
+    const maxAge = 7 * 24 * 60 * 60;
+
+    localStorage.setItem("kltn_user_role", roleId);
+    localStorage.setItem("kltn_account_role", accountRole);
+
+    document.cookie = `user_role=${roleId}; path=/; max-age=${maxAge}; samesite=lax`;
+    document.cookie = `account_role=${accountRole}; path=/; max-age=${maxAge}; samesite=lax`;
+
     setIsOpen(false);
     window.location.href = "/";
   };

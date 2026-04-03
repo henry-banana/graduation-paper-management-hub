@@ -18,6 +18,7 @@ export default function HomePage() {
           src="/background-login.webp"
           alt="UTE Campus Background"
           fill
+          sizes="100vw"
           className="object-cover object-center"
           priority
           quality={90}
@@ -37,6 +38,7 @@ export default function HomePage() {
               src="/logo-ute.png"
               alt="Logo Đại học Công Nghệ Kỹ thuật TP.HCM"
               fill
+              sizes="80px"
               className="object-contain"
               priority
             />

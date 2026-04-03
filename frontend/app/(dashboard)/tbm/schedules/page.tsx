@@ -41,7 +41,7 @@ export default function TBMSchedulesPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<ScheduleDto>>("/topics?role=tbm&page=1&size=200&state=GRADING");
+      const res = await api.get<ApiListResponse<ScheduleDto>>("/topics?role=tbm&page=1&size=100&state=GRADING");
       setSchedules(res.data ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải lịch bảo vệ.");

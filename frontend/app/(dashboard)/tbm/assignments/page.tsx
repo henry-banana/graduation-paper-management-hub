@@ -72,8 +72,8 @@ export default function TBMAssignmentsPage() {
     setError(null);
     try {
       const [topicRes, teacherRes] = await Promise.all([
-        api.get<ApiListResponse<TopicDto>>("/topics?role=tbm&page=1&size=200"),
-        api.get<ApiListResponse<TeacherDto>>("/users?role=teacher&page=1&size=200"),
+        api.get<ApiListResponse<TopicDto>>("/topics?role=tbm&page=1&size=100"),
+        api.get<ApiListResponse<TeacherDto>>("/users?role=LECTURER&page=1&size=100"),
       ]);
       setTopics(topicRes.data ?? []);
       setTeachers(teacherRes.data ?? []);
@@ -103,8 +103,14 @@ export default function TBMAssignmentsPage() {
     [topics, search, filterType],
   );
 
-  const gvpbTopics = useMemo(() => filtered.filter(t => ["APPROVED", "IN_PROGRESS", "SUBMITTED", "GRADING"].includes(t.state)), [filtered]);
-  const councilTopics = useMemo(() => filtered.filter(t => ["GRADING", "COMPLETED"].includes(t.state) || t.type === "KLTN"), [filtered]);
+  const gvpbTopics = useMemo(
+    () => filtered.filter(t => ["CONFIRMED", "IN_PROGRESS", "PENDING_CONFIRM", "DEFENSE"].includes(t.state)),
+    [filtered],
+  );
+  const councilTopics = useMemo(
+    () => filtered.filter(t => t.type === "KLTN" && ["PENDING_CONFIRM", "DEFENSE"].includes(t.state)),
+    [filtered],
+  );
 
   const handleAssignGvpb = async (topicId: string) => {
     const teacherId = gvpbMap[topicId];
@@ -112,7 +118,7 @@ export default function TBMAssignmentsPage() {
     setIsAssigningGvpb(topicId);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>("/assignments/gvpb", { topicId, reviewerUserId: teacherId });
+      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/assignments/gvpb`, { userId: teacherId });
       setTopics(prev => prev.map(t =>
         t.id === topicId
           ? { ...t, reviewer: teachers.find(x => x.id === teacherId) ? { id: teacherId, fullName: teachers.find(x => x.id === teacherId)!.fullName } : t.reviewer }
@@ -129,14 +135,22 @@ export default function TBMAssignmentsPage() {
 
   const handleAssignCouncil = async () => {
     if (!councilTopic) return;
+    const memberUserIds = Array.from(
+      new Set(councilForm.memberUserIds.filter(Boolean))
+    ).filter(
+      (id) => id !== councilForm.chairUserId && id !== councilForm.secretaryUserId,
+    );
+    if (memberUserIds.length < 3) {
+      setError("Hội đồng cần ít nhất 3 thành viên (không trùng Chủ tịch/Thư ký).");
+      return;
+    }
     setIsAssigningCouncil(true);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>("/assignments/council", {
-        topicId: councilTopic.id,
-        ...councilForm,
-        defenseAt: councilForm.defenseAt ? new Date(councilForm.defenseAt).toISOString() : undefined,
-        memberUserIds: councilForm.memberUserIds.filter(Boolean),
+      await api.post<ApiResponse<unknown>>(`/topics/${councilTopic.id}/assignments/council`, {
+        chairUserId: councilForm.chairUserId,
+        secretaryUserId: councilForm.secretaryUserId,
+        memberUserIds,
       });
       setTopics(prev => prev.map(t =>
         t.id === councilTopic!.id

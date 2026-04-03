@@ -89,8 +89,17 @@ export function middleware(request: NextRequest) {
   }
 
   if (accountRole === "LECTURER") {
+    const isCouncilRole =
+      resolvedRole === "TV_HD" ||
+      resolvedRole === "CT_HD" ||
+      resolvedRole === "TK_HD";
+
     if (pathname.startsWith("/student") || pathname.startsWith("/tbm")) {
       return NextResponse.redirect(new URL(getRoleHome("LECTURER"), request.url));
+    }
+
+    if (pathname.startsWith("/council") && !isCouncilRole) {
+      return NextResponse.redirect(new URL(getRoleHome(resolvedRole), request.url));
     }
   }
 

@@ -210,6 +210,26 @@ async function getAccessToken(email: string, name: string): Promise<string> {
   return accessToken;
 }
 
+async function getAccessTokenSafe(
+  identityKey: 'STUDENT' | 'LECTURER' | 'TBM',
+  defaultEmail: string,
+  defaultName: string,
+): Promise<string | undefined> {
+  const email = process.env[`SWEEP_${identityKey}_EMAIL`] ?? defaultEmail;
+  const name = process.env[`SWEEP_${identityKey}_NAME`] ?? defaultName;
+
+  try {
+    return await getAccessToken(email, name);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Keep sweep running even if auth bootstrap accounts are not whitelisted.
+    console.warn(
+      `[sweep:api] token bootstrap skipped for ${identityKey}: ${message}`,
+    );
+    return undefined;
+  }
+}
+
 async function invokeApi(
   options: InvokeApiOptions,
   results: SweepResult[],
@@ -338,9 +358,17 @@ async function run(): Promise<void> {
     startedByScript = server.started;
     serverProcess = server.process;
 
-    const studentToken = await getAccessToken('student1@hcmute.edu.vn', 'Student One');
-    const lecturerToken = await getAccessToken('gvhd1@hcmute.edu.vn', 'Lecturer One');
-    const tbmToken = await getAccessToken('tbm@hcmute.edu.vn', 'TBM One');
+    const studentToken = await getAccessTokenSafe(
+      'STUDENT',
+      'student1@hcmute.edu.vn',
+      'Student One',
+    );
+    const lecturerToken = await getAccessTokenSafe(
+      'LECTURER',
+      'gvhd1@hcmute.edu.vn',
+      'Lecturer One',
+    );
+    const tbmToken = await getAccessTokenSafe('TBM', 'tbm@hcmute.edu.vn', 'TBM One');
 
     let notifId = 'nt_001';
     const notificationsList = await invokeApi(

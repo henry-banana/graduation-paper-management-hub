@@ -1,5 +1,13 @@
 export type AccountRole = "STUDENT" | "LECTURER" | "TBM";
-export type UiRole = "STUDENT" | "GVHD" | "TBM";
+export type UiRole =
+  | "STUDENT"
+  | "LECTURER"
+  | "GVHD"
+  | "GVPB"
+  | "TBM"
+  | "TV_HD"
+  | "CT_HD"
+  | "TK_HD";
 
 export interface UserProfile {
   id: string;
@@ -25,6 +33,21 @@ const PROFILE_KEY = "kltn_profile";
 const AUTH_COOKIE = "auth_token";
 const ACCOUNT_ROLE_COOKIE = "account_role";
 const USER_ROLE_COOKIE = "user_role";
+
+const UI_ROLES: readonly UiRole[] = [
+  "STUDENT",
+  "LECTURER",
+  "GVHD",
+  "GVPB",
+  "TBM",
+  "TV_HD",
+  "CT_HD",
+  "TK_HD",
+] as const;
+
+function isUiRole(value: string | null): value is UiRole {
+  return Boolean(value && UI_ROLES.includes(value as UiRole));
+}
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -134,14 +157,14 @@ export function getCurrentUiRole(): UiRole {
     return "STUDENT";
   }
 
-  const stored = localStorage.getItem(USER_ROLE_KEY);
-  if (stored === "STUDENT" || stored === "GVHD" || stored === "TBM") {
-    return stored;
+  const cookieValue = getCookie(USER_ROLE_COOKIE);
+  if (isUiRole(cookieValue)) {
+    return cookieValue;
   }
 
-  const cookieValue = getCookie(USER_ROLE_COOKIE);
-  if (cookieValue === "STUDENT" || cookieValue === "GVHD" || cookieValue === "TBM") {
-    return cookieValue;
+  const stored = localStorage.getItem(USER_ROLE_KEY);
+  if (isUiRole(stored)) {
+    return stored;
   }
 
   return "STUDENT";

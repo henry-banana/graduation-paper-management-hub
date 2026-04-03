@@ -1,9 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as puppeteer from 'puppeteer-core';
 import { renderMinutesHtml, MinutesTemplateData } from './minutes.template';
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const chromium = require('chromium') as { path: string };
+import chromium = require('chromium');
 
 
 export interface GeneratedPdf {

@@ -44,7 +44,7 @@ export default function CouncilSummaryPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=council&page=1&size=100&state=GRADING");
+      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=tk_hd&page=1&size=100&state=GRADING");
       setTopics(res.data ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải tổng hợp điểm.");
@@ -66,7 +66,7 @@ export default function CouncilSummaryPage() {
     setIsSummarizing(topicId);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/scores/summarize`, {});
+      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/scores/summary`, { requestedByRole: "TK_HD" });
       setTopics(prev => prev.map(t =>
         t.id === topicId
           ? { ...t, scores: { ...(t.scores ?? {}), isSummarized: true } }

@@ -27,7 +27,7 @@ import {
   canEditDeadline,
   ACTION_TO_STATE,
 } from './topic-state.enum';
-import { AuthUser } from '../../common/types';
+import { AuthUser, TopicRole } from '../../common/types';
 import {
   PeriodsRepository,
   RevisionRoundRecord,
@@ -107,14 +107,30 @@ export class TopicsService {
     } else if (query.role === 'supervisor' || query.role === 'gvhd') {
       // GVHD: xem đề tài mình đang hướng dẫn
       topics = topics.filter((t) => t.supervisorUserId === currentUser.userId);
-    } else if (query.role === 'reviewer' || query.role === 'gvpb' || query.role === 'tv_hd' || query.role === 'ct_hd') {
-      // GVPB/TV_HD/CT_HD: xem đề tài qua assignments
+    } else if (query.role === 'reviewer' || query.role === 'gvpb' || query.role === 'tv_hd' || query.role === 'ct_hd' || query.role === 'tk_hd') {
+      // GVPB/TV_HD/CT_HD/TK_HD: xem đề tài qua assignments
       if (this.assignmentsRepository) {
         const assignments = await this.assignmentsRepository.findAll();
+        const roleToTopicRole: Record<string, TopicRole> = {
+          gvpb: 'GVPB',
+          tv_hd: 'TV_HD',
+          ct_hd: 'CT_HD',
+          tk_hd: 'TK_HD',
+        };
+
+        let myAssignments = assignments.filter(
+          (a) => a.userId === currentUser.userId && a.status === 'ACTIVE',
+        );
+
+        if (query.role !== 'reviewer') {
+          const mappedRole = roleToTopicRole[query.role];
+          myAssignments = myAssignments.filter(
+            (a) => a.topicRole === mappedRole,
+          );
+        }
+
         const myTopicIds = new Set(
-          assignments
-            .filter((a) => a.userId === currentUser.userId)
-            .map((a) => a.topicId),
+          myAssignments.map((a) => a.topicId),
         );
         topics = topics.filter((t) => myTopicIds.has(t.id));
       }

@@ -54,7 +54,6 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
     { name: "Tổng hợp điểm", path: "/council/summary", icon: FileText },
   ],
   CT_HD: [
-    { name: "Chấm điểm HĐ", path: "/council/scoring", icon: CheckSquare },
     { name: "Xác nhận công bố", path: "/council/final-confirm", icon: CheckSquare },
   ],
 };
@@ -130,7 +129,7 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
         <div className="relative px-6 pt-8 pb-6 flex items-center justify-between border-b border-white/10">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 relative flex-shrink-0">
-              <Image src="/logo-ute.png" alt="UTE Logo" fill className="object-contain" />
+              <Image src="/logo-ute.png" alt="UTE Logo" fill sizes="40px" className="object-contain" />
             </div>
             <div>
               <h1 className="text-white font-headline font-bold text-sm leading-tight">Công Nghệ KT TP.HCM</h1>

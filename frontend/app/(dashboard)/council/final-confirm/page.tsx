@@ -39,6 +39,11 @@ interface MinutesForm {
   revisionNotes: string;
 }
 
+interface ExportResultDto {
+  driveLink?: string;
+  downloadUrl?: string;
+}
+
 export default function CouncilFinalConfirmPage() {
   const [topics, setTopics] = useState<TopicSummaryDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -55,7 +60,7 @@ export default function CouncilFinalConfirmPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=council&page=1&size=100&state=GRADING");
+      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=ct_hd&page=1&size=100&state=GRADING");
       setTopics(res.data ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải tổng hợp điểm.");
@@ -101,17 +106,18 @@ export default function CouncilFinalConfirmPage() {
     setIsSavingMinutes(true);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>(`/topics/${minutesModal.id}/minutes`, minutesForm);
+      const exportRes = await api.post<ApiResponse<ExportResultDto>>(`/exports/minutes/${minutesModal.id}`, {});
+      const minutesLink = exportRes.data?.driveLink ?? exportRes.data?.downloadUrl;
       setTopics(prev => prev.map(t =>
         t.id === minutesModal.id
-          ? { ...t, councilComments: minutesForm.councilComments }
+          ? { ...t, councilMinutesLink: minutesLink ?? t.councilMinutesLink }
           : t,
       ));
       setMinutesModal(null);
-      setSuccess("Đã lưu Biên bản Hội đồng thành công.");
+      setSuccess("Đã tạo Biên bản Hội đồng thành công.");
       setTimeout(() => setSuccess(null), 4000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lưu biên bản thất bại.");
+      setError(e instanceof Error ? e.message : "Tạo biên bản thất bại.");
     } finally {
       setIsSavingMinutes(false);
     }
@@ -357,7 +363,7 @@ export default function CouncilFinalConfirmPage() {
               <button onClick={() => setMinutesModal(null)} className="flex-1 px-4 py-2.5 border border-outline-variant/20 rounded-xl text-sm font-semibold text-on-surface hover:bg-surface-container transition-colors">Hủy</button>
               <button onClick={() => void handleSaveMinutes()} disabled={isSavingMinutes}
                 className="flex-1 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">
-                {isSavingMinutes ? "Đang lưu..." : "Lưu Biên bản"}
+                {isSavingMinutes ? "Đang tạo..." : "Tạo Biên bản"}
               </button>
             </div>
           </div>

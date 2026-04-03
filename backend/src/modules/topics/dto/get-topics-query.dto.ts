@@ -42,11 +42,11 @@ export class GetTopicsQueryDto {
 
   @ApiPropertyOptional({
     description: 'Filter by role context',
-    enum: ['student', 'supervisor', 'reviewer', 'gvhd', 'gvpb', 'tv_hd', 'ct_hd', 'tbm'],
+    enum: ['student', 'supervisor', 'reviewer', 'gvhd', 'gvpb', 'tv_hd', 'ct_hd', 'tk_hd', 'tbm'],
   })
   @IsOptional()
-  @IsIn(['student', 'supervisor', 'reviewer', 'gvhd', 'gvpb', 'tv_hd', 'ct_hd', 'tbm'])
-  role?: 'student' | 'supervisor' | 'reviewer' | 'gvhd' | 'gvpb' | 'tv_hd' | 'ct_hd' | 'tbm';
+  @IsIn(['student', 'supervisor', 'reviewer', 'gvhd', 'gvpb', 'tv_hd', 'ct_hd', 'tk_hd', 'tbm'])
+  role?: 'student' | 'supervisor' | 'reviewer' | 'gvhd' | 'gvpb' | 'tv_hd' | 'ct_hd' | 'tk_hd' | 'tbm';
 
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()

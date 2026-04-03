@@ -138,3 +138,153 @@ describe('TopicsService - registration period window', () => {
     expect(topicsRepository.create).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('TopicsService - role-based topic filtering', () => {
+  const currentLecturer = {
+    userId: 'USR_LECTURER_001',
+    email: 'lecturer@hcmute.edu.vn',
+    role: 'LECTURER' as const,
+  };
+
+  const createServiceForFindAll = () => {
+    const topics = [
+      {
+        id: 'tp_001',
+        type: 'KLTN',
+        title: 'Topic 1',
+        domain: 'AI',
+        state: 'GRADING',
+        studentUserId: 'USR_STUDENT_001',
+        supervisorUserId: 'USR_LECTURER_002',
+        periodId: 'prd_001',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'tp_002',
+        type: 'KLTN',
+        title: 'Topic 2',
+        domain: 'Web',
+        state: 'GRADING',
+        studentUserId: 'USR_STUDENT_002',
+        supervisorUserId: 'USR_LECTURER_003',
+        periodId: 'prd_001',
+        createdAt: '2026-01-02T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+      {
+        id: 'tp_003',
+        type: 'KLTN',
+        title: 'Topic 3',
+        domain: 'IoT',
+        state: 'GRADING',
+        studentUserId: 'USR_STUDENT_003',
+        supervisorUserId: 'USR_LECTURER_004',
+        periodId: 'prd_001',
+        createdAt: '2026-01-03T00:00:00.000Z',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      },
+    ];
+
+    const assignments = [
+      {
+        id: 'as_001',
+        topicId: 'tp_001',
+        userId: 'USR_LECTURER_001',
+        topicRole: 'TK_HD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_002',
+        topicId: 'tp_002',
+        userId: 'USR_LECTURER_001',
+        topicRole: 'TV_HD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_003',
+        topicId: 'tp_003',
+        userId: 'USR_LECTURER_001',
+        topicRole: 'TK_HD',
+        status: 'INACTIVE',
+      },
+      {
+        id: 'as_004',
+        topicId: 'tp_003',
+        userId: 'USR_LECTURER_999',
+        topicRole: 'TK_HD',
+        status: 'ACTIVE',
+      },
+    ];
+
+    const topicsRepository = {
+      findAll: jest.fn().mockResolvedValue(topics),
+    };
+
+    const revisionRoundsRepository = {
+      findWhere: jest.fn(),
+      findById: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    };
+
+    const periodsRepository = {
+      findById: jest.fn(),
+    };
+
+    const usersRepository = {
+      findById: jest.fn(),
+    };
+
+    const assignmentsRepository = {
+      findAll: jest.fn().mockResolvedValue(assignments),
+    };
+
+    const service = new TopicsService(
+      topicsRepository as any,
+      revisionRoundsRepository as any,
+      periodsRepository as any,
+      usersRepository as any,
+      assignmentsRepository as any,
+      undefined,
+    );
+
+    return {
+      service,
+      topicsRepository,
+      assignmentsRepository,
+    };
+  };
+
+  it('returns only ACTIVE topics where current user is TK_HD when role=tk_hd', async () => {
+    const { service } = createServiceForFindAll();
+
+    const result = await service.findAll(
+      {
+        role: 'tk_hd',
+        page: 1,
+        size: 20,
+      },
+      currentLecturer,
+    );
+
+    expect(result.data.map((topic) => topic.id)).toEqual(['tp_001']);
+    expect(result.pagination.total).toBe(1);
+  });
+
+  it('returns all ACTIVE assigned topics for reviewer regardless of topicRole', async () => {
+    const { service } = createServiceForFindAll();
+
+    const result = await service.findAll(
+      {
+        role: 'reviewer',
+        page: 1,
+        size: 20,
+      },
+      currentLecturer,
+    );
+
+    expect(result.data.map((topic) => topic.id)).toEqual(['tp_002', 'tp_001']);
+    expect(result.pagination.total).toBe(2);
+  });
+});
