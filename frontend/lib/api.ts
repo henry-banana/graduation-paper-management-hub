@@ -34,6 +34,18 @@ interface ProblemDetail {
   status?: number;
 }
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly detail?: ProblemDetail;
+
+  constructor(message: string, status: number, detail?: ProblemDetail) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 interface RefreshResponse {
   data: {
     accessToken: string;
@@ -136,7 +148,7 @@ class ApiClient {
       detail?.message ||
       detail?.title ||
       `Request failed with status ${status}`;
-    return new Error(message);
+    return new ApiRequestError(message, status, detail);
   }
 
   private async request<T>(

@@ -8,8 +8,10 @@ import { ApiResponse, api } from "@/lib/api";
 import {
   AccountRole,
   clearAuthSession,
+  setCurrentRoles,
   setAuthSession,
   setUserProfile,
+  UiRole,
 } from "@/lib/auth/session";
 
 interface AuthMeDto {
@@ -17,6 +19,7 @@ interface AuthMeDto {
   email: string;
   fullName: string;
   accountRole: AccountRole;
+  uiRole?: UiRole;
 }
 
 function getRedirectPath(accountRole: AccountRole): string {
@@ -76,6 +79,9 @@ function AuthCallbackContent() {
 
         const response = await api.get<ApiResponse<AuthMeDto>>("/auth/me");
         setUserProfile(response.data);
+        if (response.data.uiRole) {
+          setCurrentRoles(response.data.accountRole, response.data.uiRole);
+        }
 
         router.replace(getRedirectPath(response.data.accountRole));
       } catch (callbackError) {

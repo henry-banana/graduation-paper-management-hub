@@ -136,7 +136,7 @@ export class SubmissionsService {
     fileBuffer: Buffer,
   ): Promise<CreateSubmissionResponseDto> {
     const topic = await this.getTopicOrThrow(topicId);
-    this.assertUploadPermission(topic, fileType, user);
+    await this.assertUploadPermission(topic, fileType, user);
     this.assertUploadState(topic, fileType);
     const validatedFile = this.fileValidator.validate(fileInfo);
 
@@ -200,7 +200,7 @@ export class SubmissionsService {
     }
 
     const topic = await this.getTopicOrThrow(submission.topicId);
-    this.assertSubmitterOwnership(submission, topic, user);
+    await this.assertSubmitterOwnership(submission, topic, user);
 
     const policyState = this.syncSubmissionPolicyFlags(submission);
 
@@ -256,8 +256,8 @@ export class SubmissionsService {
     }
 
     const topic = await this.getTopicOrThrow(submission.topicId);
-    this.assertSubmitterOwnership(submission, topic, user);
-    this.assertUploadPermission(topic, submission.fileType, user);
+    await this.assertSubmitterOwnership(submission, topic, user);
+    await this.assertUploadPermission(topic, submission.fileType, user);
 
     const validatedFile = this.fileValidator.validate(fileInfo);
     if (!fileBuffer || fileBuffer.length === 0) {
@@ -654,12 +654,18 @@ export class SubmissionsService {
     if (user.role === 'LECTURER') {
       // GVHD (supervisor) always has access
       if (topic.supervisorUserId === user.userId) {
+        await this.assertActiveAssignmentIfPresent(topic.id, user.userId, [
+          'GVHD',
+        ]);
         return;
       }
       // GVPB / Council: check if assigned to this topic via Assignments sheet
       const assignments = await this.assignmentsRepository.findAll();
       const isAssigned = assignments.some(
-        (a) => a.topicId === topic.id && a.userId === user.userId,
+        (a) =>
+          a.topicId === topic.id &&
+          a.userId === user.userId &&
+          a.status === 'ACTIVE',
       );
       if (isAssigned) {
         return;
@@ -674,27 +680,31 @@ export class SubmissionsService {
     submission: SubmissionRecord,
     topic: TopicRecord,
     user: AuthUser,
-  ): void {
+  ): Promise<void> {
     if (user.role === 'TBM') {
-      return;
+      return Promise.resolve();
     }
 
     if (user.role === 'STUDENT' && topic.studentUserId === user.userId) {
-      return;
+      return Promise.resolve();
     }
 
     if (user.role === 'LECTURER' && topic.supervisorUserId === user.userId) {
-      return;
+      return this.assertActiveAssignmentIfPresent(topic.id, user.userId, [
+        'GVHD',
+      ]);
     }
 
-    throw new ForbiddenException('Cannot modify this submission');
+    return Promise.reject(
+      new ForbiddenException('Cannot modify this submission'),
+    );
   }
 
-  private assertUploadPermission(
+  private async assertUploadPermission(
     topic: TopicRecord,
     fileType: FileType,
     user: AuthUser,
-  ): void {
+  ): Promise<void> {
     if (fileType === 'REPORT') {
       if (user.role !== 'STUDENT' || topic.studentUserId !== user.userId) {
         throw new ForbiddenException(
@@ -715,6 +725,33 @@ export class SubmissionsService {
       throw new ForbiddenException(
         `Only topic supervisor can upload ${fileType} files`,
       );
+    }
+
+    await this.assertActiveAssignmentIfPresent(topic.id, user.userId, ['GVHD']);
+  }
+
+  private async assertActiveAssignmentIfPresent(
+    topicId: string,
+    userId: string,
+    acceptedRoles: Array<'GVHD' | 'GVPB' | 'TV_HD' | 'CT_HD' | 'TK_HD'>,
+  ): Promise<void> {
+    const assignments = await this.assignmentsRepository.findAll();
+    const scopedAssignments = assignments.filter(
+      (assignment) => assignment.topicId === topicId && assignment.userId === userId,
+    );
+
+    // Legacy-safe fallback: if no assignment row exists, keep existing owner-based behavior.
+    if (scopedAssignments.length === 0) {
+      return;
+    }
+
+    const hasActiveAssignment = scopedAssignments.some(
+      (assignment) =>
+        assignment.status === 'ACTIVE' && acceptedRoles.includes(assignment.topicRole),
+    );
+
+    if (!hasActiveAssignment) {
+      throw new ForbiddenException('Cannot access this topic');
     }
   }
 

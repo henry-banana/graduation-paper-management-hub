@@ -28,6 +28,18 @@ function generateRequestId(): string {
   return `req_${crypto.randomBytes(8).toString('hex')}`;
 }
 
+function mapAccountRoleToUiRole(role: AuthUser['role']): 'STUDENT' | 'LECTURER' | 'TBM' {
+  if (role === 'STUDENT') {
+    return 'STUDENT';
+  }
+
+  if (role === 'TBM') {
+    return 'TBM';
+  }
+
+  return 'LECTURER';
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -125,13 +137,15 @@ export class AuthController {
   @Get('me')
   async getCurrentUser(@CurrentUser() user: AuthUser) {
     const profile = await this.authService.getCurrentProfile(user.userId);
+    const accountRole = profile?.role ?? user.role;
 
     return {
       data: {
         id: profile?.userId ?? user.userId,
         email: profile?.email ?? user.email,
         fullName: profile?.name ?? user.email,
-        accountRole: profile?.role ?? user.role,
+        accountRole,
+        uiRole: mapAccountRoleToUiRole(accountRole),
       },
       meta: { requestId: generateRequestId() },
     };

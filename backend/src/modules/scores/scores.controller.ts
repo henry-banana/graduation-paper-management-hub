@@ -247,7 +247,7 @@ export class ScoresController {
     @Param('topicId') topicId: string,
     @CurrentUser() user: AuthUser,
   ) {
-    // CT_HD confirms and publishes. If user is TBM they also get this role.
+    // CT_HD confirms and publishes. Service layer enforces ACTIVE CT_HD assignment.
     const role: ConfirmScoreRole = 'CT_HD';
     const result = await this.scoresService.confirm(topicId, role, user);
     return {

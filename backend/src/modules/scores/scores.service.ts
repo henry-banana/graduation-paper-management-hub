@@ -116,6 +116,7 @@ export class ScoresService {
       (assignment) =>
         assignment.topicId === topicId &&
         assignment.userId === userId &&
+        assignment.status === 'ACTIVE' &&
         (topicRole === undefined || assignment.topicRole === topicRole),
     );
   }
@@ -458,12 +459,19 @@ export class ScoresService {
       throw new ConflictException('Dual confirmation is only available for KLTN topics');
     }
 
-    if (user.role !== 'LECTURER') {
-      throw new ForbiddenException('Only lecturers can confirm scores');
+    if (user.role !== 'LECTURER' && user.role !== 'TBM') {
+      throw new ForbiddenException('Only lecturers or TBM can confirm scores');
     }
 
+    if (user.role === 'TBM' && role !== 'CT_HD') {
+      throw new ForbiddenException('TBM can only confirm-publish using CT_HD role');
+    }
+
+    // Least-privilege policy: confirmation requires an ACTIVE assignment for the requested role.
     if (!(await this.hasAssignment(topicId, user.userId, role))) {
-      throw new ForbiddenException(`You do not have ${role} role on this topic`);
+      throw new ForbiddenException(
+        `Only users with ACTIVE ${role} assignment can confirm scores`,
+      );
     }
 
     const calculatedSummary = await this.calculateSummary(topicId, topic);
@@ -756,15 +764,22 @@ export class ScoresService {
       const assignments = await this.assignmentsRepository.findAll();
       const assignedCouncilMembers = assignments.filter(
         (assignment) =>
-          assignment.topicId === topicId && assignment.topicRole === 'TV_HD',
+          assignment.topicId === topicId &&
+          assignment.topicRole === 'TV_HD' &&
+          assignment.status === 'ACTIVE',
       );
 
       if (assignedCouncilMembers.length === 0) {
         throw new ConflictException('Cannot summarize before council assignments are ready');
       }
 
+      const activeCouncilUserIds = new Set(
+        assignedCouncilMembers.map((assignment) => assignment.userId),
+      );
       const councilScores = topicScores.filter(
-        (score) => score.scorerRole === 'TV_HD',
+        (score) =>
+          score.scorerRole === 'TV_HD' &&
+          activeCouncilUserIds.has(score.scorerUserId),
       );
       const submittedCouncilUserIds = new Set(
         councilScores.map((score) => score.scorerUserId),

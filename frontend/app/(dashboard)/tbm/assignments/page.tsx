@@ -5,7 +5,7 @@ import {
   AlertCircle, BookOpen, Check, ChevronDown, GraduationCap,
   RefreshCw, Search, UserCheck, Users, X,
 } from "lucide-react";
-import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 
 /* ---------- Types ---------- */
 interface TopicDto {
@@ -13,11 +13,22 @@ interface TopicDto {
   title: string;
   type: "BCTT" | "KLTN";
   state: string;
+  studentUserId?: string;
+  supervisorUserId?: string;
+  periodId?: string;
   student?: { id: string; fullName: string; studentId?: string };
   supervisor?: { id: string; fullName: string; email?: string };
   reviewer?: { id: string; fullName: string } | null;
   council?: { id: string; name: string } | null;
   period?: { id: string; code: string };
+}
+
+interface AssignmentDto {
+  id: string;
+  topicId: string;
+  userId: string;
+  topicRole: "GVHD" | "GVPB" | "TV_HD" | "CT_HD" | "TK_HD";
+  status: "ACTIVE" | "REVOKED";
 }
 
 interface TeacherDto {
@@ -90,6 +101,41 @@ export default function TBMAssignmentsPage() {
     }
   };
 
+  const findTeacherById = (teacherId: string) =>
+    teachers.find((teacher) => teacher.id === teacherId);
+
+  const findActiveGvpbAssignment = async (topicId: string): Promise<AssignmentDto | null> => {
+    const response = await api.get<ApiResponse<AssignmentDto[]>>(
+      `/topics/${topicId}/assignments`,
+    );
+
+    return (
+      response.data.find(
+        (assignment) =>
+          assignment.topicRole === "GVPB" && assignment.status === "ACTIVE",
+      ) ?? null
+    );
+  };
+
+  const updateTopicReviewer = (topicId: string, teacherId: string) => {
+    const reviewer = findTeacherById(teacherId);
+    if (!reviewer) return;
+
+    setTopics((prev) =>
+      prev.map((topic) =>
+        topic.id === topicId
+          ? {
+              ...topic,
+              reviewer: {
+                id: reviewer.id,
+                fullName: reviewer.fullName,
+              },
+            }
+          : topic,
+      ),
+    );
+  };
+
   useEffect(() => { void load(); }, []);
 
   const filtered = useMemo(() =>
@@ -115,18 +161,58 @@ export default function TBMAssignmentsPage() {
   const handleAssignGvpb = async (topicId: string) => {
     const teacherId = gvpbMap[topicId];
     if (!teacherId) return;
+
+    const topic = topics.find((item) => item.id === topicId);
+    if (topic?.reviewer?.id === teacherId) {
+      setSuccess("GVPB hiện tại đã là giảng viên được chọn.");
+      setTimeout(() => setSuccess(null), 3000);
+      return;
+    }
+
     setIsAssigningGvpb(topicId);
     setError(null);
     try {
       await api.post<ApiResponse<unknown>>(`/topics/${topicId}/assignments/gvpb`, { userId: teacherId });
-      setTopics(prev => prev.map(t =>
-        t.id === topicId
-          ? { ...t, reviewer: teachers.find(x => x.id === teacherId) ? { id: teacherId, fullName: teachers.find(x => x.id === teacherId)!.fullName } : t.reviewer }
-          : t,
-      ));
+      updateTopicReviewer(topicId, teacherId);
       setSuccess("Phân công GVPB thành công.");
       setTimeout(() => setSuccess(null), 3000);
     } catch (e) {
+      if (e instanceof ApiRequestError && e.status === 409) {
+        try {
+          const currentAssignment = await findActiveGvpbAssignment(topicId);
+
+          if (!currentAssignment) {
+            throw new Error("Không tìm thấy phân công GVPB hiện tại để thay thế.");
+          }
+
+          if (currentAssignment.userId === teacherId) {
+            setSuccess("GVPB hiện tại đã là giảng viên được chọn.");
+            setTimeout(() => setSuccess(null), 3000);
+            return;
+          }
+
+          await api.patch<ApiResponse<unknown>>(
+            `/assignments/${currentAssignment.id}/replace`,
+            {
+              newUserId: teacherId,
+              reason: "TBM cập nhật phân công GVPB từ màn hình quản lý.",
+            },
+          );
+
+          updateTopicReviewer(topicId, teacherId);
+          setSuccess("Đã thay thế GVPB thành công.");
+          setTimeout(() => setSuccess(null), 3000);
+          return;
+        } catch (replaceError) {
+          setError(
+            replaceError instanceof Error
+              ? replaceError.message
+              : "Thay thế GVPB thất bại.",
+          );
+          return;
+        }
+      }
+
       setError(e instanceof Error ? e.message : "Phân công GVPB thất bại.");
     } finally {
       setIsAssigningGvpb(null);
@@ -256,7 +342,7 @@ export default function TBMAssignmentsPage() {
                           <tr key={t.id} className="hover:bg-surface-container-low/30 transition-colors">
                             <td className="px-4 py-4">
                               <p className="text-sm font-semibold text-on-surface">{t.student?.fullName ?? "—"}</p>
-                              <p className="text-xs text-outline">{t.student?.studentId ?? ""}</p>
+                              <p className="text-xs text-outline">{t.student?.studentId ?? t.studentUserId ?? ""}</p>
                             </td>
                             <td className="px-4 py-4 max-w-[200px]">
                               <p className="text-xs text-on-surface line-clamp-2" title={t.title}>{t.title}</p>
@@ -264,8 +350,8 @@ export default function TBMAssignmentsPage() {
                             <td className="px-4 py-4">
                               <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${t.type === "KLTN" ? "bg-purple-100 text-purple-700" : "bg-primary/10 text-primary"}`}>{t.type}</span>
                             </td>
-                            <td className="px-4 py-4 text-xs text-outline whitespace-nowrap">{t.period?.code ?? "—"}</td>
-                            <td className="px-4 py-4 text-xs text-on-surface-variant">{t.supervisor?.fullName ?? "—"}</td>
+                            <td className="px-4 py-4 text-xs text-outline whitespace-nowrap">{t.period?.code ?? t.periodId ?? "—"}</td>
+                            <td className="px-4 py-4 text-xs text-on-surface-variant">{t.supervisor?.fullName ?? t.supervisorUserId ?? "—"}</td>
                             <td className="px-4 py-4 text-xs">
                               {t.reviewer
                                 ? <span className="flex items-center gap-1 text-green-600"><Check className="w-3 h-3" />{t.reviewer.fullName}</span>

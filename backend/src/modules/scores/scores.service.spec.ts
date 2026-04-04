@@ -7,9 +7,71 @@ import {
 } from '@nestjs/common';
 import { ScoresService } from './scores.service';
 import { AuthUser } from '../../common/types';
+import {
+  AssignmentsRepository,
+  ScoreSummariesRepository,
+  ScoresRepository,
+  TopicsRepository,
+} from '../../infrastructure/google-sheets';
+import { NotificationsService } from '../notifications/notifications.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('ScoresService', () => {
   let service: ScoresService;
+
+  type MockTopic = {
+    id: string;
+    type: 'KLTN' | 'BCTT';
+    title: string;
+    domain: string;
+    state: 'GRADING' | 'SCORING' | 'DEFENSE' | 'COMPLETED';
+    studentUserId: string;
+    supervisorUserId: string;
+    periodId: string;
+    submitEndAt?: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+
+  type MockAssignment = {
+    id: string;
+    topicId: string;
+    userId: string;
+    topicRole: 'GVHD' | 'GVPB' | 'TV_HD' | 'TK_HD' | 'CT_HD';
+    status: 'ACTIVE' | 'REVOKED';
+    assignedAt: string;
+    revokedAt?: string;
+  };
+
+  type MockScore = {
+    id: string;
+    topicId: string;
+    scorerUserId: string;
+    scorerRole: 'GVHD' | 'GVPB' | 'TV_HD';
+    status: 'DRAFT' | 'SUBMITTED';
+    totalScore: number;
+    rubricData: Array<{ criterion: string; score: number; max: number; note?: string }>;
+    submittedAt?: string;
+    updatedAt: string;
+  };
+
+  type MockSummary = {
+    id: string;
+    topicId: string;
+    gvhdScore?: number;
+    gvpbScore?: number;
+    councilAvgScore?: number;
+    finalScore: number;
+    result: 'PASS' | 'FAIL' | 'PENDING';
+    confirmedByGvhd: boolean;
+    confirmedByCtHd: boolean;
+    published: boolean;
+  };
+
+  let topics: MockTopic[];
+  let assignments: MockAssignment[];
+  let scores: MockScore[];
+  let summaries: MockSummary[];
 
   const lecturerUser: AuthUser = {
     userId: 'USR002',
@@ -118,8 +180,109 @@ describe('ScoresService', () => {
   };
 
   beforeEach(async () => {
+    const now = new Date().toISOString();
+
+    topics = [
+      {
+        id: 'tp_001',
+        type: 'KLTN',
+        title: 'AI-assisted grading optimization',
+        domain: 'AI',
+        state: 'GRADING',
+        studentUserId: 'USR001',
+        supervisorUserId: 'USR002',
+        periodId: 'prd_001',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'tp_002',
+        type: 'KLTN',
+        title: 'Realtime classroom analytics',
+        domain: 'IoT',
+        state: 'GRADING',
+        studentUserId: 'USR003',
+        supervisorUserId: 'USR004',
+        periodId: 'prd_001',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    assignments = [
+      { id: 'as_001', topicId: 'tp_001', userId: 'USR002', topicRole: 'GVHD', status: 'ACTIVE', assignedAt: now },
+      { id: 'as_002', topicId: 'tp_001', userId: 'USR_GVPB', topicRole: 'GVPB', status: 'ACTIVE', assignedAt: now },
+      { id: 'as_003', topicId: 'tp_001', userId: 'USR_TV1', topicRole: 'TV_HD', status: 'ACTIVE', assignedAt: now },
+      { id: 'as_004', topicId: 'tp_001', userId: 'USR_TV2', topicRole: 'TV_HD', status: 'ACTIVE', assignedAt: now },
+      { id: 'as_005', topicId: 'tp_001', userId: 'USR_TV3', topicRole: 'TV_HD', status: 'ACTIVE', assignedAt: now },
+      { id: 'as_006', topicId: 'tp_001', userId: 'USR_CT', topicRole: 'CT_HD', status: 'ACTIVE', assignedAt: now },
+      { id: 'as_007', topicId: 'tp_001', userId: 'USR_TK', topicRole: 'TK_HD', status: 'ACTIVE', assignedAt: now },
+      { id: 'as_008', topicId: 'tp_002', userId: 'USR004', topicRole: 'GVHD', status: 'ACTIVE', assignedAt: now },
+    ];
+
+    scores = [
+      {
+        id: 'sc_001',
+        topicId: 'tp_001',
+        scorerUserId: 'USR002',
+        scorerRole: 'GVHD',
+        status: 'DRAFT',
+        totalScore: 1.5,
+        rubricData: [{ criterion: 'quality', score: 1.5, max: 2.5 }],
+        updatedAt: now,
+      },
+    ];
+
+    summaries = [];
+
+    const scoresRepositoryMock = {
+      findAll: jest.fn(async () => scores),
+      findById: jest.fn(async (id: string) => scores.find((score) => score.id === id) ?? null),
+      create: jest.fn(async (entity: MockScore) => {
+        scores.push(entity);
+      }),
+      update: jest.fn(async (id: string, entity: MockScore) => {
+        const index = scores.findIndex((score) => score.id === id);
+        if (index >= 0) {
+          scores[index] = entity;
+        }
+      }),
+    };
+
+    const scoreSummariesRepositoryMock = {
+      findFirst: jest.fn(async (predicate: (summary: MockSummary) => boolean) =>
+        summaries.find((summary) => predicate(summary)) ?? null,
+      ),
+      findById: jest.fn(async (id: string) => summaries.find((summary) => summary.id === id) ?? null),
+      create: jest.fn(async (entity: MockSummary) => {
+        summaries.push(entity);
+      }),
+      update: jest.fn(async (id: string, entity: MockSummary) => {
+        const index = summaries.findIndex((summary) => summary.id === id);
+        if (index >= 0) {
+          summaries[index] = entity;
+        }
+      }),
+    };
+
+    const topicsRepositoryMock = {
+      findById: jest.fn(async (id: string) => topics.find((topic) => topic.id === id) ?? null),
+    };
+
+    const assignmentsRepositoryMock = {
+      findAll: jest.fn(async () => assignments),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ScoresService],
+      providers: [
+        ScoresService,
+        { provide: ScoresRepository, useValue: scoresRepositoryMock },
+        { provide: ScoreSummariesRepository, useValue: scoreSummariesRepositoryMock },
+        { provide: TopicsRepository, useValue: topicsRepositoryMock },
+        { provide: AssignmentsRepository, useValue: assignmentsRepositoryMock },
+        { provide: NotificationsService, useValue: { create: jest.fn() } },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+      ],
     }).compile();
 
     service = module.get<ScoresService>(ScoresService);
@@ -339,6 +502,51 @@ describe('ScoresService', () => {
       expect(result.result).toBe('PASS');
     });
 
+    it('should ignore revoked TV_HD submission in council average', async () => {
+      await prepareSubmittedKltnScores();
+
+      assignments = assignments.map((assignment) =>
+        assignment.id === 'as_005'
+          ? {
+              ...assignment,
+              status: 'REVOKED',
+              revokedAt: new Date().toISOString(),
+            }
+          : assignment,
+      );
+
+      const result = await service.getSummary('tp_001', tkUser, 'TK_HD');
+
+      expect(result.councilAvgScore).toBe(7.5);
+      expect(result.finalScore).toBe(6.83);
+    });
+
+    it('should block summary when active TV_HD is missing even if revoked TV_HD submitted', async () => {
+      await prepareSubmittedKltnScores();
+
+      assignments = assignments.map((assignment) =>
+        assignment.id === 'as_004'
+          ? {
+              ...assignment,
+              status: 'REVOKED',
+              revokedAt: new Date().toISOString(),
+            }
+          : assignment,
+      );
+
+      scores = scores.filter(
+        (score) =>
+          !(score.topicId === 'tp_001' && score.scorerUserId === 'USR_TV3' && score.scorerRole === 'TV_HD'),
+      );
+
+      await expect(service.getSummary('tp_001', tkUser, 'TK_HD')).rejects.toThrow(
+        ConflictException,
+      );
+      await expect(service.getSummary('tp_001', tkUser, 'TK_HD')).rejects.toThrow(
+        'Cannot summarize before all council member scores are submitted',
+      );
+    });
+
     it('should throw NotFoundException for non-existent topic', async () => {
       await expect(
         service.getSummary('nonexistent', lecturerUser),
@@ -383,6 +591,14 @@ describe('ScoresService', () => {
       await service.confirm('tp_001', 'GVHD', lecturerUser);
       const result = await service.confirm('tp_001', 'CT_HD', ctUser);
       expect(result.published).toBe(true);
+    });
+
+    it('should throw ForbiddenException when TBM confirms without ACTIVE CT_HD assignment', async () => {
+      await prepareSubmittedKltnScores();
+
+      await expect(
+        service.confirm('tp_001', 'CT_HD', tbmUser),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 

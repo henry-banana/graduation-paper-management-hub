@@ -32,6 +32,9 @@ import {
   PeriodsRepository,
   RevisionRoundRecord,
   RevisionRoundsRepository,
+  ScoreSummariesRepository,
+  ScoresRepository,
+  SubmissionsRepository,
   TopicsRepository,
   UsersRepository,
   AssignmentsRepository,
@@ -79,6 +82,12 @@ export class TopicsService {
     private readonly usersRepository: UsersRepository,
     @Optional()
     private readonly assignmentsRepository?: AssignmentsRepository,
+    @Optional()
+    private readonly submissionsRepository?: SubmissionsRepository,
+    @Optional()
+    private readonly scoresRepository?: ScoresRepository,
+    @Optional()
+    private readonly scoreSummariesRepository?: ScoreSummariesRepository,
     @Optional()
     private readonly notificationsService?: NotificationsService,
     @Optional()
@@ -152,9 +161,13 @@ export class TopicsService {
     const size = query.size ?? 20;
     const start = (page - 1) * size;
     const paginatedTopics = topics.slice(start, start + size);
+    const shouldEnrich = this.shouldEnrichTopicList(query.role);
+    const data = shouldEnrich
+      ? await this.enrichTopicListDtos(paginatedTopics, query.role, currentUser)
+      : paginatedTopics.map((t) => this.mapToDto(t));
 
     return {
-      data: paginatedTopics.map((t) => this.mapToDto(t)),
+      data,
       pagination: { page, size, total },
     };
   }
@@ -765,6 +778,281 @@ export class TopicsService {
     return { fromState, toState };
   }
 
+  private shouldEnrichTopicList(role?: GetTopicsQueryDto['role']): boolean {
+    return (
+      role === 'reviewer' ||
+      role === 'gvhd' ||
+      role === 'gvpb' ||
+      role === 'tv_hd' ||
+      role === 'tk_hd' ||
+      role === 'ct_hd'
+    );
+  }
+
+  private async enrichTopicListDtos(
+    topics: TopicRecord[],
+    requestedRole: GetTopicsQueryDto['role'] | undefined,
+    currentUser: AuthUser,
+  ): Promise<TopicResponseDto[]> {
+    if (topics.length === 0) {
+      return [];
+    }
+
+    const topicIds = new Set(topics.map((topic) => topic.id));
+    const topicIdList = Array.from(topicIds);
+
+    const [allAssignments, allSubmissions, allScores, allSummaries] =
+      await Promise.all([
+        this.assignmentsRepository?.findAll() ?? Promise.resolve([]),
+        this.submissionsRepository?.findAll() ?? Promise.resolve([]),
+        this.scoresRepository?.findAll() ?? Promise.resolve([]),
+        this.scoreSummariesRepository?.findAll() ?? Promise.resolve([]),
+      ]);
+
+    const activeAssignments = allAssignments.filter(
+      (assignment) =>
+        topicIds.has(assignment.topicId) && assignment.status === 'ACTIVE',
+    );
+
+    const assignmentsByTopic = new Map<string, typeof activeAssignments>();
+    for (const topicId of topicIdList) {
+      assignmentsByTopic.set(
+        topicId,
+        activeAssignments.filter((assignment) => assignment.topicId === topicId),
+      );
+    }
+
+    const userIds = new Set<string>();
+    for (const topic of topics) {
+      userIds.add(topic.studentUserId);
+      userIds.add(topic.supervisorUserId);
+    }
+    for (const assignment of activeAssignments) {
+      userIds.add(assignment.userId);
+    }
+
+    const usersById = new Map<string, Awaited<ReturnType<UsersRepository['findById']>>>();
+    await Promise.all(
+      Array.from(userIds).map(async (userId) => {
+        usersById.set(userId, await this.usersRepository.findById(userId));
+      }),
+    );
+
+    const periodsById = new Map<string, Awaited<ReturnType<PeriodsRepository['findById']>>>();
+    await Promise.all(
+      Array.from(new Set(topics.map((topic) => topic.periodId))).map(
+        async (periodId) => {
+          periodsById.set(periodId, await this.periodsRepository.findById(periodId));
+        },
+      ),
+    );
+
+    const latestSubmissionByTopic = new Map<
+      string,
+      {
+        id: string;
+        driveLink?: string;
+        versionNumber: number;
+        uploadedAt: string;
+      }
+    >();
+    for (const submission of allSubmissions) {
+      if (!topicIds.has(submission.topicId)) {
+        continue;
+      }
+
+      const candidate = {
+        id: submission.id,
+        driveLink: submission.driveLink,
+        versionNumber: submission.versionNumber,
+        uploadedAt: submission.uploadedAt,
+      };
+      const current = latestSubmissionByTopic.get(submission.topicId);
+      if (!current) {
+        latestSubmissionByTopic.set(submission.topicId, candidate);
+        continue;
+      }
+
+      const candidateTime = new Date(candidate.uploadedAt).getTime();
+      const currentTime = new Date(current.uploadedAt).getTime();
+      if (
+        candidate.versionNumber > current.versionNumber ||
+        (candidate.versionNumber === current.versionNumber && candidateTime > currentTime)
+      ) {
+        latestSubmissionByTopic.set(submission.topicId, candidate);
+      }
+    }
+
+    const submittedScores = allScores.filter(
+      (score) => topicIds.has(score.topicId) && score.status === 'SUBMITTED',
+    );
+    const submittedScoresByTopic = new Map<string, typeof submittedScores>();
+    for (const topicId of topicIdList) {
+      submittedScoresByTopic.set(
+        topicId,
+        submittedScores.filter((score) => score.topicId === topicId),
+      );
+    }
+
+    const summaryByTopic = new Map(
+      allSummaries
+        .filter((summary) => topicIds.has(summary.topicId))
+        .map((summary) => [summary.topicId, summary] as const),
+    );
+
+    const pickLatestScore = (
+      scores: typeof submittedScores,
+      scorerRole: 'GVHD' | 'GVPB',
+    ): number | undefined => {
+      const candidates = scores.filter((score) => score.scorerRole === scorerRole);
+      if (candidates.length === 0) {
+        return undefined;
+      }
+      candidates.sort((left, right) => {
+        const leftTime = new Date(left.submittedAt ?? left.updatedAt).getTime();
+        const rightTime = new Date(right.submittedAt ?? right.updatedAt).getTime();
+        return rightTime - leftTime;
+      });
+      return candidates[0].totalScore;
+    };
+
+    const roundTo2 = (value: number): number => Math.round(value * 100) / 100;
+
+    return topics.map((topic) => {
+      const dto: TopicResponseDto = this.mapToDto(topic);
+
+      const student = usersById.get(topic.studentUserId);
+      const supervisor = usersById.get(topic.supervisorUserId);
+      const topicAssignments = assignmentsByTopic.get(topic.id) ?? [];
+
+      const reviewerAssignment = topicAssignments.find(
+        (assignment) => assignment.topicRole === 'GVPB',
+      );
+      const reviewer = reviewerAssignment
+        ? usersById.get(reviewerAssignment.userId)
+        : null;
+
+      const period = periodsById.get(topic.periodId);
+      const latestSubmission = latestSubmissionByTopic.get(topic.id);
+      const topicScores = submittedScoresByTopic.get(topic.id) ?? [];
+      const summary = summaryByTopic.get(topic.id);
+
+      const gvhdScore = pickLatestScore(topicScores, 'GVHD');
+      const gvpbScore = pickLatestScore(topicScores, 'GVPB');
+
+      const activeCouncilAssignments = topicAssignments.filter(
+        (assignment) => assignment.topicRole === 'TV_HD',
+      );
+      const activeCouncilUserIds = new Set(
+        activeCouncilAssignments.map((assignment) => assignment.userId),
+      );
+      const councilScores = topicScores.filter(
+        (score) =>
+          score.scorerRole === 'TV_HD' && activeCouncilUserIds.has(score.scorerUserId),
+      );
+      const submittedCouncilUserIds = new Set(
+        councilScores.map((score) => score.scorerUserId),
+      );
+
+      const councilAvgFromScores =
+        councilScores.length > 0
+          ? roundTo2(
+              councilScores.reduce((sum, score) => sum + score.totalScore, 0) /
+                councilScores.length,
+            )
+          : undefined;
+      const hasAllCouncilScores =
+        activeCouncilAssignments.length > 0 &&
+        activeCouncilAssignments.every((assignment) =>
+          submittedCouncilUserIds.has(assignment.userId),
+        );
+
+      const isReady =
+        gvhdScore !== undefined &&
+        gvpbScore !== undefined &&
+        hasAllCouncilScores;
+      const isSummarized = summary !== undefined;
+
+      dto.student = {
+        id: topic.studentUserId,
+        fullName: student?.name ?? topic.studentUserId,
+        studentId: student?.studentId,
+      };
+
+      dto.supervisor = {
+        id: topic.supervisorUserId,
+        fullName: supervisor?.name ?? topic.supervisorUserId,
+        studentId: supervisor?.lecturerId,
+      };
+
+      if (reviewerAssignment) {
+        dto.reviewer = {
+          id: reviewerAssignment.userId,
+          fullName: reviewer?.name ?? reviewerAssignment.userId,
+          studentId: reviewer?.lecturerId,
+        };
+      }
+
+      dto.period = {
+        code: period?.code ?? topic.periodId,
+      };
+
+      dto.latestSubmission = {
+        id: latestSubmission?.id ?? '',
+        driveLink: latestSubmission?.driveLink ?? '',
+        version: latestSubmission?.versionNumber ?? 0,
+      };
+
+      dto.scores = {
+        gvhd: summary?.gvhdScore ?? gvhdScore ?? null,
+        gvpb: summary?.gvpbScore ?? gvpbScore ?? null,
+        councilAvg: summary?.councilAvgScore ?? councilAvgFromScores ?? null,
+        council: summary?.councilAvgScore ?? councilAvgFromScores ?? null,
+        final: summary?.finalScore ?? null,
+        isReady,
+        isSummarized,
+        gvhdConfirmed: summary?.confirmedByGvhd ?? false,
+        ctHdConfirmed: summary?.confirmedByCtHd ?? false,
+        published: summary?.published ?? false,
+      };
+
+      dto.isPublished = summary?.published ?? false;
+
+      if (currentUser.role === 'LECTURER') {
+        const myCouncilAssignment = topicAssignments.find(
+          (assignment) =>
+            assignment.userId === currentUser.userId &&
+            (assignment.topicRole === 'TV_HD' ||
+              assignment.topicRole === 'TK_HD' ||
+              assignment.topicRole === 'CT_HD'),
+        );
+
+        if (myCouncilAssignment) {
+          const councilRole = myCouncilAssignment.topicRole;
+          if (
+            councilRole === 'TV_HD' ||
+            councilRole === 'TK_HD' ||
+            councilRole === 'CT_HD'
+          ) {
+            dto.councilRole = councilRole;
+          }
+        }
+      }
+
+      if (requestedRole === 'tv_hd') {
+        dto.councilRole = 'TV_HD';
+      }
+      if (requestedRole === 'tk_hd') {
+        dto.councilRole = 'TK_HD';
+      }
+      if (requestedRole === 'ct_hd') {
+        dto.councilRole = 'CT_HD';
+      }
+
+      return dto;
+    });
+  }
+
   mapToDto(topic: TopicRecord): TopicResponseDto {
     return {
       id: topic.id,
@@ -783,6 +1071,30 @@ export class TopicsService {
       revisionsAllowed: topic.revisionsAllowed,
       createdAt: topic.createdAt,
       updatedAt: topic.updatedAt,
+      student: {
+        id: topic.studentUserId,
+        fullName: topic.studentUserId,
+      },
+      period: {
+        code: topic.periodId,
+      },
+      latestSubmission: {
+        id: '',
+        driveLink: '',
+        version: 0,
+      },
+      scores: {
+        gvhd: null,
+        gvpb: null,
+        councilAvg: null,
+        council: null,
+        final: null,
+        isReady: false,
+        isSummarized: false,
+        gvhdConfirmed: false,
+        ctHdConfirmed: false,
+        published: false,
+      },
     };
   }
 

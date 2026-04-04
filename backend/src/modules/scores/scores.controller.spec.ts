@@ -188,4 +188,24 @@ describe('ScoresController', () => {
       expect(result.meta.requestId).toBeDefined();
     });
   });
+
+  describe('confirmPublish', () => {
+    it('should delegate to CT_HD confirmation flow', async () => {
+      scoresService.confirm.mockResolvedValue({
+        confirmed: true,
+        published: true,
+      });
+
+      const result = await controller.confirmPublish('tp_001', tbmUser);
+
+      expect(scoresService.confirm).toHaveBeenCalledWith(
+        'tp_001',
+        'CT_HD',
+        tbmUser,
+      );
+      expect(result.data.confirmed).toBe(true);
+      expect(result.data.published).toBe(true);
+      expect(result.meta.requestId).toBeDefined();
+    });
+  });
 });

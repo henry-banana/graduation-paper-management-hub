@@ -10,6 +10,7 @@ import { SubmissionsService } from './submissions.service';
 import { SubmissionFileValidatorService } from './submission-file-validator.service';
 import { AuthUser } from '../../common/types';
 import {
+  AssignmentsRepository,
   RevisionRoundsRepository,
   SubmissionsRepository,
   TopicsRepository,
@@ -31,6 +32,9 @@ describe('SubmissionsService', () => {
     findWhere: jest.Mock;
     findById: jest.Mock;
   };
+  let assignmentsRepository: {
+    findAll: jest.Mock;
+  };
   let topicsRepository: {
     findById: jest.Mock;
   };
@@ -41,6 +45,7 @@ describe('SubmissionsService', () => {
     log: jest.Mock;
   };
   let submissionsStore: any[];
+  let assignmentsStore: any[];
   let topicsStore: TopicRecord[];
 
   const studentUser: AuthUser = {
@@ -185,6 +190,23 @@ describe('SubmissionsService', () => {
       },
     ];
 
+    assignmentsStore = [
+      {
+        id: 'asg_001',
+        topicId: 'tp_001',
+        userId: lecturerUser.userId,
+        topicRole: 'GVHD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'asg_002',
+        topicId: 'tp_001',
+        userId: otherLecturer.userId,
+        topicRole: 'GVHD',
+        status: 'REVOKED',
+      },
+    ];
+
     submissionsRepository = {
       findAll: jest.fn(async () => submissionsStore),
       findById: jest.fn(async (id: string) => submissionsStore.find((s) => s.id === id) ?? null),
@@ -202,6 +224,10 @@ describe('SubmissionsService', () => {
     revisionRoundsRepository = {
       findWhere: jest.fn(async () => []),
       findById: jest.fn(async () => null),
+    };
+
+    assignmentsRepository = {
+      findAll: jest.fn(async () => assignmentsStore),
     };
 
     topicsRepository = {
@@ -237,6 +263,10 @@ describe('SubmissionsService', () => {
         {
           provide: RevisionRoundsRepository,
           useValue: revisionRoundsRepository,
+        },
+        {
+          provide: AssignmentsRepository,
+          useValue: assignmentsRepository,
         },
         {
           provide: GoogleDriveClient,
@@ -316,6 +346,19 @@ describe('SubmissionsService', () => {
         service.findById('sub_001', otherLecturer),
       ).rejects.toThrow(ForbiddenException);
     });
+
+    it('should block supervisor read when assignment is REVOKED', async () => {
+      const topic = topicsStore.find((record) => record.id === 'tp_001');
+      if (!topic) {
+        throw new Error('Expected topic tp_001 fixture to exist');
+      }
+
+      topic.supervisorUserId = otherLecturer.userId;
+
+      await expect(service.findById('sub_001', otherLecturer)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
   });
 
   describe('create', () => {
@@ -363,6 +406,25 @@ describe('SubmissionsService', () => {
       expect(result.id).toBeDefined();
       expect(result.version).toBe(1);
       expect(result.versionLabel).toBe('V1');
+    });
+
+    it('should block TURNITIN upload when supervisor assignment is REVOKED', async () => {
+      const topic = topicsStore.find((record) => record.id === 'tp_001');
+      if (!topic) {
+        throw new Error('Expected topic tp_001 fixture to exist');
+      }
+
+      topic.supervisorUserId = otherLecturer.userId;
+
+      await expect(
+        service.create(
+          'tp_001',
+          'TURNITIN',
+          otherLecturer,
+          buildPdfFile({ originalFileName: 'turnitin_revoked.pdf' }),
+          buildPdfBuffer(),
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('should throw ForbiddenException when lecturer uploads REPORT', async () => {

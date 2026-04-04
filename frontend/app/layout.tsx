@@ -16,7 +16,9 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const showRoleSwitcher = process.env.NEXT_PUBLIC_ENABLE_DEV_ROLE_SWITCHER === "true";
+  const showRoleSwitcher =
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_ENABLE_DEV_ROLE_SWITCHER === "true";
 
   return (
     <html lang="vi" suppressHydrationWarning>

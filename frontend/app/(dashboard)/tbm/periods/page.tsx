@@ -7,6 +7,23 @@ import {
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 
+interface PeriodApiDto {
+  id: string;
+  code: string;
+  type: "BCTT" | "KLTN";
+  openDate?: string;
+  closeDate?: string;
+  status?: "DRAFT" | "OPEN" | "CLOSED";
+  name?: string;
+  registrationStartAt?: string;
+  registrationEndAt?: string;
+  submitStartAt?: string;
+  submitEndAt?: string;
+  isOpen?: boolean;
+  supervisorQuota?: number;
+  topicsCount?: number;
+}
+
 interface PeriodDto {
   id: string;
   code: string;
@@ -17,6 +34,7 @@ interface PeriodDto {
   submitStartAt: string;
   submitEndAt: string;
   isOpen: boolean;
+  status: "DRAFT" | "OPEN" | "CLOSED";
   supervisorQuota?: number;
   topicsCount?: number;
 }
@@ -45,7 +63,34 @@ const EMPTY_FORM: FormState = {
   supervisorQuota: 5,
 };
 
+function normalizePeriod(period: PeriodApiDto): PeriodDto {
+  const registrationStartAt = period.registrationStartAt ?? period.openDate ?? "";
+  const registrationEndAt = period.registrationEndAt ?? period.closeDate ?? "";
+  const status = period.status ?? (period.isOpen ? "OPEN" : "CLOSED");
+  const isOpen =
+    typeof period.isOpen === "boolean" ? period.isOpen : status === "OPEN";
+
+  return {
+    id: period.id,
+    code: period.code,
+    name: period.name ?? `${period.type} ${period.code}`,
+    type: period.type,
+    registrationStartAt,
+    registrationEndAt,
+    submitStartAt: period.submitStartAt ?? "",
+    submitEndAt: period.submitEndAt ?? "",
+    isOpen,
+    status,
+    supervisorQuota: period.supervisorQuota,
+    topicsCount: period.topicsCount,
+  };
+}
+
 function statusOf(p: PeriodDto): { label: string; color: string } {
+  if (p.status === "DRAFT") {
+    return { label: "Nháp", color: "bg-surface-container text-outline" };
+  }
+
   const now = Date.now();
   const regStart = new Date(p.registrationStartAt).getTime();
   const regEnd = new Date(p.registrationEndAt).getTime();
@@ -63,6 +108,10 @@ function fmtDate(v: string) {
 function toInputDate(v: string) {
   if (!v) return "";
   return new Date(v).toISOString().slice(0, 16);
+}
+
+function toDateOnly(v: string) {
+  return v ? v.slice(0, 10) : "";
 }
 
 export default function TBMPeriodsPage() {
@@ -93,8 +142,8 @@ export default function TBMPeriodsPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<PeriodDto>>("/periods?page=1&size=50");
-      setPeriods(res.data ?? []);
+      const res = await api.get<ApiListResponse<PeriodApiDto>>("/periods?page=1&size=50");
+      setPeriods((res.data ?? []).map(normalizePeriod));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải danh sách đợt.");
     } finally {
@@ -126,23 +175,33 @@ export default function TBMPeriodsPage() {
   };
 
   const handleSave = async () => {
+    if (!form.registrationStartAt || !form.registrationEndAt) {
+      setError("Vui lòng nhập đầy đủ thời gian bắt đầu/kết thúc đăng ký.");
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
-      const body = {
-        ...form,
-        registrationStartAt: form.registrationStartAt ? new Date(form.registrationStartAt).toISOString() : undefined,
-        registrationEndAt: form.registrationEndAt ? new Date(form.registrationEndAt).toISOString() : undefined,
-        submitStartAt: form.submitStartAt ? new Date(form.submitStartAt).toISOString() : undefined,
-        submitEndAt: form.submitEndAt ? new Date(form.submitEndAt).toISOString() : undefined,
-      };
       if (modalMode === "create") {
-        const res = await api.post<ApiResponse<PeriodDto>>("/periods", body);
-        setPeriods(prev => [res.data, ...prev]);
+        await api.post<ApiResponse<{ id: string }>>("/periods", {
+          code: form.code,
+          type: form.type,
+          openDate: toDateOnly(form.registrationStartAt),
+          closeDate: toDateOnly(form.registrationEndAt),
+        });
       } else if (editingPeriod) {
-        const res = await api.patch<ApiResponse<PeriodDto>>(`/periods/${editingPeriod.id}`, body);
-        setPeriods(prev => prev.map(p => p.id === editingPeriod.id ? res.data : p));
+        await api.patch<ApiResponse<{ updated: boolean }>>(
+          `/periods/${editingPeriod.id}`,
+          {
+            code: form.code,
+            openDate: toDateOnly(form.registrationStartAt),
+            closeDate: toDateOnly(form.registrationEndAt),
+          },
+        );
       }
+
+      await load();
       setModalMode(null);
       setSuccess(modalMode === "create" ? "Tạo đợt thành công." : "Cập nhật đợt thành công.");
       setTimeout(() => setSuccess(null), 3000);
@@ -157,8 +216,20 @@ export default function TBMPeriodsPage() {
     setIsToggling(p.id);
     setError(null);
     try {
-      await api.patch<ApiResponse<PeriodDto>>(`/periods/${p.id}`, { isOpen: !p.isOpen });
-      setPeriods(prev => prev.map(x => x.id === p.id ? { ...x, isOpen: !p.isOpen } : x));
+      const endpoint = p.isOpen
+        ? `/periods/${p.id}/close`
+        : `/periods/${p.id}/open`;
+
+      await api.post<ApiResponse<{ status: "OPEN" | "CLOSED" }>>(endpoint, {});
+      setPeriods(prev => prev.map(x =>
+        x.id === p.id
+          ? {
+              ...x,
+              isOpen: !p.isOpen,
+              status: p.isOpen ? "CLOSED" : "OPEN",
+            }
+          : x,
+      ));
       setSuccess(p.isOpen ? "Đã đóng đợt." : "Đã mở đợt.");
       setTimeout(() => setSuccess(null), 3000);
     } catch (e) {

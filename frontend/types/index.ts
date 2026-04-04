@@ -38,6 +38,51 @@ export interface Topic {
   updatedAt: string;
 }
 
+export interface TopicListPerson {
+  id: string;
+  fullName: string;
+  studentId?: string;
+}
+
+export interface TopicListPeriod {
+  code: string;
+}
+
+export interface TopicListLatestSubmission {
+  id: string;
+  driveLink: string;
+  version: number;
+}
+
+export interface TopicListScores {
+  gvhd: number | null;
+  gvpb: number | null;
+  councilAvg: number | null;
+  council: number | null;
+  final: number | null;
+  isReady: boolean;
+  isSummarized: boolean;
+  gvhdConfirmed: boolean;
+  ctHdConfirmed: boolean;
+  published: boolean;
+}
+
+export interface CouncilTopicListItem {
+  id: string;
+  title: string;
+  type: TopicType;
+  state: TopicState;
+  student: TopicListPerson;
+  supervisor?: TopicListPerson;
+  reviewer?: TopicListPerson;
+  period: TopicListPeriod;
+  latestSubmission: TopicListLatestSubmission;
+  scores: TopicListScores;
+  councilRole?: 'CT_HD' | 'TK_HD' | 'TV_HD';
+  isPublished?: boolean;
+  councilMinutesLink?: string;
+}
+
 // === Period ===
 export interface Period {
   id: string;

@@ -6,6 +6,7 @@ import {
   RefreshCw, Search, Users,
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import type { CouncilTopicListItem, TopicListScores } from "@/types";
 
 interface ScoreSource {
   role: string;
@@ -14,23 +15,11 @@ interface ScoreSource {
   weightedScore?: number;
 }
 
-interface TopicSummaryDto {
-  id: string;
-  title: string;
-  type: "BCTT" | "KLTN";
-  student?: { fullName: string; studentId?: string };
-  supervisor?: { fullName: string };
-  scores?: {
-    gvhd?: number;
-    gvpb?: number;
-    councilAvg?: number;
-    final?: number;
+type TopicSummaryDto = Omit<CouncilTopicListItem, "scores"> & {
+  scores?: TopicListScores & {
     sources?: ScoreSource[];
-    isReady?: boolean;
-    isSummarized?: boolean;
   };
-  period?: { code: string };
-}
+};
 
 export default function CouncilSummaryPage() {
   const [topics, setTopics] = useState<TopicSummaryDto[]>([]);
@@ -44,7 +33,7 @@ export default function CouncilSummaryPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=tk_hd&page=1&size=100&state=GRADING");
+      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=tk_hd&page=1&size=100&state=SCORING");
       setTopics(res.data ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải tổng hợp điểm.");
@@ -69,7 +58,22 @@ export default function CouncilSummaryPage() {
       await api.post<ApiResponse<unknown>>(`/topics/${topicId}/scores/summary`, { requestedByRole: "TK_HD" });
       setTopics(prev => prev.map(t =>
         t.id === topicId
-          ? { ...t, scores: { ...(t.scores ?? {}), isSummarized: true } }
+          ? {
+              ...t,
+              scores: {
+                gvhd: t.scores?.gvhd ?? null,
+                gvpb: t.scores?.gvpb ?? null,
+                councilAvg: t.scores?.councilAvg ?? null,
+                council: t.scores?.council ?? null,
+                final: t.scores?.final ?? null,
+                isReady: t.scores?.isReady ?? false,
+                isSummarized: true,
+                gvhdConfirmed: t.scores?.gvhdConfirmed ?? false,
+                ctHdConfirmed: t.scores?.ctHdConfirmed ?? false,
+                published: t.scores?.published ?? false,
+                sources: t.scores?.sources,
+              },
+            }
           : t,
       ));
       setSuccess("Đã tổng hợp điểm thành công. Chờ CT_HD và GVHD xác nhận.");

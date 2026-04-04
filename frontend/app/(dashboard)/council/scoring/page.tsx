@@ -8,20 +8,10 @@ import {
   FileCheck, RefreshCw, Save, Sliders, User,
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import type { CouncilTopicListItem } from "@/types";
 
 /* ---------- Types ---------- */
-interface TopicDto {
-  id: string;
-  title: string;
-  type: "BCTT" | "KLTN";
-  state: string;
-  student?: { id: string; fullName: string; studentId?: string };
-  supervisor?: { fullName: string };
-  reviewer?: { fullName: string };
-  period?: { code: string };
-  latestSubmission?: { id: string; driveLink?: string; version: number };
-  councilRole?: "CT_HD" | "TK_HD" | "TV_HD"; // role of current user in this topic's council
-}
+type TopicDto = CouncilTopicListItem;
 
 interface ScoreDto {
   criteria: Record<string, number>;
@@ -64,7 +54,7 @@ function CouncilScoringContent() {
     void (async () => {
       setIsLoadingTopics(true);
       try {
-        const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=tv_hd&page=1&size=100&state=GRADING");
+        const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=tv_hd&page=1&size=100&state=SCORING");
         setTopics(res.data ?? []);
         setSelectedId((current) => current || res.data?.[0]?.id || "");
       } catch (e) {

@@ -45,6 +45,23 @@ const UI_ROLES: readonly UiRole[] = [
   "TK_HD",
 ] as const;
 
+const LECTURER_UI_ROLES: readonly UiRole[] = [
+  "LECTURER",
+  "GVHD",
+  "GVPB",
+  "TV_HD",
+  "CT_HD",
+  "TK_HD",
+] as const;
+
+function isAccountRole(value: string | null): value is AccountRole {
+  return value === "STUDENT" || value === "LECTURER" || value === "TBM";
+}
+
+function isLecturerUiRole(value: string | null): value is UiRole {
+  return Boolean(value && LECTURER_UI_ROLES.includes(value as UiRole));
+}
+
 function isUiRole(value: string | null): value is UiRole {
   return Boolean(value && UI_ROLES.includes(value as UiRole));
 }
@@ -86,8 +103,34 @@ export function mapAccountRoleToUiRole(accountRole: AccountRole): UiRole {
       return "TBM";
     case "LECTURER":
     default:
-      return "GVHD";
+      return "LECTURER";
   }
+}
+
+export function resolveCanonicalUiRole(
+  accountRole: AccountRole,
+  uiRole: string | null,
+): UiRole {
+  const isProductionRuntime = process.env.NODE_ENV === "production";
+
+  if (accountRole === "STUDENT") {
+    return "STUDENT";
+  }
+
+  if (accountRole === "TBM") {
+    return "TBM";
+  }
+
+  if (isProductionRuntime) {
+    return "LECTURER";
+  }
+
+  // accountRole === 'LECTURER': accept only lecturer family UI roles.
+  if (isLecturerUiRole(uiRole)) {
+    return uiRole;
+  }
+
+  return "GVHD";
 }
 
 export function setCurrentRoles(accountRole: AccountRole, uiRole?: UiRole) {
@@ -95,7 +138,7 @@ export function setCurrentRoles(accountRole: AccountRole, uiRole?: UiRole) {
     return;
   }
 
-  const resolvedUiRole = uiRole ?? mapAccountRoleToUiRole(accountRole);
+  const resolvedUiRole = resolveCanonicalUiRole(accountRole, uiRole ?? null);
   localStorage.setItem(ACCOUNT_ROLE_KEY, accountRole);
   localStorage.setItem(USER_ROLE_KEY, resolvedUiRole);
 
@@ -135,21 +178,34 @@ export function getCurrentAccountRole(): AccountRole | null {
     return null;
   }
 
+  // Cookie is the canonical source (aligned with middleware).
+  // Keep localStorage only as a legacy fallback when cookie is absent.
+  const cookieValue = getCookie(ACCOUNT_ROLE_COOKIE);
+  if (cookieValue !== null) {
+    return isAccountRole(cookieValue) ? cookieValue : null;
+  }
+
   const stored = localStorage.getItem(ACCOUNT_ROLE_KEY);
-  if (stored === "STUDENT" || stored === "LECTURER" || stored === "TBM") {
+  if (isAccountRole(stored)) {
     return stored;
   }
 
-  const cookieValue = getCookie(ACCOUNT_ROLE_COOKIE);
-  if (
-    cookieValue === "STUDENT" ||
-    cookieValue === "LECTURER" ||
-    cookieValue === "TBM"
-  ) {
-    return cookieValue;
+  return null;
+}
+
+function getPreferredUiRoleFromSession(): UiRole | null {
+  if (!isBrowser()) {
+    return null;
   }
 
-  return null;
+  // Cookie is canonical; localStorage is legacy fallback only when cookie is absent.
+  const cookieValue = getCookie(USER_ROLE_COOKIE);
+  if (cookieValue !== null) {
+    return isUiRole(cookieValue) ? cookieValue : null;
+  }
+
+  const stored = localStorage.getItem(USER_ROLE_KEY);
+  return isUiRole(stored) ? stored : null;
 }
 
 export function getCurrentUiRole(): UiRole {
@@ -157,17 +213,12 @@ export function getCurrentUiRole(): UiRole {
     return "STUDENT";
   }
 
-  const cookieValue = getCookie(USER_ROLE_COOKIE);
-  if (isUiRole(cookieValue)) {
-    return cookieValue;
+  const accountRole = getCurrentAccountRole();
+  if (!accountRole) {
+    return "STUDENT";
   }
 
-  const stored = localStorage.getItem(USER_ROLE_KEY);
-  if (isUiRole(stored)) {
-    return stored;
-  }
-
-  return "STUDENT";
+  return resolveCanonicalUiRole(accountRole, getPreferredUiRoleFromSession());
 }
 
 export function setAuthSession(payload: AuthSessionPayload) {

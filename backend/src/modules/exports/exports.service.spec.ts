@@ -315,6 +315,51 @@ describe('ExportsService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('allows KLTN rubric export when topic state is SCORING', async () => {
+    topicsRepository.findById.mockImplementation(async (topicId: string) => {
+      if (topicId === 'tp_kltn') {
+        return { ...kltnTopic, state: 'SCORING' };
+      }
+      if (topicId === 'tp_bctt') {
+        return bcttTopic;
+      }
+      return null;
+    });
+
+    scoresRepository.findById.mockResolvedValue({
+      ...submittedGvhdScore,
+      id: 'sc_kltn_gvpb',
+      topicId: 'tp_kltn',
+      scorerRole: 'GVPB',
+    });
+
+    const result = await service.exportRubricKltn(
+      'tp_kltn',
+      'GVPB',
+      'sc_kltn_gvpb',
+      lecturerUser,
+    );
+
+    expect(result.exportType).toBe('RUBRIC_KLTN');
+    expect(rubricGeneratorService.generateKltnGvpb).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects KLTN rubric export when topic state is not allowed', async () => {
+    topicsRepository.findById.mockImplementation(async (topicId: string) => {
+      if (topicId === 'tp_kltn') {
+        return { ...kltnTopic, state: 'PENDING_CONFIRM' };
+      }
+      if (topicId === 'tp_bctt') {
+        return bcttTopic;
+      }
+      return null;
+    });
+
+    await expect(
+      service.exportRubricKltn('tp_kltn', 'GVPB', 'sc_kltn_gvpb', lecturerUser),
+    ).rejects.toThrow(BadRequestException);
+  });
+
   it('rejects topic list export for non-TBM users', async () => {
     await expect(service.exportTopicList(undefined, lecturerUser)).rejects.toThrow(
       ForbiddenException,

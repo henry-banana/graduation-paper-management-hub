@@ -212,7 +212,7 @@ export class ExportsService {
     }
 
     // KLTN rubric available for topics in scoring/defense/completed states
-    if (!['GRADING', 'DEFENSE', 'COMPLETED'].includes(topic.state)) {
+    if (!['SCORING', 'GRADING', 'DEFENSE', 'COMPLETED'].includes(topic.state)) {
       throw new BadRequestException(
         'Phiếu chấm KLTN chỉ khả dụng cho đề tài đang chấm điểm, đã bảo vệ hoặc đã công bố',
       );

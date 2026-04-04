@@ -17,10 +17,21 @@ const ROLE_LABELS: Record<string, string> = {
   LECTURER: "Giảng viên",
   GVHD: "GV Hướng dẫn",
   GVPB: "GV Phản biện",
-  TBM: "Thư ký BM",
+  TBM: "Trưởng bộ môn",
   TV_HD: "Thành viên HĐ",
   TK_HD: "Thư ký HĐ",
   CT_HD: "Chủ tịch HĐ",
+};
+
+const ROLE_ABBR: Record<string, string> = {
+  STUDENT: "SV",
+  LECTURER: "GV",
+  GVHD: "HD",
+  GVPB: "PB",
+  TBM: "TBM",
+  TV_HD: "TV",
+  TK_HD: "TK",
+  CT_HD: "CT",
 };
 
 export function Header({ setIsSidebarOpen }: { setIsSidebarOpen: (val: boolean) => void }) {
@@ -115,7 +126,7 @@ export function Header({ setIsSidebarOpen }: { setIsSidebarOpen: (val: boolean) 
               className="flex items-center gap-2.5 px-3 py-1.5 rounded-full hover:bg-surface-container transition-colors ml-1"
             >
               <div className="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center">
-                <span className="text-xs font-bold text-primary">{role.substring(0, 2)}</span>
+                <span className="text-xs font-bold text-primary">{ROLE_ABBR[role] ?? role.substring(0, 2)}</span>
               </div>
               <div className="hidden md:block text-left">
                 <p className="text-xs font-semibold text-on-surface leading-tight">{fullName}</p>

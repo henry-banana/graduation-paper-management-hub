@@ -7,27 +7,10 @@ import {
   Shield, Users, X,
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import type { CouncilTopicListItem } from "@/types";
 
 /* ---------- Types ---------- */
-interface ScoreBreakdown {
-  gvhd?: number;
-  gvpb?: number;
-  council?: number;
-  final?: number;
-}
-
-interface TopicSummaryDto {
-  id: string;
-  title: string;
-  type: "BCTT" | "KLTN";
-  state: string;
-  student?: { id: string; fullName: string; studentId?: string };
-  supervisor?: { fullName: string };
-  reviewer?: { fullName: string };
-  period?: { code: string };
-  scores?: ScoreBreakdown;
-  isPublished?: boolean;
-  councilMinutesLink?: string;
+interface TopicSummaryDto extends CouncilTopicListItem {
   // Secretary: minutes data
   minutesContent?: string;
   gvpbComments?: string;
@@ -60,7 +43,7 @@ export default function CouncilFinalConfirmPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=ct_hd&page=1&size=100&state=GRADING");
+      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=ct_hd&page=1&size=100&state=SCORING");
       setTopics(res.data ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải tổng hợp điểm.");
@@ -84,6 +67,21 @@ export default function CouncilFinalConfirmPage() {
       ? (topics.reduce((s, t) => s + (t.scores?.final ?? 0), 0) / topics.length).toFixed(2)
       : "—",
   }), [topics]);
+
+  const canPublishTopic = (topic: TopicSummaryDto): boolean => {
+    const scores = topic.scores;
+    if (!scores) return false;
+
+    return (
+      !topic.isPublished &&
+      !scores.published &&
+      scores.isReady &&
+      scores.isSummarized &&
+      scores.gvhdConfirmed &&
+      !scores.ctHdConfirmed &&
+      typeof scores.final === "number"
+    );
+  };
 
   const handlePublish = async (topicId: string) => {
     if (!window.confirm("Xác nhận công bố điểm chính thức cho sinh viên này?")) return;
@@ -123,7 +121,7 @@ export default function CouncilFinalConfirmPage() {
     }
   };
 
-  const scoreColor = (score: number | undefined) => {
+  const scoreColor = (score: number | null | undefined) => {
     if (score == null) return "text-outline";
     if (score >= 8) return "text-green-600";
     if (score >= 5) return "text-amber-600";
@@ -202,6 +200,7 @@ export default function CouncilFinalConfirmPage() {
                 <tbody className="divide-y divide-outline-variant/10">
                   {filtered.map(t => {
                     const publishing = isPublishing === t.id;
+                    const canPublish = canPublishTopic(t);
                     return (
                       <>
                         <tr
@@ -253,7 +252,7 @@ export default function CouncilFinalConfirmPage() {
                               {!t.isPublished && (
                                 <button
                                   onClick={() => void handlePublish(t.id)}
-                                  disabled={publishing || !t.scores?.final}
+                                  disabled={publishing || !canPublish}
                                   className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white text-xs font-semibold rounded-xl hover:bg-primary/90 transition-all disabled:opacity-50"
                                 >
                                   <Shield className="w-3.5 h-3.5" />

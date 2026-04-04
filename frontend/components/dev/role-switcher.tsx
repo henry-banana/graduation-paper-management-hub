@@ -21,16 +21,24 @@ function inferAccountRole(roleId: string): "STUDENT" | "LECTURER" | "TBM" {
 }
 
 export function RoleSwitcher() {
+  const isProduction = process.env.NODE_ENV === "production";
+
   const [isOpen, setIsOpen] = useState(false);
   const [currentRole, setCurrentRole] = useState("STUDENT");
 
   useEffect(() => {
+    if (isProduction) return;
+
     // Read cookie on mount
     const match = document.cookie.match(new RegExp('(^| )user_role=([^;]+)'));
     if (match) {
       setCurrentRole(match[2]);
     }
-  }, []);
+  }, [isProduction]);
+
+  if (isProduction) {
+    return null;
+  }
 
   const handleSwitch = (roleId: string) => {
     const accountRole = inferAccountRole(roleId);

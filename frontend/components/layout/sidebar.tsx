@@ -11,7 +11,7 @@ const ROLE_LABELS: Record<string, { label: string; color: string; abbr: string }
   LECTURER: { label: "Giảng viên", color: "bg-green-600", abbr: "GV" },
   GVHD: { label: "GV Hướng dẫn", color: "bg-green-600", abbr: "HD" },
   GVPB: { label: "GV Phản biện", color: "bg-purple-600", abbr: "PB" },
-  TBM: { label: "Thư ký BM", color: "bg-orange-500", abbr: "TK" },
+  TBM: { label: "Trưởng bộ môn", color: "bg-orange-500", abbr: "TBM" },
   TV_HD: { label: "Thành viên HĐ", color: "bg-indigo-600", abbr: "TV" },
   TK_HD: { label: "Thư ký HĐ", color: "bg-teal-600", abbr: "TK" },
   CT_HD: { label: "Chủ tịch HĐ", color: "bg-red-600", abbr: "CT" },
@@ -29,7 +29,6 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
     { name: "Duyệt đề tài", path: "/gvhd/pending", icon: Clock },
     { name: "Tiến độ hướng dẫn", path: "/gvhd/topics", icon: BookOpen },
     { name: "Chấm điểm (Rubric)", path: "/gvhd/scoring", icon: CheckSquare },
-    { name: "Hồ sơ phản biện", path: "/gvpb/reviews", icon: FileText },
   ],
   GVHD: [
     { name: "Duyệt đề tài", path: "/gvhd/pending", icon: Clock },
@@ -72,6 +71,7 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
   const pathname = usePathname();
   const [role, setRole] = useState("STUDENT");
   const [mounted, setMounted] = useState(false);
+  const [hasGvpbCapability, setHasGvpbCapability] = useState(false);
   // F4B: active topic quick-link
   const [activeTopic, setActiveTopic] = useState<ActiveTopicQuick | null>(null);
 
@@ -79,6 +79,32 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
     setMounted(true);
     setRole(getCurrentUiRole());
   }, []);
+
+  // Audit-2: for generic LECTURER role, resolve reviewer menu by backend assignment capability.
+  useEffect(() => {
+    if (!mounted || role !== "LECTURER") {
+      setHasGvpbCapability(false);
+      return;
+    }
+
+    const token = localStorage.getItem("kltn_access_token");
+    if (!token) {
+      setHasGvpbCapability(false);
+      return;
+    }
+
+    void fetch(
+      `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1"}/topics?role=gvpb&page=1&size=1`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+      .then(r => r.ok ? r.json() : null)
+      .then((json: { data?: unknown[] } | null) => {
+        setHasGvpbCapability(Boolean(json?.data && json.data.length > 0));
+      })
+      .catch(() => {
+        setHasGvpbCapability(false);
+      });
+  }, [mounted, role]);
 
   // F4B: fetch active topic for STUDENT
   useEffect(() => {
@@ -105,7 +131,21 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
     router.replace("/login");
   };
 
-  const currentRoutes = routes[role] || routes["STUDENT"];
+  const currentRoutes = (() => {
+    const baseRoutes = routes[role] || routes["STUDENT"];
+    if (role !== "LECTURER") {
+      return baseRoutes;
+    }
+
+    if (!hasGvpbCapability) {
+      return baseRoutes;
+    }
+
+    return [
+      ...baseRoutes,
+      { name: "Hồ sơ phản biện", path: "/gvpb/reviews", icon: FileText },
+    ];
+  })();
   const roleInfo = ROLE_LABELS[role] || { label: role, color: "bg-primary", abbr: role.substring(0, 2) };
   
   // Find the longest matching route to prevent parent routes from highlighting when on a child route
