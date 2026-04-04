@@ -50,19 +50,25 @@ In Google Cloud Console, add exactly the same callback URL to Authorized redirec
 
 ## Seed Sample Data
 
-`npm run seed:sheets` upserts sample rows into all required Google Sheets tabs:
+`npm run seed:sheets` upserts canonical sample rows into Google Sheets tabs used by the system
+(for example: `Data`, `Dot`, `Trangthaidetai`, `Điểm`, `TenDetai`, `Topics`, `RevisionRounds`,
+`ScoreSummaries`, `Notifications`, ...).
 
-- `Users`, `Periods`, `Topics`, `Assignments`, `Submissions`
-- `Scores`, `ScoreSummaries`, `Notifications`
-- `ExportFiles`, `Schedules`, `AuditLogs`
+This script does not hard-delete existing rows. It appends/upserts according to script logic.
 
-This script does not hard-delete existing rows; it updates by `id` if row already exists.
+`npm run seed:sheets:validate` runs read-only validation (schema + row counts) and fails closed if
+header/structure mismatches are detected.
 
-`npm run seed:sheets:validate` runs schema validation only and fails closed when any tab header does not match expected columns.
+`npm run seed:sheets:reset` clears data rows (keeps headers) and then seeds again from canonical
+sample data. Current reset flow preserves teacher reference tabs (`Quota`, `Major`).
 
-`npm run seed:sheets:reset` clears all existing data rows (keeps headers), validates schema, then seeds again from canonical sample data.
+`npm run seed:sheets:reseed` is the recommended clean reset command for local/staging:
 
-`npm run seed` is an alias for checklist compatibility and executes the same sheet seeding flow.
+1. Runs `seed:sheets:reset`
+2. Runs `seed:sheets:validate`
+3. Retries validate automatically when Google Sheets quota returns `429/rateLimitExceeded`
+
+`npm run seed` remains an alias for checklist compatibility.
 
 Use `npm run inspect:sheets` to print row counts and sample IDs from each tab after seeding.
 Use `npm run preview:sheets` to export live Google Sheets data into `.tmp/sheet-preview.json` with impact checks for backend logic (topic/score/export readiness, reference integrity).

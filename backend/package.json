@@ -11,6 +11,7 @@
     "seed:sheets": "ts-node --transpile-only src/scripts/seed-sheets.ts",
     "seed:sheets:validate": "ts-node --transpile-only src/scripts/seed-sheets.ts --validate-only",
     "seed:sheets:reset": "ts-node --transpile-only src/scripts/seed-sheets.ts --reset",
+    "seed:sheets:reseed": "ts-node --transpile-only src/scripts/reseed-sheets.ts",
     "import:sheets": "ts-node --transpile-only src/scripts/import-from-teacher-sheet.ts",
     "cleanup:sheets": "ts-node --transpile-only src/scripts/cleanup-old-sheets.ts",
     "inspect:sheets": "ts-node src/scripts/inspect-sheets.ts",
