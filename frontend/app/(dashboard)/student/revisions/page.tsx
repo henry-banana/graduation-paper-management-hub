@@ -13,7 +13,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
-import FileUpload from "@/components/submissions/FileUpload";
+import { FileUpload } from "@/components/ui/file-upload";
 
 interface RevisionRound {
   id: string;
