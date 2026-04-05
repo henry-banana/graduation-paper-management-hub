@@ -211,9 +211,8 @@ export class RubricGeneratorService {
       const injectedXml = this.injectPlaceholders(documentXml, rubricType);
 
       if (this.hasPlaceholder(injectedXml)) {
-        // Wrap in inner try/catch so that Path C still gets a chance if
-        // docxtemplater fails (e.g. BCTT template has inline ellipsis that
-        // causes duplicate-tag errors in OOXML after injection).
+        // Keep injected render isolated so Path B failures on non-placeholder
+        // templates do not continue to unsafe Path C dotted replacement.
         try {
           zip.file('word/document.xml', injectedXml);
           const doc = new Docxtemplater(zip, {
@@ -229,20 +228,9 @@ export class RubricGeneratorService {
         } catch (pathBError) {
           const msg = pathBError instanceof Error ? pathBError.message : 'unknown';
           this.logger.warn(
-            `Path B (injected docxtemplater) failed for ${rubricType}: ${msg}. Trying Path C.`,
+            `Path B (injected docxtemplater) failed for ${rubricType}: ${msg}. Unsafe to continue with Path C on non-placeholder template. Skipping Path C for safety and falling back to deterministic generator.`,
           );
-          // Re-open fresh zip (the one above was modified in-place)
-          const freshZip = new PizZip(fs.readFileSync(
-            path.join(this.templateDir, RUBRIC_TEMPLATE_FILE_MAP[rubricType]),
-            'binary',
-          ));
-          const legacyFallback = this.renderLegacyTemplateIfPossible(
-            freshZip,
-            rubricType,
-            documentXml,
-            templatePayload,
-          );
-          if (legacyFallback) return legacyFallback;
+          return null;
         }
       }
 
