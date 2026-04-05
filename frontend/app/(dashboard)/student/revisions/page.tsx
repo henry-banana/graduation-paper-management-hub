@@ -151,6 +151,28 @@ export default function StudentRevisionsPage() {
     setTimeout(() => setError(null), 5000);
   };
 
+  const handleUpload = async (file: File) => {
+    if (!selectedTopicId || !uploadingType) {
+      throw new Error("Vui lòng chọn đề tài trước khi nộp file.");
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("fileType", uploadingType);
+
+      await api.postForm(
+        `/topics/${selectedTopicId}/submissions`,
+        formData
+      );
+      await handleUploadSuccess();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Lỗi khi upload file";
+      handleUploadError(msg);
+      throw e;
+    }
+  };
+
   const getApprovalStatusBadge = (status?: string) => {
     switch (status) {
       case "APPROVED":
@@ -351,13 +373,21 @@ export default function StudentRevisionsPage() {
                       <CheckCircle2 className="w-5 h-5 text-green-600" />
                     </div>
                   ) : uploadingType === "REVISION" ? (
-                    <FileUpload
-                      topicId={selectedTopicId}
-                      fileType="REVISION"
-                      onSuccess={handleUploadSuccess}
-                      onError={handleUploadError}
-                      onCancel={() => setUploadingType(null)}
-                    />
+                    <div className="space-y-2">
+                      <FileUpload
+                        onUpload={handleUpload}
+                        accept=".pdf"
+                        maxSize={50}
+                        requireConfirmation
+                        confirmButtonText="Xác nhận nộp bản chỉnh sửa"
+                      />
+                      <button
+                        onClick={() => setUploadingType(null)}
+                        className="w-full text-xs text-outline hover:text-on-surface"
+                      >
+                        Hủy
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={() => setUploadingType("REVISION")}
@@ -395,13 +425,21 @@ export default function StudentRevisionsPage() {
                       <CheckCircle2 className="w-5 h-5 text-green-600" />
                     </div>
                   ) : uploadingType === "REVISION_EXPLANATION" ? (
-                    <FileUpload
-                      topicId={selectedTopicId}
-                      fileType="REVISION_EXPLANATION"
-                      onSuccess={handleUploadSuccess}
-                      onError={handleUploadError}
-                      onCancel={() => setUploadingType(null)}
-                    />
+                    <div className="space-y-2">
+                      <FileUpload
+                        onUpload={handleUpload}
+                        accept=".pdf"
+                        maxSize={50}
+                        requireConfirmation
+                        confirmButtonText="Xác nhận nộp biên bản giải trình"
+                      />
+                      <button
+                        onClick={() => setUploadingType(null)}
+                        className="w-full text-xs text-outline hover:text-on-surface"
+                      >
+                        Hủy
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={() => setUploadingType("REVISION_EXPLANATION")}
