@@ -9,13 +9,12 @@ import {
   AccountRole,
   clearAuthSession,
   setCurrentRoles,
+  setCurrentTopicRoles,
   setAuthSession,
   setUserProfile,
+  TopicRole,
   UiRole,
 } from "@/lib/auth/session";
-
-// Bug #8 fix: Include topicRoles for sub-role redirect logic
-type TopicRole = "GVHD" | "GVPB" | "TV_HD" | "TK_HD" | "CT_HD";
 
 interface AuthMeDto {
   id: string;
@@ -104,6 +103,7 @@ function AuthCallbackContent() {
 
         const response = await api.get<ApiResponse<AuthMeDto>>("/auth/me");
         setUserProfile(response.data);
+        setCurrentTopicRoles(response.data.topicRoles);
         if (response.data.uiRole) {
           setCurrentRoles(response.data.accountRole, response.data.uiRole);
         }

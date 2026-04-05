@@ -269,6 +269,25 @@ export default function TBMAssignmentsPage() {
 
   const handleAssignCouncil = async () => {
     if (!councilTopic) return;
+    const defenseAtRaw = councilForm.defenseAt?.trim();
+    const location = councilForm.location?.trim() ?? "";
+
+    if (!defenseAtRaw) {
+      setError("Vui lòng chọn ngày giờ bảo vệ.");
+      return;
+    }
+
+    if (!location) {
+      setError("Vui lòng nhập địa điểm bảo vệ.");
+      return;
+    }
+
+    const defenseAtDate = new Date(defenseAtRaw);
+    if (Number.isNaN(defenseAtDate.getTime())) {
+      setError("Ngày giờ bảo vệ không hợp lệ.");
+      return;
+    }
+
     const memberUserIds = Array.from(
       new Set(councilForm.memberUserIds.filter(Boolean))
     ).filter(
@@ -285,6 +304,8 @@ export default function TBMAssignmentsPage() {
         chairUserId: councilForm.chairUserId,
         secretaryUserId: councilForm.secretaryUserId,
         memberUserIds,
+        defenseAt: defenseAtDate.toISOString(),
+        location,
       });
       setTopics(prev => prev.map(t =>
         t.id === councilTopic!.id
@@ -504,7 +525,7 @@ export default function TBMAssignmentsPage() {
                             </td>
                             <td className="px-4 py-4">
                               <button
-                                onClick={() => { setCouncilTopic(t); setCouncilForm(EMPTY_COUNCIL); }}
+                                onClick={() => { setCouncilTopic(t); setCouncilForm(EMPTY_COUNCIL); setError(null); }}
                                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-purple-600 text-white hover:bg-purple-700 transition-all"
                               >
                                 <Users className="w-3.5 h-3.5" />Phân công
@@ -593,7 +614,7 @@ export default function TBMAssignmentsPage() {
             )}
             <div className="flex gap-3 px-6 pb-6">
               <button onClick={() => setCouncilTopic(null)} className="flex-1 px-4 py-2.5 border border-outline-variant/20 rounded-xl text-sm font-semibold text-on-surface hover:bg-surface-container transition-colors">Hủy</button>
-              <button onClick={() => void handleAssignCouncil()} disabled={isAssigningCouncil || !councilForm.chairUserId || !councilForm.secretaryUserId}
+              <button onClick={() => void handleAssignCouncil()} disabled={isAssigningCouncil || !councilForm.chairUserId || !councilForm.secretaryUserId || !councilForm.defenseAt || !councilForm.location?.trim()}
                 className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-colors disabled:opacity-60">
                 {isAssigningCouncil ? "Đang phân công..." : "Xác nhận phân công"}
               </button>

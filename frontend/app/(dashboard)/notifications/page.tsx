@@ -1,18 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Search,
-  Bell,
   AlertCircle,
-  Info,
+  Bell,
+  Check,
   CheckCircle2,
   ChevronRight,
-  Check,
+  Info,
+  Loader2,
   Megaphone,
+  Search,
+  Send,
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import {
+  getCurrentTopicRoles,
+  getCurrentUiRole,
+  getUserProfile,
+  TopicRole,
+  UiRole,
+} from "@/lib/auth/session";
 
 interface NotificationDto {
   id: string;
@@ -24,6 +33,41 @@ interface NotificationDto {
   deepLink?: string;
   isRead: boolean;
   createdAt: string;
+}
+
+interface TopicOptionDto {
+  id: string;
+  title: string;
+  type: "BCTT" | "KLTN";
+  state: string;
+  studentUserId?: string;
+  supervisorUserId?: string;
+  student?: { id: string; fullName: string; studentId?: string };
+  supervisor?: { id?: string; fullName: string };
+}
+
+interface AssignmentDto {
+  id: string;
+  topicId: string;
+  userId: string;
+  topicRole: "GVHD" | "GVPB" | "TV_HD" | "CT_HD" | "TK_HD";
+  status: "ACTIVE" | "REVOKED";
+}
+
+interface UserOptionDto {
+  id: string;
+  fullName: string;
+  email: string;
+  accountRole?: "STUDENT" | "LECTURER" | "TBM";
+  studentId?: string;
+  lecturerId?: string;
+  isActive?: boolean;
+}
+
+interface RecipientOption {
+  id: string;
+  label: string;
+  subLabel: string;
 }
 
 type UiNotificationType = "important" | "info" | "warning" | "success";
@@ -68,6 +112,14 @@ const TYPE_CONFIG: Record<
   },
 };
 
+const TOPIC_QUERY_BY_TOPIC_ROLE: Record<TopicRole, string> = {
+  GVHD: "gvhd",
+  GVPB: "gvpb",
+  TV_HD: "tv_hd",
+  TK_HD: "tk_hd",
+  CT_HD: "ct_hd",
+};
+
 function mapTypeToUi(type: string): UiNotificationType {
   switch (type) {
     case "TOPIC_REJECTED":
@@ -96,6 +148,56 @@ function formatDateTime(value: string): { date: string; time: string } {
     date: date.toLocaleDateString("vi-VN"),
     time: date.toLocaleTimeString("vi-VN", { hour12: false }),
   };
+}
+
+function getTopicQueriesByRole(uiRole: UiRole, topicRoles: TopicRole[]): string[] {
+  if (uiRole === "TBM") {
+    return ["tbm"];
+  }
+
+  const queries = new Set<string>();
+  if (uiRole === "LECTURER" || uiRole === "GVHD") {
+    queries.add("gvhd");
+    topicRoles.forEach((role) => {
+      const mapped = TOPIC_QUERY_BY_TOPIC_ROLE[role];
+      if (mapped) {
+        queries.add(mapped);
+      }
+    });
+    return Array.from(queries);
+  }
+
+  if (uiRole === "GVPB") {
+    queries.add("gvpb");
+  }
+  if (uiRole === "TV_HD") {
+    queries.add("tv_hd");
+  }
+  if (uiRole === "TK_HD") {
+    queries.add("tk_hd");
+  }
+  if (uiRole === "CT_HD") {
+    queries.add("ct_hd");
+  }
+
+  if (queries.size === 0) {
+    queries.add("gvhd");
+  }
+  return Array.from(queries);
+}
+
+function mapUserToRecipient(user: UserOptionDto): RecipientOption {
+  const code = user.studentId?.trim() || user.lecturerId?.trim();
+  return {
+    id: user.id,
+    label: user.fullName,
+    subLabel: code ? `${code} · ${user.email}` : user.email,
+  };
+}
+
+function topicOptionLabel(topic: TopicOptionDto): string {
+  const studentName = topic.student?.fullName ?? "Sinh viên";
+  return `[${topic.type}] ${studentName} - ${topic.title}`;
 }
 
 function NotificationRow({
@@ -161,12 +263,30 @@ function NotificationRow({
 
 export default function NotificationsPage() {
   const router = useRouter();
+  const [uiRole, setUiRole] = useState<UiRole>("LECTURER");
+
   const [notifications, setNotifications] = useState<NotificationDto[]>([]);
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadNotifications = async () => {
+  const [topicOptions, setTopicOptions] = useState<TopicOptionDto[]>([]);
+  const [globalRecipientOptions, setGlobalRecipientOptions] = useState<RecipientOption[]>([]);
+  const [recipientOptions, setRecipientOptions] = useState<RecipientOption[]>([]);
+  const [selectedTopicId, setSelectedTopicId] = useState("");
+  const [selectedReceiverId, setSelectedReceiverId] = useState("");
+  const [composeTitle, setComposeTitle] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [isLoadingTopicOptions, setIsLoadingTopicOptions] = useState(false);
+  const [isLoadingRecipients, setIsLoadingRecipients] = useState(false);
+  const [isSendingPersonal, setIsSendingPersonal] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
+  const [composeSuccess, setComposeSuccess] = useState<string | null>(null);
+
+  const currentUserId = useMemo(() => getUserProfile()?.id ?? "", []);
+  const isTbm = uiRole === "TBM";
+
+  const loadNotifications = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
@@ -184,11 +304,138 @@ export default function NotificationsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  const loadComposeTopics = useCallback(async () => {
+    setIsLoadingTopicOptions(true);
+    setComposeError(null);
+
+    try {
+      const nextUiRole = getCurrentUiRole();
+      setUiRole(nextUiRole);
+      const topicRoles = getCurrentTopicRoles();
+      const roleQueries = getTopicQueriesByRole(nextUiRole, topicRoles);
+
+      const topicResponses = await Promise.all(
+        roleQueries.map((query) =>
+          api.get<ApiListResponse<TopicOptionDto>>(`/topics?role=${query}&page=1&size=100`),
+        ),
+      );
+
+      const topicMap = new Map<string, TopicOptionDto>();
+      topicResponses.forEach((response) => {
+        response.data.forEach((topic) => {
+          topicMap.set(topic.id, topic);
+        });
+      });
+
+      const mergedTopics = Array.from(topicMap.values()).sort((a, b) =>
+        (a.student?.fullName ?? a.title).localeCompare(b.student?.fullName ?? b.title, "vi"),
+      );
+      setTopicOptions(mergedTopics);
+
+      if (nextUiRole === "TBM") {
+        const usersResponse = await api.get<ApiListResponse<UserOptionDto>>(
+          "/users?page=1&size=100",
+        );
+        const mappedUsers = usersResponse.data
+          .filter((user) => user.id !== currentUserId && user.isActive !== false)
+          .map(mapUserToRecipient)
+          .sort((a, b) => a.label.localeCompare(b.label, "vi"));
+        setGlobalRecipientOptions(mappedUsers);
+      } else {
+        setGlobalRecipientOptions([]);
+      }
+    } catch (loadError) {
+      const message =
+        loadError instanceof Error
+          ? loadError.message
+          : "Không thể tải danh sách gửi thông báo.";
+      setComposeError(message);
+    } finally {
+      setIsLoadingTopicOptions(false);
+    }
+  }, [currentUserId]);
 
   useEffect(() => {
     void loadNotifications();
-  }, []);
+    void loadComposeTopics();
+  }, [loadComposeTopics, loadNotifications]);
+
+  useEffect(() => {
+    setSelectedReceiverId("");
+    setComposeSuccess(null);
+
+    if (!selectedTopicId) {
+      if (isTbm) {
+        setRecipientOptions(globalRecipientOptions);
+      } else {
+        setRecipientOptions([]);
+      }
+      return;
+    }
+
+    setIsLoadingRecipients(true);
+    setComposeError(null);
+
+    void (async () => {
+      try {
+        const [topicResponse, assignmentsResponse] = await Promise.all([
+          api.get<ApiResponse<TopicOptionDto>>(`/topics/${selectedTopicId}`),
+          api.get<ApiResponse<AssignmentDto[]>>(`/topics/${selectedTopicId}/assignments`),
+        ]);
+
+        const participantIds = new Set<string>();
+        const topic = topicResponse.data;
+        if (topic.studentUserId) {
+          participantIds.add(topic.studentUserId);
+        } else if (topic.student?.id) {
+          participantIds.add(topic.student.id);
+        }
+        if (topic.supervisorUserId) {
+          participantIds.add(topic.supervisorUserId);
+        } else if (topic.supervisor?.id) {
+          participantIds.add(topic.supervisor.id);
+        }
+
+        assignmentsResponse.data
+          .filter((assignment) => assignment.status === "ACTIVE")
+          .forEach((assignment) => {
+            participantIds.add(assignment.userId);
+          });
+
+        if (currentUserId) {
+          participantIds.delete(currentUserId);
+        }
+
+        const users = await Promise.all(
+          Array.from(participantIds).map(async (userId) => {
+            try {
+              const userResponse = await api.get<ApiResponse<UserOptionDto>>(`/users/${userId}`);
+              return userResponse.data;
+            } catch {
+              return null;
+            }
+          }),
+        );
+
+        const options = users
+          .filter((user): user is UserOptionDto => Boolean(user))
+          .map(mapUserToRecipient)
+          .sort((a, b) => a.label.localeCompare(b.label, "vi"));
+        setRecipientOptions(options);
+      } catch (loadError) {
+        const message =
+          loadError instanceof Error
+            ? loadError.message
+            : "Không thể tải danh sách người nhận.";
+        setComposeError(message);
+        setRecipientOptions([]);
+      } finally {
+        setIsLoadingRecipients(false);
+      }
+    })();
+  }, [currentUserId, globalRecipientOptions, isTbm, selectedTopicId]);
 
   const unreadCount = notifications.filter((item) => !item.isRead).length;
 
@@ -232,6 +479,49 @@ export default function NotificationsPage() {
     })();
   };
 
+  const handleSendPersonal = async () => {
+    setComposeError(null);
+    setComposeSuccess(null);
+
+    if (!isTbm && !selectedTopicId) {
+      setComposeError("Giảng viên phải chọn đề tài liên quan trước khi gửi.");
+      return;
+    }
+
+    if (!selectedReceiverId) {
+      setComposeError("Vui lòng chọn người nhận.");
+      return;
+    }
+
+    if (!composeBody.trim()) {
+      setComposeError("Nội dung thông báo không được để trống.");
+      return;
+    }
+
+    setIsSendingPersonal(true);
+    try {
+      await api.post<ApiResponse<NotificationDto>>("/notifications/personal", {
+        receiverUserId: selectedReceiverId,
+        topicId: selectedTopicId || undefined,
+        title: composeTitle.trim() || undefined,
+        body: composeBody.trim(),
+      });
+
+      setComposeSuccess("Đã gửi thông báo cá nhân thành công.");
+      setComposeBody("");
+      setComposeTitle("");
+      void loadNotifications();
+    } catch (sendError) {
+      const message =
+        sendError instanceof Error
+          ? sendError.message
+          : "Không thể gửi thông báo cá nhân.";
+      setComposeError(message);
+    } finally {
+      setIsSendingPersonal(false);
+    }
+  };
+
   const handleOpenNotification = (notification: NotificationDto) => {
     void (async () => {
       try {
@@ -259,6 +549,12 @@ export default function NotificationsPage() {
     })();
   };
 
+  const canSend = Boolean(
+    selectedReceiverId &&
+      composeBody.trim() &&
+      (isTbm || selectedTopicId),
+  );
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -280,6 +576,123 @@ export default function NotificationsPage() {
           Đánh dấu tất cả đã đọc
         </button>
       </div>
+
+      <section className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 overflow-hidden shadow-sm">
+        <div className="px-6 py-4 border-b border-outline-variant/10 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-on-surface">Gửi thông báo cá nhân</h2>
+            <p className="text-xs text-outline mt-1">
+              {isTbm
+                ? "TBM có thể gửi theo đề tài hoặc gửi trực tiếp đến tài khoản cụ thể."
+                : "Giảng viên chỉ được gửi cho người tham gia trong đề tài mình phụ trách."}
+            </p>
+          </div>
+          {(isLoadingTopicOptions || isLoadingRecipients) && (
+            <div className="flex items-center gap-2 text-xs text-outline">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Đang tải dữ liệu...
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wider text-outline">
+              Đề tài liên quan {isTbm ? "(tùy chọn)" : "*"}
+            </label>
+            <select
+              value={selectedTopicId}
+              onChange={(event) => setSelectedTopicId(event.target.value)}
+              className="w-full px-3 py-2.5 bg-surface-container rounded-xl border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="">
+                {isTbm ? "Không gắn đề tài cụ thể" : "Chọn đề tài..."}
+              </option>
+              {topicOptions.map((topic) => (
+                <option key={topic.id} value={topic.id}>
+                  {topicOptionLabel(topic)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wider text-outline">
+              Người nhận *
+            </label>
+            <select
+              value={selectedReceiverId}
+              onChange={(event) => setSelectedReceiverId(event.target.value)}
+              disabled={isLoadingRecipients || recipientOptions.length === 0}
+              className="w-full px-3 py-2.5 bg-surface-container rounded-xl border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+            >
+              <option value="">
+                {isLoadingRecipients
+                  ? "Đang tải người nhận..."
+                  : recipientOptions.length > 0
+                    ? "Chọn người nhận..."
+                    : "Không có người nhận khả dụng"}
+              </option>
+              {recipientOptions.map((recipient) => (
+                <option key={recipient.id} value={recipient.id}>
+                  {recipient.label} - {recipient.subLabel}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-outline">
+              Tiêu đề (tùy chọn)
+            </label>
+            <input
+              value={composeTitle}
+              onChange={(event) => setComposeTitle(event.target.value)}
+              placeholder="Ví dụ: Nhắc bổ sung báo cáo trước hạn"
+              className="w-full px-3 py-2.5 bg-surface-container rounded-xl border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-outline">
+              Nội dung *
+            </label>
+            <textarea
+              value={composeBody}
+              onChange={(event) => setComposeBody(event.target.value)}
+              rows={4}
+              placeholder="Nhập nội dung thông báo..."
+              className="w-full px-3 py-2.5 bg-surface-container rounded-xl border border-outline-variant/20 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
+            />
+          </div>
+
+          {composeError && (
+            <div className="md:col-span-2 flex items-start gap-2.5 bg-error-container/20 border border-error/20 rounded-xl px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-error">{composeError}</p>
+            </div>
+          )}
+
+          {composeSuccess && (
+            <div className="md:col-span-2 flex items-start gap-2.5 bg-green-50 border border-green-200 rounded-xl px-3 py-2.5">
+              <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-green-700">{composeSuccess}</p>
+            </div>
+          )}
+
+          <div className="md:col-span-2 flex justify-end">
+            <button
+              type="button"
+              onClick={() => void handleSendPersonal()}
+              disabled={isSendingPersonal || !canSend}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+            >
+              <Send className="w-4 h-4" />
+              {isSendingPersonal ? "Đang gửi..." : "Gửi thông báo cá nhân"}
+            </button>
+          </div>
+        </div>
+      </section>
 
       {error && (
         <div className="flex items-start gap-3 bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3">

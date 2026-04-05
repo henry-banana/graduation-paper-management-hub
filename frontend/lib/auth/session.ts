@@ -8,6 +8,7 @@ export type UiRole =
   | "TV_HD"
   | "CT_HD"
   | "TK_HD";
+export type TopicRole = "GVHD" | "GVPB" | "TV_HD" | "CT_HD" | "TK_HD";
 
 export interface UserProfile {
   id: string;
@@ -28,11 +29,13 @@ const REFRESH_TOKEN_KEY = "kltn_refresh_token";
 const EXPIRES_AT_KEY = "kltn_expires_at";
 const ACCOUNT_ROLE_KEY = "kltn_account_role";
 const USER_ROLE_KEY = "kltn_user_role";
+const TOPIC_ROLES_KEY = "kltn_topic_roles";
 const PROFILE_KEY = "kltn_profile";
 
 const AUTH_COOKIE = "auth_token";
 const ACCOUNT_ROLE_COOKIE = "account_role";
 const USER_ROLE_COOKIE = "user_role";
+const TOPIC_ROLES_COOKIE = "topic_roles";
 
 const UI_ROLES: readonly UiRole[] = [
   "STUDENT",
@@ -53,6 +56,7 @@ const LECTURER_UI_ROLES: readonly UiRole[] = [
   "CT_HD",
   "TK_HD",
 ] as const;
+const TOPIC_ROLES: readonly TopicRole[] = ["GVHD", "GVPB", "TV_HD", "CT_HD", "TK_HD"] as const;
 
 function isAccountRole(value: string | null): value is AccountRole {
   return value === "STUDENT" || value === "LECTURER" || value === "TBM";
@@ -64,6 +68,10 @@ function isLecturerUiRole(value: string | null): value is UiRole {
 
 function isUiRole(value: string | null): value is UiRole {
   return Boolean(value && UI_ROLES.includes(value as UiRole));
+}
+
+function isTopicRole(value: string | null): value is TopicRole {
+  return Boolean(value && TOPIC_ROLES.includes(value as TopicRole));
 }
 
 function isBrowser(): boolean {
@@ -139,6 +147,41 @@ export function setCurrentRoles(accountRole: AccountRole, uiRole?: UiRole) {
   const maxAgeSeconds = 7 * 24 * 60 * 60;
   setCookie(ACCOUNT_ROLE_COOKIE, accountRole, maxAgeSeconds);
   setCookie(USER_ROLE_COOKIE, resolvedUiRole, maxAgeSeconds);
+}
+
+export function setCurrentTopicRoles(topicRoles?: string[]) {
+  if (!isBrowser()) {
+    return;
+  }
+
+  const normalized = (topicRoles ?? []).filter((role): role is TopicRole =>
+    isTopicRole(role),
+  );
+  const unique = Array.from(new Set(normalized));
+  const maxAgeSeconds = 7 * 24 * 60 * 60;
+  localStorage.setItem(TOPIC_ROLES_KEY, JSON.stringify(unique));
+  setCookie(TOPIC_ROLES_COOKIE, unique.join(","), maxAgeSeconds);
+}
+
+export function getCurrentTopicRoles(): TopicRole[] {
+  if (!isBrowser()) {
+    return [];
+  }
+
+  const raw = localStorage.getItem(TOPIC_ROLES_KEY);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((role): role is TopicRole => isTopicRole(role));
+  } catch {
+    return [];
+  }
 }
 
 export function setUserProfile(profile: UserProfile) {
@@ -292,9 +335,11 @@ export function clearAuthSession() {
   localStorage.removeItem(EXPIRES_AT_KEY);
   localStorage.removeItem(ACCOUNT_ROLE_KEY);
   localStorage.removeItem(USER_ROLE_KEY);
+  localStorage.removeItem(TOPIC_ROLES_KEY);
   localStorage.removeItem(PROFILE_KEY);
 
   clearCookie(AUTH_COOKIE);
   clearCookie(ACCOUNT_ROLE_COOKIE);
   clearCookie(USER_ROLE_COOKIE);
+  clearCookie(TOPIC_ROLES_COOKIE);
 }

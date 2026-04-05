@@ -1,10 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  IsDateString,
   IsString,
   IsNotEmpty,
   IsArray,
   ArrayMinSize,
   ArrayUnique,
+  MaxLength,
 } from 'class-validator';
 
 export class AssignCouncilDto {
@@ -36,4 +38,20 @@ export class AssignCouncilDto {
   @IsNotEmpty({ each: true })
   @IsString({ each: true })
   memberUserIds!: string[];
+
+  @ApiProperty({
+    description: 'Defense datetime (ISO)',
+    example: '2026-07-15T08:30:00.000Z',
+  })
+  @IsDateString({}, { message: 'defenseAt must be a valid ISO datetime' })
+  defenseAt!: string;
+
+  @ApiProperty({
+    description: 'Defense location detail (room/link)',
+    example: 'Phòng B2-01',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  location!: string;
 }

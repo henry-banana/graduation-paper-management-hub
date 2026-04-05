@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { X, BookOpen, Clock, CheckSquare, Users, Bell, ClipboardList, ChevronRight, LogOut, FileText, ExternalLink, Lightbulb } from "lucide-react";
-import { clearAuthSession, getCurrentUiRole } from "@/lib/auth/session";
+import { clearAuthSession, getCurrentTopicRoles, getCurrentUiRole, TopicRole } from "@/lib/auth/session";
 import { TOPIC_STATE_LABELS } from "@/lib/constants/vi-labels";
 
 const ROLE_LABELS: Record<string, { label: string; color: string; abbr: string; textClass?: string }> = {
@@ -70,45 +70,24 @@ interface ActiveTopicQuick {
   state: string;
 }
 
+function hasLecturerTopicRole(topicRoles: TopicRole[], role: TopicRole): boolean {
+  return topicRoles.includes(role);
+}
+
 export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (val: boolean) => void }) {
   const router = useRouter();
   const pathname = usePathname();
   const [role, setRole] = useState("STUDENT");
   const [mounted, setMounted] = useState(false);
-  const [hasGvpbCapability, setHasGvpbCapability] = useState(false);
+  const [lecturerTopicRoles, setLecturerTopicRoles] = useState<TopicRole[]>([]);
   // F4B: active topic quick-link
   const [activeTopic, setActiveTopic] = useState<ActiveTopicQuick | null>(null);
 
   useEffect(() => {
     setMounted(true);
     setRole(getCurrentUiRole());
+    setLecturerTopicRoles(getCurrentTopicRoles());
   }, []);
-
-  // Audit-2: for generic LECTURER role, resolve reviewer menu by backend assignment capability.
-  useEffect(() => {
-    if (!mounted || role !== "LECTURER") {
-      setHasGvpbCapability(false);
-      return;
-    }
-
-    const token = localStorage.getItem("kltn_access_token");
-    if (!token) {
-      setHasGvpbCapability(false);
-      return;
-    }
-
-    void fetch(
-      `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1"}/topics?role=gvpb&page=1&size=1`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    )
-      .then(r => r.ok ? r.json() : null)
-      .then((json: { data?: unknown[] } | null) => {
-        setHasGvpbCapability(Boolean(json?.data && json.data.length > 0));
-      })
-      .catch(() => {
-        setHasGvpbCapability(false);
-      });
-  }, [mounted, role]);
 
   // F4B: fetch active topic for STUDENT
   useEffect(() => {
@@ -141,14 +120,27 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
       return baseRoutes;
     }
 
-    if (!hasGvpbCapability) {
-      return baseRoutes;
+    const dynamicRoutes = [...baseRoutes];
+
+    if (hasLecturerTopicRole(lecturerTopicRoles, "GVPB")) {
+      dynamicRoutes.push({ name: "Hồ sơ phản biện", path: "/gvpb/reviews", icon: FileText });
     }
 
-    return [
-      ...baseRoutes,
-      { name: "Hồ sơ phản biện", path: "/gvpb/reviews", icon: FileText },
-    ];
+    if (hasLecturerTopicRole(lecturerTopicRoles, "TV_HD")) {
+      dynamicRoutes.push({ name: "Chấm điểm Hội đồng", path: "/council/scoring", icon: CheckSquare });
+    }
+
+    if (hasLecturerTopicRole(lecturerTopicRoles, "TK_HD")) {
+      dynamicRoutes.push({ name: "Tổng hợp thư ký", path: "/council/summary", icon: FileText });
+    }
+
+    if (hasLecturerTopicRole(lecturerTopicRoles, "CT_HD")) {
+      dynamicRoutes.push({ name: "Duyệt chủ tịch", path: "/council/final-confirm", icon: CheckSquare });
+    }
+
+    dynamicRoutes.push({ name: "Thông báo", path: "/notifications", icon: Bell });
+
+    return dynamicRoutes;
   })();
   const roleInfo = ROLE_LABELS[role] || { label: role, color: "bg-primary", abbr: role.substring(0, 2), textClass: "text-white" };
   const activeTopicStateLabel = activeTopic

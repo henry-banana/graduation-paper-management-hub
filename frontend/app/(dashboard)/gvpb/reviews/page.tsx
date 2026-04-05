@@ -22,6 +22,8 @@ interface ScoreDto {
   comments?: string;
   questions?: string;
   isSubmitted?: boolean;
+  isLocked?: boolean;
+  lockReason?: string;
 }
 
 const RUBRIC_GVPB = [
@@ -44,6 +46,22 @@ export default function GVPBReviewsPage() {
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const isSubmitted = existingScore?.isSubmitted ?? false;
+  const isScoreLocked = isSubmitted && (existingScore?.isLocked ?? true);
+
+  const submittedLockMessage = useMemo(() => {
+    if (!isSubmitted) return "";
+    if (!isScoreLocked) {
+      return "Phieu diem da nop nhung van co the cap nhat truoc xac nhan cuoi.";
+    }
+    if (existingScore?.lockReason?.includes("published")) {
+      return "Phieu diem da khoa vi diem da duoc cong bo.";
+    }
+    if (existingScore?.lockReason?.includes("confirmed")) {
+      return "Phieu diem da khoa vi da co xac nhan cuoi.";
+    }
+    return "Phieu diem da nop va khong the chinh sua.";
+  }, [existingScore?.lockReason, isScoreLocked, isSubmitted]);
 
   const totalScore = useMemo(() => RUBRIC_GVPB.reduce((s, c) => s + (scores[c.id] ?? 0), 0), [scores]);
   const maxScore = RUBRIC_GVPB.reduce((s, c) => s + c.max, 0);
@@ -116,15 +134,34 @@ export default function GVPBReviewsPage() {
 
   const handleSubmit = async () => {
     if (!selectedId) return;
-    if (!window.confirm("Sau khi nộp chính thức, điểm sẽ không thể chỉnh sửa. Xác nhận?")) return;
+    const confirmMessage = isSubmitted && !isScoreLocked
+      ? "Ban muon cap nhat phieu diem da nop?"
+      : "Sau khi nop chinh thuc, diem se khong the chinh sua. Xac nhan?";
+    if (!window.confirm(confirmMessage)) return;
     setIsSubmitting(true);
     setError(null);
     try {
       await api.post<ApiResponse<unknown>>(`/topics/${selectedId}/scores/submit-direct`, {
         criteria: scores, comments, questions, role: "GVPB",
       });
-      setSuccess("Đã nộp phiếu phản biện chính thức!");
-      setExistingScore(prev => ({ criteria: (prev?.criteria ?? {}), ...(prev ?? {}), isSubmitted: true } as ScoreDto));
+      setSuccess(
+        isSubmitted && !isScoreLocked
+          ? "Da cap nhat phieu phan bien da nop."
+          : "Da nop phieu phan bien chinh thuc!",
+      );
+      try {
+        const refreshed = await api.get<ApiResponse<ScoreDto>>(`/topics/${selectedId}/scores/my-draft`);
+        setExistingScore(refreshed.data);
+        setScores(refreshed.data.criteria ?? {});
+        setComments(refreshed.data.comments ?? "");
+        setQuestions(refreshed.data.questions ?? "");
+      } catch {
+        setExistingScore((prev) => ({
+          ...(prev ?? { criteria: {} }),
+          isSubmitted: true,
+          isLocked: true,
+        }));
+      }
       setTimeout(() => setSuccess(null), 5000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Nộp điểm thất bại.");
@@ -244,10 +281,10 @@ export default function GVPBReviewsPage() {
                   </div>
                 )}
 
-                {existingScore?.isSubmitted && (
+                {isSubmitted && (
                   <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-2xl px-4 py-3">
                     <FileCheck className="w-4 h-4 text-primary" />
-                    <p className="text-sm text-primary font-medium">Đã nộp phiếu phản biện chính thức.</p>
+                    <p className="text-sm text-primary font-medium">{submittedLockMessage}</p>
                   </div>
                 )}
 
@@ -271,7 +308,7 @@ export default function GVPBReviewsPage() {
                             <div className="flex items-center gap-2">
                               <input
                                 type="number" max={c.max} min={0} step={0.25} value={current}
-                                disabled={existingScore?.isSubmitted}
+                                disabled={isScoreLocked}
                                 onChange={e => setScores(prev => ({ ...prev, [c.id]: Math.min(c.max, Math.max(0, parseFloat(e.target.value) || 0)) }))}
                                 className="w-20 text-right rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm font-bold px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
                               />
@@ -292,7 +329,7 @@ export default function GVPBReviewsPage() {
                       <MessageSquare className="w-3.5 h-3.5" />Câu hỏi phản biện
                     </label>
                     <textarea
-                      rows={4} value={questions} disabled={existingScore?.isSubmitted}
+                      rows={4} value={questions} disabled={isScoreLocked}
                       onChange={e => setQuestions(e.target.value)}
                       placeholder="Nhập các câu hỏi sẽ đặt cho sinh viên trong buổi bảo vệ..."
                       className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-60"
@@ -301,7 +338,7 @@ export default function GVPBReviewsPage() {
                   <div>
                     <label className="block text-xs font-semibold uppercase text-outline mb-2">Nhận xét chung</label>
                     <textarea
-                      rows={3} value={comments} disabled={existingScore?.isSubmitted}
+                      rows={3} value={comments} disabled={isScoreLocked}
                       onChange={e => setComments(e.target.value)}
                       placeholder="Nhận xét tổng quan về bài làm..."
                       className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-60"
@@ -312,16 +349,16 @@ export default function GVPBReviewsPage() {
                 {/* Action buttons */}
                 <div className="flex gap-3">
                   <button
-                    onClick={() => void handleSaveDraft()} disabled={isSaving || existingScore?.isSubmitted}
+                    onClick={() => void handleSaveDraft()} disabled={isSaving || isScoreLocked}
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-outline-variant/20 text-sm font-semibold text-on-surface hover:bg-surface-container transition-all disabled:opacity-60"
                   >
                     <Save className="w-4 h-4" />{isSaving ? "Đang lưu..." : "Lưu nháp"}
                   </button>
                   <button
-                    onClick={() => void handleSubmit()} disabled={isSubmitting || existingScore?.isSubmitted}
+                    onClick={() => void handleSubmit()} disabled={isSubmitting || isScoreLocked}
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60"
                   >
-                    <FileCheck className="w-4 h-4" />{isSubmitting ? "Đang nộp..." : existingScore?.isSubmitted ? "Đã nộp" : "Nộp phiếu phản biện"}
+                    <FileCheck className="w-4 h-4" />{isSubmitting ? "Dang nop..." : isScoreLocked ? "Da khoa sau nop" : isSubmitted ? "Cap nhat phieu da nop" : "Nop phieu phan bien"}
                   </button>
                 </div>
               </div>

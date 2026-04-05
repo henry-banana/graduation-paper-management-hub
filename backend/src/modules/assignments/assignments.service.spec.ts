@@ -9,6 +9,7 @@ import { AssignmentsService, AssignmentRecord } from './assignments.service';
 import { AuthUser } from '../../common/types';
 import {
   AssignmentsRepository,
+  SchedulesRepository,
   TopicsRepository,
   UsersRepository,
 } from '../../infrastructure/google-sheets';
@@ -202,6 +203,12 @@ describe('AssignmentsService', () => {
       }),
     };
 
+    const schedulesRepositoryMock = {
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async (entity: unknown) => entity),
+      update: jest.fn(async (_id: string, entity: unknown) => entity),
+    };
+
     const notificationsServiceMock = {
       create: jest.fn(async () => ({ id: 'nt_mock' })),
     };
@@ -210,6 +217,7 @@ describe('AssignmentsService', () => {
       providers: [
         AssignmentsService,
         { provide: AssignmentsRepository, useValue: assignmentsRepositoryMock },
+        { provide: SchedulesRepository, useValue: schedulesRepositoryMock },
         { provide: TopicsRepository, useValue: topicsRepositoryMock },
         { provide: UsersRepository, useValue: usersRepositoryMock },
         { provide: NotificationsService, useValue: notificationsServiceMock },
@@ -310,6 +318,8 @@ describe('AssignmentsService', () => {
             chairUserId: 'USR_CT_1',
             secretaryUserId: 'USR_TK_1',
             memberUserIds: ['USR_TV_1', 'USR_TV_2', 'USR_TV_3'],
+            defenseAt: '2026-07-15T08:30:00.000Z',
+            location: 'Phong B2-01',
           },
           lecturerUser,
         ),
@@ -324,6 +334,8 @@ describe('AssignmentsService', () => {
             chairUserId: 'USR_CT_1',
             secretaryUserId: 'USR_TK_1',
             memberUserIds: ['USR_TV_1', 'USR_TV_2', 'USR_TV_3'],
+            defenseAt: '2026-07-15T08:30:00.000Z',
+            location: 'Phong B2-01',
           },
           tbmUser,
         ),
@@ -338,6 +350,8 @@ describe('AssignmentsService', () => {
             chairUserId: 'USR_CT_1',
             secretaryUserId: 'USR_TK_1',
             memberUserIds: ['USR_TV_1', 'USR_TV_2', 'USR_TV_3'],
+            defenseAt: '2026-07-15T08:30:00.000Z',
+            location: 'Phong B2-01',
           },
           tbmUser,
         ),
@@ -356,6 +370,8 @@ describe('AssignmentsService', () => {
             chairUserId: 'USR_CT_1',
             secretaryUserId: 'USR_CT_1', // Duplicate
             memberUserIds: ['USR_TV_1', 'USR_TV_2', 'USR_TV_3'],
+            defenseAt: '2026-07-15T08:30:00.000Z',
+            location: 'Phong B2-01',
           },
           tbmUser,
         ),
@@ -374,6 +390,8 @@ describe('AssignmentsService', () => {
             chairUserId: 'USR002', // GVHD of tp_001
             secretaryUserId: 'USR_TK_1',
             memberUserIds: ['USR_TV_1', 'USR_TV_2', 'USR_TV_3'],
+            defenseAt: '2026-07-15T08:30:00.000Z',
+            location: 'Phong B2-01',
           },
           tbmUser,
         ),
@@ -394,6 +412,8 @@ describe('AssignmentsService', () => {
             chairUserId: 'USR_GVPB_1',
             secretaryUserId: 'USR_TK_1',
             memberUserIds: ['USR_TV_1', 'USR_TV_2', 'USR_TV_3'],
+            defenseAt: '2026-07-15T08:30:00.000Z',
+            location: 'Phong B2-01',
           },
           tbmUser,
         ),

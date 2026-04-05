@@ -17,14 +17,6 @@ const TBM_ALLOWED_PREFIXES = [
 ] as const;
 const GVHD_ALLOWED_PREFIXES = ["/gvhd", "/notifications", "/profile", "/settings"] as const;
 const GVPB_ALLOWED_PREFIXES = ["/gvpb", "/notifications", "/profile", "/settings"] as const;
-const LECTURER_ALLOWED_PREFIXES = [
-  "/gvhd",
-  "/gvpb",
-  "/council",
-  "/notifications",
-  "/profile",
-  "/settings",
-] as const;
 const TV_HD_ALLOWED_PREFIXES = [
   "/council/scoring",
   "/notifications",
@@ -52,6 +44,8 @@ const LECTURER_UI_ROLES = [
   "TK_HD",
   "CT_HD",
 ] as const;
+const TOPIC_ROLE_VALUES = ["GVHD", "GVPB", "TV_HD", "TK_HD", "CT_HD"] as const;
+type TopicRole = (typeof TOPIC_ROLE_VALUES)[number];
 
 type AccountRole = "STUDENT" | "LECTURER" | "TBM";
 
@@ -61,6 +55,30 @@ function isAccountRole(value: string | undefined): value is AccountRole {
 
 function isLecturerUiRole(value: string | undefined): boolean {
   return Boolean(value && LECTURER_UI_ROLES.includes(value as (typeof LECTURER_UI_ROLES)[number]));
+}
+
+function isTopicRole(value: string): value is TopicRole {
+  return TOPIC_ROLE_VALUES.includes(value as TopicRole);
+}
+
+function parseTopicRoles(rawCookieValue: string | undefined): Set<TopicRole> {
+  if (!rawCookieValue) {
+    return new Set<TopicRole>();
+  }
+
+  let decoded = rawCookieValue;
+  try {
+    decoded = decodeURIComponent(rawCookieValue);
+  } catch {
+    decoded = rawCookieValue;
+  }
+
+  const roles = decoded
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item): item is TopicRole => isTopicRole(item));
+
+  return new Set<TopicRole>(roles);
 }
 
 function getCanonicalRole(accountRole: AccountRole, uiRole: string | undefined): string {
@@ -131,6 +149,7 @@ export function middleware(request: NextRequest) {
 
   const isAuthenticated = Boolean(request.cookies.get("auth_token")?.value);
   const uiRole = request.cookies.get("user_role")?.value;
+  const topicRoles = parseTopicRoles(request.cookies.get("topic_roles")?.value);
   const accountRoleCookie = request.cookies.get("account_role")?.value;
   const accountRole = isAccountRole(accountRoleCookie) ? accountRoleCookie : undefined;
 
@@ -180,7 +199,22 @@ export function middleware(request: NextRequest) {
     let allowedPrefixes: readonly string[] = GVHD_ALLOWED_PREFIXES;
 
     if (resolvedRole === "LECTURER") {
-      allowedPrefixes = LECTURER_ALLOWED_PREFIXES;
+      // For base lecturers, grant shared routes and unlock role-specific routes
+      // only when the lecturer is actually assigned to that topic role.
+      const dynamicPrefixes = new Set<string>(GVHD_ALLOWED_PREFIXES);
+      if (topicRoles.has("GVPB")) {
+        GVPB_ALLOWED_PREFIXES.forEach((prefix) => dynamicPrefixes.add(prefix));
+      }
+      if (topicRoles.has("TV_HD")) {
+        TV_HD_ALLOWED_PREFIXES.forEach((prefix) => dynamicPrefixes.add(prefix));
+      }
+      if (topicRoles.has("TK_HD")) {
+        TK_HD_ALLOWED_PREFIXES.forEach((prefix) => dynamicPrefixes.add(prefix));
+      }
+      if (topicRoles.has("CT_HD")) {
+        CT_HD_ALLOWED_PREFIXES.forEach((prefix) => dynamicPrefixes.add(prefix));
+      }
+      allowedPrefixes = Array.from(dynamicPrefixes);
     } else if (resolvedRole === "GVPB") {
       allowedPrefixes = GVPB_ALLOWED_PREFIXES;
     } else if (resolvedRole === "TV_HD") {

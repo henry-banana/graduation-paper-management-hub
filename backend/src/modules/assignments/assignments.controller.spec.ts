@@ -122,6 +122,8 @@ describe('AssignmentsController', () => {
           chairUserId: 'USR_CT_1',
           secretaryUserId: 'USR_TK_1',
           memberUserIds: ['USR_TV_1', 'USR_TV_2', 'USR_TV_3'],
+          defenseAt: '2026-07-15T08:30:00.000Z',
+          location: 'Phong B2-01',
         },
         tbmUser,
       );

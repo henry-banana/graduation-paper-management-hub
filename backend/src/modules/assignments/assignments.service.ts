@@ -18,6 +18,7 @@ import {
 import { AuthUser, TopicRole } from '../../common/types';
 import {
   AssignmentsRepository,
+  SchedulesRepository,
   TopicsRepository,
   UsersRepository,
 } from '../../infrastructure/google-sheets';
@@ -40,6 +41,7 @@ export class AssignmentsService {
 
   constructor(
     private readonly assignmentsRepository: AssignmentsRepository,
+    private readonly schedulesRepository: SchedulesRepository,
     private readonly topicsRepository: TopicsRepository,
     private readonly usersRepository: UsersRepository,
     @Optional()
@@ -48,6 +50,33 @@ export class AssignmentsService {
 
   private generateId(): string {
     return `as_${crypto.randomBytes(6).toString('hex')}`;
+  }
+
+  private generateScheduleId(): string {
+    return `sch_${crypto.randomBytes(6).toString('hex')}`;
+  }
+
+  private inferLocationType(location: string): 'ONLINE' | 'OFFLINE' {
+    const normalized = location.toLowerCase();
+    if (
+      normalized.includes('online') ||
+      normalized.includes('zoom') ||
+      normalized.includes('meet') ||
+      normalized.includes('teams') ||
+      normalized.includes('truc tuyen') ||
+      normalized.includes('trực tuyến')
+    ) {
+      return 'ONLINE';
+    }
+    return 'OFFLINE';
+  }
+
+  private formatDateTimeVi(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleString('vi-VN', { hour12: false });
   }
 
   private async getLecturerQuota(userId: string): Promise<{
@@ -432,8 +461,65 @@ export class AssignmentsService {
       );
     }
 
-    // Create assignments
+    const defenseAtDate = new Date(dto.defenseAt);
+    if (Number.isNaN(defenseAtDate.getTime())) {
+      this.logger.warn(
+        `[assignCouncil:badRequest] topicId=${topicId} reason=INVALID_DEFENSE_AT rawValue=${dto.defenseAt}`,
+      );
+      throw new BadRequestException('defenseAt must be a valid datetime');
+    }
+
+    const locationDetail = dto.location.trim();
+    if (!locationDetail) {
+      this.logger.warn(
+        `[assignCouncil:badRequest] topicId=${topicId} reason=EMPTY_LOCATION`,
+      );
+      throw new BadRequestException('location must not be empty');
+    }
+
     const now = new Date().toISOString();
+    const defenseAtIso = defenseAtDate.toISOString();
+    const locationType = this.inferLocationType(locationDetail);
+    const formattedDefenseAt = this.formatDateTimeVi(defenseAtIso);
+
+    const existingSchedule = await this.schedulesRepository.findFirst(
+      (schedule) => schedule.topicId === topicId,
+    );
+
+    if (existingSchedule) {
+      await this.schedulesRepository.update(existingSchedule.id, {
+        ...existingSchedule,
+        defenseAt: defenseAtIso,
+        locationType,
+        locationDetail,
+        notes: existingSchedule.notes ?? 'Lich bao ve duoc cap nhat tu phan cong hoi dong',
+        updatedAt: now,
+      });
+      this.logger.log(
+        `[assignCouncil:scheduleUpdated] topicId=${topicId} scheduleId=${existingSchedule.id} defenseAt=${defenseAtIso} locationType=${locationType}`,
+      );
+    } else {
+      const scheduleId = this.generateScheduleId();
+      await this.schedulesRepository.create({
+        id: scheduleId,
+        topicId,
+        defenseAt: defenseAtIso,
+        locationType,
+        locationDetail,
+        notes: 'Lich bao ve duoc tao tu phan cong hoi dong',
+        createdBy: user.userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      this.logger.log(
+        `[assignCouncil:scheduleCreated] topicId=${topicId} scheduleId=${scheduleId} defenseAt=${defenseAtIso} locationType=${locationType}`,
+      );
+    }
+
+    const scheduleDetails = `Lich bao ve: ${formattedDefenseAt} tai ${locationDetail}.`;
+    const scheduleMessage = `Hoi dong cham bao ve da duoc phan cong cho de tai "${topic.title}". ${scheduleDetails}`;
+
+    // Create assignments
     const newAssignments: AssignmentRecord[] = [];
 
     // Chair (CT_HD)
@@ -527,7 +613,7 @@ export class AssignmentsService {
             type: 'GENERAL',
             topicId,
             context: {
-              message: `De tai "${topic.title}" da chuyen sang trang thai BAO VE sau khi phan cong hoi dong.`,
+              message: `De tai "${topic.title}" da chuyen sang trang thai BAO VE. ${scheduleDetails}`,
             },
           });
         }
@@ -573,7 +659,7 @@ export class AssignmentsService {
         type: 'GENERAL',
         topicId,
         context: {
-          message: `Hoi dong cham bao ve da duoc phan cong cho de tai \"${topic.title}\".`,
+          message: scheduleMessage,
         },
       });
     }
