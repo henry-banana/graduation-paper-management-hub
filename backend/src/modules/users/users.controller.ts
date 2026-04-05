@@ -8,7 +8,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -43,10 +43,11 @@ export class UsersController {
 
   @Get('supervisors/options')
   @ApiOperation({ summary: 'Get active supervisor options for topic registration' })
+  @ApiQuery({ name: 'includeId', required: false, description: 'Include this supervisor ID even if at full quota' })
   @ApiResponse({ status: 200, type: [SupervisorOptionDto] })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async getSupervisorOptions() {
-    const supervisors = await this.usersService.findSupervisorOptions();
+  async getSupervisorOptions(@Query('includeId') includeId?: string) {
+    const supervisors = await this.usersService.findSupervisorOptions(includeId);
     return {
       data: supervisors,
       meta: { requestId: `req_${Date.now()}` },

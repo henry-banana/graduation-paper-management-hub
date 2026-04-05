@@ -86,9 +86,10 @@ export default function StudentRevisionsPage() {
       setIsLoading(true);
       try {
         const res = await api.get<ApiListResponse<TopicDto>>("/topics?page=1&size=50");
-        // Filter to show only KLTN topics in post-defense states
+        // Bug #11 fix: Filter to KLTN topics in post-defense states (SCORING, COMPLETED)
+        // Removed PUBLISHED_READY as it doesn't exist in backend enum
         const kltnTopics = (res.data ?? []).filter(
-          (t) => t.type === "KLTN" && ["SCORING", "PUBLISHED_READY", "COMPLETED"].includes(t.state)
+          (t) => t.type === "KLTN" && ["SCORING", "COMPLETED"].includes(t.state)
         );
         setTopics(kltnTopics);
         if (kltnTopics.length > 0) {

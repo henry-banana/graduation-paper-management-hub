@@ -1,18 +1,25 @@
 /**
- * seed-sheets.ts — Schema v3.2 (CLEAN SEED — fully corrected)
- * ─────────────────────────────────────────────────────────────
+ * seed-sheets.ts — Schema v3.3 (CLEAN SEED — fully corrected with quota tracking)
+ * ─────────────────────────────────────────────────────────────────────────────────
  * Usage:
- *   npm run seed:sheets              (upsert — thêm vào nếu chưa có)
- *   npm run seed:sheets:reset        (XÓA SẠCH rồi seed lại từ đầu)
+ *   npm run seed:sheets              (ALWAYS clears and reseeds - idempotent)
+ *   npm run seed:sheets:reset        (alias for above - XÓA SẠCH rồi seed lại từ đầu)
  *   npm run seed:sheets:validate     (chỉ đếm rows, không ghi gì)
  *
- * Design:
+ * NOTE: Both "seed:sheets" and "seed:sheets:reset" now always clear data before
+ *       seeding to avoid duplicate IDs. This is the intended behavior for
+ *       development/testing environments. DO NOT use this script in production.
+ *
+ * Design (Bug #7 & Seed Redesign fixes):
  *   - Data (Users) tab: 3 SV + 5 GV + 1 TBM = 9 users
+ *     * GV1: totalQuota=5, quotaUsed=2 (GVHD for BCTT demo + KLTN demo)
+ *     * GV2: totalQuota=4, quotaUsed=1 (GVHD for BCTT done)
+ *     * GV3-5: quotaUsed=0 (available for new topics)
  *   - Dot (Periods): 3 đợt (BCTT HK1-24-25 closed + BCTT HK1-25-26 open + KLTN HK2-25-26 open)
- *   - Topics: 3 topics
- *       + topic-bctt-demo: BCTT / IN_PROGRESS (dùng để demo GVHD/SV flow)
- *       + topic-bctt-done: BCTT / COMPLETED   (dùng để kiểm tra UI lịch sử)
- *       + topic-kltn-demo: KLTN / SCORING     (dùng để demo GVPB+Council flow)
+ *   - Topics: 3 topics with proper GVHD assignments
+ *       + topic-bctt-demo: BCTT / IN_PROGRESS (SV1 → GV1)
+ *       + topic-bctt-done: BCTT / COMPLETED   (SV2 → GV2, historical)
+ *       + topic-kltn-demo: KLTN / SCORING     (SV2 → GV1, full council)
  *   - Trangthaidetai (Assignments): GVHD + GVPB + CT_HD + 2×TV_HD + TK_HD
  *   - TenDetai (Submissions): 1 submission CONFIRMED cho BCTT / 1 cho KLTN
  *   - Điểm (Scores): draft+submitted cho BCTT GVHD + KLTN GVHD + KLTN GVPB
@@ -22,7 +29,7 @@
  *   - Notifications: 3 cái (system + personal)
  *   - AuditLogs: 0 (clean slate)
  *   - SystemConfig: weights chuẩn
- * ─────────────────────────────────────────────────────────────
+ * ─────────────────────────────────────────────────────────────────────────────────
  */
 
 import 'dotenv/config';
@@ -251,14 +258,20 @@ const DATA_ROWS: Row[] = [
    U_SV3, '0901111003', '',  '', '', '', 'TRUE', T, 90,  120],  // NOT eligible (< 120 credits)
 
   // Lecturers (GV)
+  // Bug fix: Quota reflects actual assignments
+  // GV1: GVHD for T_BCTT_DEMO + T_KLTN_DEMO = 2 topics used
   [EMAIL_GV[U_GV1], 'GV001', NAME_GV[U_GV1], 'GV', 'CNPM', '',
    U_GV1, '0902221001', '', 5, 2, 'AI, Machine Learning, Phần mềm', 'TRUE', T, '', ''],
+  // GV2: GVHD for T_BCTT_DONE = 1 topic used
   [EMAIL_GV[U_GV2], 'GV002', NAME_GV[U_GV2], 'GV', 'CNPM', '',
    U_GV2, '0902221002', '', 4, 1, 'Web, Mobile, IoT',               'TRUE', T, '', ''],
+  // GV3: GVPB + TV_HD for KLTN but these don't count toward quota (only GVHD does)
   [EMAIL_GV[U_GV3], 'GV003', NAME_GV[U_GV3], 'GV', 'KTMT', '',
-   U_GV3, '0902221003', '', 6, 1, 'Mạng máy tính, Hệ thống nhúng',  'TRUE', T, '', ''],
+   U_GV3, '0902221003', '', 6, 0, 'Mạng máy tính, Hệ thống nhúng',  'TRUE', T, '', ''],
+  // GV4: Available for new topics
   [EMAIL_GV[U_GV4], 'GV004', NAME_GV[U_GV4], 'GV', 'CNPM', '',
    U_GV4, '0902221004', '', 3, 0, 'Cơ sở dữ liệu, Phân tích dữ liệu', 'TRUE', T, '', ''],
+  // GV5: Available for new topics
   [EMAIL_GV[U_GV5], 'GV005', NAME_GV[U_GV5], 'GV', 'CNPM', '',
    U_GV5, '0902221005', '', 4, 0, 'Bảo mật, Blockchain',            'TRUE', T, '', ''],
 
@@ -611,7 +624,8 @@ async function main(): Promise<void> {
 
   console.log('\n🚀  KLTN Seed Script — Schema v3.2 (CLEAN SEED)');
   console.log(`  Spreadsheet: ${SPREADSHEET_ID}`);
-  console.log(`  Mode: ${isValidateOnly ? 'VALIDATE' : isReset ? 'RESET + SEED' : 'SEED (upsert)'}\n`);
+  // Bug #7 fix: Always clear before seeding to prevent duplicate IDs
+  console.log(`  Mode: ${isValidateOnly ? 'VALIDATE' : 'CLEAR + SEED (idempotent)'}\n`);
 
   const tabNames = Object.keys(SHEET_HEADERS);
 
@@ -633,25 +647,31 @@ async function main(): Promise<void> {
     process.stdout.write(`  ✓ ${sheetName}\n`);
   }
 
-  // Clear data if --reset (skip Quota, Major which are teacher-managed read-only)
-  if (isReset) {
-    const skipClear = new Set(['Quota', 'Major', 'Data']); // Data kept for manual teacher management
-    console.log('\n🗑️   Clearing data rows...');
-    for (const sheetName of tabNames) {
-      if (skipClear.has(sheetName)) {
-        console.log(`  ⏭  ${sheetName} — skipped`);
-        continue;
-      }
-      await clearData(sheetName);
-      process.stdout.write(`  ✓ ${sheetName} cleared\n`);
+  // Bug #7 fix: Always clear data before seeding to prevent duplicates
+  // (Previously this only ran with --reset flag, causing append-only behavior)
+  const skipClear = new Set(['Quota', 'Major']); // Keep read-only teacher-managed tabs
+  console.log('\n🗑️   Clearing data rows...');
+  for (const sheetName of tabNames) {
+    if (skipClear.has(sheetName)) {
+      console.log(`  ⏭  ${sheetName} — skipped (read-only)`);
+      continue;
     }
-    // Also clear Data tab for full reset
-    await clearData('Data');
-    console.log('  ✓ Data cleared (full reset)');
+    await clearData(sheetName);
+    process.stdout.write(`  ✓ ${sheetName} cleared\n`);
   }
 
   // Seed data
   console.log('\n🌱  Seeding data...');
+
+  // Bug #7 fix: Validate no duplicate IDs before seeding
+  function validateNoDuplicateIds(sheetName: string, rows: Row[], idColumnIndex: number): void {
+    const ids = rows.map(r => r[idColumnIndex]).filter(id => id);
+    const uniqueIds = new Set(ids);
+    if (ids.length !== uniqueIds.size) {
+      const duplicates = ids.filter((id, idx) => ids.indexOf(id) !== idx);
+      throw new Error(`❌  ${sheetName}: Duplicate IDs detected: ${[...new Set(duplicates)].join(', ')}`);
+    }
+  }
 
   const dataToSeed: [string, Row[]][] = [
     ['Data',                  DATA_ROWS],
@@ -670,6 +690,28 @@ async function main(): Promise<void> {
     ['Notifications',         NOTIFICATIONS_ROWS],
     ['SystemConfig',          SYSTEM_CONFIG_ROWS],
   ];
+
+  // Bug #7 fix: Validate no duplicate IDs before seeding
+  const ID_COLUMN_MAP: Record<string, number> = {
+    'Data': 6,              // 'id' column
+    'Dot': 8,               // 'id' column  
+    'Topics': 0,            // 'id' column (first)
+    'Trangthaidetai': 6,    // 'id' column
+    'RevisionRounds': 0,    // 'id' column
+    'TenDetai': 0,          // 'id' column
+    'Điểm': 0,              // 'id' column
+    'ScoreSummaries': 0,    // 'id' column
+    'Notifications': 0,     // 'id' column
+  };
+
+  console.log('🔍  Validating no duplicate IDs in seed data...');
+  for (const [sheetName, rows] of dataToSeed) {
+    const idCol = ID_COLUMN_MAP[sheetName];
+    if (idCol !== undefined && rows.length > 0) {
+      validateNoDuplicateIds(sheetName, rows, idCol);
+      console.log(`  ✓ ${sheetName.padEnd(28)} — no duplicates`);
+    }
+  }
 
   for (const [sheetName, rows] of dataToSeed) {
     if (rows.length === 0) {
@@ -716,6 +758,8 @@ async function main(): Promise<void> {
 
   if (allOk) {
     console.log('\n✅  Seed complete — all tabs have expected data!\n');
+    console.log('⚠️   IMPORTANT: This script is for dev/test ONLY. DO NOT use in production.');
+    console.log('     Running this script will DELETE all existing data and replace it with seed data.\n');
   } else {
     console.log('\n⚠️   Seed complete with warnings — some tabs have fewer rows than expected.\n');
   }

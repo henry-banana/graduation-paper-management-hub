@@ -662,6 +662,28 @@ export class AssignmentsService {
     };
   }
 
+  /**
+   * Get all active topic roles for a user (Bug #8 fix)
+   * Returns unique TopicRoles where user has active assignments
+   */
+  async getActiveTopicRolesForUser(userId: string): Promise<TopicRole[]> {
+    this.logger.log(`[getActiveTopicRolesForUser:start] userId=${userId}`);
+    const assignments = await this.assignmentsRepository.findAll();
+    const roles = new Set<TopicRole>();
+    
+    for (const a of assignments) {
+      if (a.userId === userId && a.status === 'ACTIVE') {
+        roles.add(a.topicRole);
+      }
+    }
+    
+    const result = Array.from(roles);
+    this.logger.log(
+      `[getActiveTopicRolesForUser:success] userId=${userId} roles=${result.join(',') || '-'}`,
+    );
+    return result;
+  }
+
   private async notifyIfAvailable(params: {
     receiverUserId: string;
     type: 'ASSIGNMENT_ADDED' | 'GENERAL';

@@ -553,24 +553,28 @@ export class TopicsService {
       topic.supervisorUserId = nextSupervisorId;
     }
 
-    if (supervisorChanged && topic.state === 'PENDING_GV') {
-      topic.approvalDeadlineAt = new Date(
-        now.getTime() + 3 * 24 * 60 * 60 * 1000,
-      ).toISOString();
+    // Bug #2 fix: Sync assignment whenever supervisor changes, not just in PENDING_GV
+    if (supervisorChanged) {
+      // Only send notification and update deadline if in PENDING_GV
+      if (topic.state === 'PENDING_GV') {
+        topic.approvalDeadlineAt = new Date(
+          now.getTime() + 3 * 24 * 60 * 60 * 1000,
+        ).toISOString();
 
-      const student = await this.usersRepository.findById(topic.studentUserId);
-      await this.notifyIfAvailable({
-        receiverUserId: topic.supervisorUserId,
-        type: 'TOPIC_PENDING',
-        topicId: topic.id,
-        context: {
-          topicTitle: topic.title,
-          studentName:
-            student?.name ?? student?.email ?? topic.studentUserId,
-        },
-      });
+        const student = await this.usersRepository.findById(topic.studentUserId);
+        await this.notifyIfAvailable({
+          receiverUserId: topic.supervisorUserId,
+          type: 'TOPIC_PENDING',
+          topicId: topic.id,
+          context: {
+            topicTitle: topic.title,
+            studentName:
+              student?.name ?? student?.email ?? topic.studentUserId,
+          },
+        });
+      }
 
-      // Cập nhật assignment khi đổi supervisor
+      // Always sync assignment when supervisor changes (regardless of state)
       if (this.assignmentsRepository) {
         const assignments = await this.assignmentsRepository.findAll();
         
@@ -936,6 +940,43 @@ export class TopicsService {
       topic.updatedAt = new Date().toISOString();
       await this.topicsRepository.update(topic.id, topic);
 
+      // Bug fix: Create GVHD assignment when topic is submitted to supervisor (DRAFT → PENDING_GV)
+      if (action === 'SUBMIT_TO_GV' && toState === 'PENDING_GV' && this.assignmentsRepository) {
+        const existingAssignment = (await this.assignmentsRepository.findAll())
+          .find(a => a.topicId === topic.id && a.userId === topic.supervisorUserId && a.topicRole === 'GVHD');
+        
+        if (!existingAssignment) {
+          const newAssignment = {
+            id: `as_${crypto.randomBytes(6).toString('hex')}`,
+            topicId: topic.id,
+            userId: topic.supervisorUserId,
+            topicRole: 'GVHD' as const,
+            status: 'ACTIVE' as const,
+            assignedAt: new Date().toISOString(),
+            revokedAt: undefined,
+          };
+          await this.assignmentsRepository.insert(newAssignment);
+          this.logger.log(`Created GVHD assignment for topic=${topic.id} supervisor=${topic.supervisorUserId}`);
+        }
+
+        // Set approval deadline
+        const deadline = new Date();
+        deadline.setDate(deadline.getDate() + 3); // 3 days from now
+        topic.approvalDeadlineAt = deadline.toISOString();
+        await this.topicsRepository.update(topic.id, topic);
+
+        // Send notification to supervisor
+        await this.notifyIfAvailable({
+          receiverUserId: topic.supervisorUserId,
+          type: 'TOPIC_PENDING',
+          topicId: topic.id,
+          context: {
+            topicTitle: topic.title,
+            studentName: currentUser.email, // Will be enriched later if needed
+          },
+        });
+      }
+
       if (
         (toState === 'COMPLETED' && fromState !== 'COMPLETED') ||
         (toState === 'CANCELLED' && this.shouldReleaseQuotaOnCancel(fromState))
@@ -966,7 +1007,8 @@ export class TopicsService {
       role === 'gvpb' ||
       role === 'tv_hd' ||
       role === 'tk_hd' ||
-      role === 'ct_hd'
+      role === 'ct_hd' ||
+      role === 'tbm'  // Bug #5 fix: TBM should also get enriched topic list
     );
   }
 
@@ -1313,6 +1355,11 @@ export class TopicsService {
     }
 
     if (user.role === 'LECTURER') {
+      // Bug #2 fix: Check supervisor directly in case assignment sync failed
+      if (topic.supervisorUserId === user.userId) {
+        return;
+      }
+
       const assignmentRoles = await this.getActiveAssignmentRoles(
         topic.id,
         user.userId,

@@ -11,6 +11,7 @@
     "seed:sheets": "ts-node --transpile-only src/scripts/seed-sheets.ts",
     "seed:sheets:validate": "ts-node --transpile-only src/scripts/seed-sheets.ts --validate-only",
     "seed:sheets:reset": "ts-node --transpile-only src/scripts/seed-sheets.ts --reset",
+    "seed:sheets:test-idempotent": "npm run seed:sheets && npm run seed:sheets && npm run seed:sheets:validate",
     "seed:sheets:reseed": "ts-node --transpile-only src/scripts/reseed-sheets.ts",
     "seed:sheets:rollback": "ts-node --transpile-only src/scripts/rollback-from-preview.ts",
     "import:sheets": "ts-node --transpile-only src/scripts/import-from-teacher-sheet.ts",

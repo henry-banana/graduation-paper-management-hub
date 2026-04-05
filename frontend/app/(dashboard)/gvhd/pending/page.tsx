@@ -335,7 +335,7 @@ export default function GVHDPendingPage() {
                       Từ chối
                     </button>
                     <a
-                      href={`/student/topics/${topic.id}`}
+                      href={`/gvhd/topics/${topic.id}`}
                       className="p-2 bg-surface-container-low border border-outline-variant/30 text-on-surface-variant rounded-xl hover:bg-surface-container transition-colors"
                       title="Xem chi tiết"
                     >

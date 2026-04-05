@@ -132,13 +132,22 @@ export class UsersService {
     };
   }
 
-  async findSupervisorOptions(): Promise<SupervisorOptionDto[]> {
-    this.logger.log('[findSupervisorOptions:start]');
+  /**
+   * Get supervisors available for selection (with remaining quota)
+   * @param includeId - Optional: also include this supervisor ID even if at full quota (for displaying current supervisor)
+   */
+  async findSupervisorOptions(includeId?: string): Promise<SupervisorOptionDto[]> {
+    this.logger.log(`[findSupervisorOptions:start] includeId=${includeId ?? 'none'}`);
     const users = await this.usersRepository.findAll();
     const options = users
       .filter((user) => {
         if (user.role !== 'LECTURER' || user.isActive === false) {
           return false;
+        }
+
+        // Bug #6 fix: Always include the specified supervisor ID (for displaying current supervisor)
+        if (includeId && user.id === includeId) {
+          return true;
         }
 
         const totalQuota = user.totalQuota ?? 0;

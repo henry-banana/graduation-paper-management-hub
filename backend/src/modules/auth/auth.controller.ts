@@ -16,13 +16,14 @@ import * as crypto from 'crypto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
+import { AssignmentsService } from '../assignments/assignments.service';
 import {
   RefreshTokenRequestDto,
   RefreshTokenDto,
   GoogleCallbackRequestDto,
 } from './dto';
 import { GoogleUser } from './strategies/google.strategy';
-import { AuthUser } from '../../common/types';
+import { AuthUser, TopicRole } from '../../common/types';
 
 function generateRequestId(): string {
   return `req_${crypto.randomBytes(8).toString('hex')}`;
@@ -45,6 +46,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    private readonly assignmentsService: AssignmentsService,
   ) {}
 
   @Public()
@@ -139,6 +141,12 @@ export class AuthController {
     const profile = await this.authService.getCurrentProfile(user.userId);
     const accountRole = profile?.role ?? user.role;
 
+    // Bug #8 fix: Include topic roles (GVHD, GVPB, TV_HD, etc.) for redirect logic
+    let topicRoles: TopicRole[] = [];
+    if (accountRole === 'LECTURER') {
+      topicRoles = await this.assignmentsService.getActiveTopicRolesForUser(user.userId);
+    }
+
     return {
       data: {
         id: profile?.userId ?? user.userId,
@@ -146,6 +154,7 @@ export class AuthController {
         fullName: profile?.name ?? user.email,
         accountRole,
         uiRole: mapAccountRoleToUiRole(accountRole),
+        topicRoles, // Sub-roles for lecturers (GVHD, GVPB, TV_HD, TK_HD, CT_HD)
       },
       meta: { requestId: generateRequestId() },
     };

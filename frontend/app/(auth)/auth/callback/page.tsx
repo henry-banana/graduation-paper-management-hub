@@ -14,15 +14,20 @@ import {
   UiRole,
 } from "@/lib/auth/session";
 
+// Bug #8 fix: Include topicRoles for sub-role redirect logic
+type TopicRole = "GVHD" | "GVPB" | "TV_HD" | "TK_HD" | "CT_HD";
+
 interface AuthMeDto {
   id: string;
   email: string;
   fullName: string;
   accountRole: AccountRole;
   uiRole?: UiRole;
+  topicRoles?: TopicRole[]; // Bug #8: Sub-roles from assignments
 }
 
-function getRedirectPath(accountRole: AccountRole, uiRole?: UiRole): string {
+// Bug #8 fix: Use topicRoles array for better redirect logic
+function getRedirectPath(accountRole: AccountRole, topicRoles?: TopicRole[]): string {
   if (accountRole === "STUDENT") {
     return "/student/notifications";
   }
@@ -31,22 +36,26 @@ function getRedirectPath(accountRole: AccountRole, uiRole?: UiRole): string {
     return "/tbm/periods";
   }
 
-  if (uiRole === "GVPB") {
-    return "/gvpb/reviews";
-  }
-
-  if (uiRole === "TV_HD") {
-    return "/council/scoring";
-  }
-
-  if (uiRole === "TK_HD") {
-    return "/council/summary";
-  }
-
-  if (uiRole === "CT_HD") {
+  // For lecturers, prioritize by sub-role importance: CT_HD > TK_HD > TV_HD > GVPB > GVHD
+  const roles = new Set(topicRoles ?? []);
+  
+  if (roles.has("CT_HD")) {
     return "/council/final-confirm";
   }
 
+  if (roles.has("TK_HD")) {
+    return "/council/summary";
+  }
+
+  if (roles.has("TV_HD")) {
+    return "/council/scoring";
+  }
+
+  if (roles.has("GVPB")) {
+    return "/gvpb/reviews";
+  }
+
+  // Default for GVHD or lecturers without sub-roles
   return "/gvhd/pending";
 }
 
@@ -99,7 +108,8 @@ function AuthCallbackContent() {
           setCurrentRoles(response.data.accountRole, response.data.uiRole);
         }
 
-        router.replace(getRedirectPath(response.data.accountRole, response.data.uiRole));
+        // Bug #8 fix: Use topicRoles for redirect instead of uiRole
+        router.replace(getRedirectPath(response.data.accountRole, response.data.topicRoles));
       } catch (callbackError) {
         clearAuthSession();
         const message =

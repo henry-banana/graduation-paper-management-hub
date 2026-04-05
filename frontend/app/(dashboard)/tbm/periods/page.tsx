@@ -186,17 +186,25 @@ export default function TBMPeriodsPage() {
       if (modalMode === "create") {
         await api.post<ApiResponse<{ id: string }>>("/periods", {
           code: form.code,
+          name: form.name || undefined,
           type: form.type,
           openDate: toDateOnly(form.registrationStartAt),
           closeDate: toDateOnly(form.registrationEndAt),
+          submitStartAt: form.submitStartAt ? toDateOnly(form.submitStartAt) : undefined,
+          submitEndAt: form.submitEndAt ? toDateOnly(form.submitEndAt) : undefined,
+          supervisorQuota: form.supervisorQuota || undefined,
         });
       } else if (editingPeriod) {
         await api.patch<ApiResponse<{ updated: boolean }>>(
           `/periods/${editingPeriod.id}`,
           {
             code: form.code,
+            name: form.name || undefined,
             openDate: toDateOnly(form.registrationStartAt),
             closeDate: toDateOnly(form.registrationEndAt),
+            submitStartAt: form.submitStartAt ? toDateOnly(form.submitStartAt) : undefined,
+            submitEndAt: form.submitEndAt ? toDateOnly(form.submitEndAt) : undefined,
+            supervisorQuota: form.supervisorQuota || undefined,
           },
         );
       }

@@ -486,10 +486,14 @@ export default function StudentTopicDetailPage() {
           supervisorUserId: topicRes.data.supervisorUserId || "",
         });
 
+        // Bug #6 fix: Include current supervisor ID to show their name even if at full quota
+        const currentSupervisorId = topicRes.data.supervisorUserId;
         const [submissionsRes, notificationsRes, supervisorsRes, roundsRes] = await Promise.all([
           api.get<ApiResponse<SubmissionDto[]>>(`/topics/${topicId}/submissions`),
           api.get<ApiListResponse<NotificationDto>>("/notifications?page=1&size=100"),
-          api.get<ApiResponse<SupervisorOptionDto[]>>("/users/supervisors/options"),
+          api.get<ApiResponse<SupervisorOptionDto[]>>(
+            `/users/supervisors/options${currentSupervisorId ? `?includeId=${currentSupervisorId}` : ''}`
+          ),
           api
             .get<ApiResponse<RevisionRoundDto[]>>(`/topics/${topicId}/revisions/rounds`)
             .catch(() => null),

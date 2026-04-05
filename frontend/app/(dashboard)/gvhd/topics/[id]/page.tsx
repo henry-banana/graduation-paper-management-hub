@@ -175,9 +175,13 @@ export default function GVHDTopicDetailPage() {
   const stateLabel = TOPIC_STATE_LABELS[topic.state] ?? { label: topic.state, color: "text-outline", bg: "bg-surface-container" };
 
   // Which transitions are available
-  const canTransitionToGrading = topic.state === "IN_PROGRESS";
-  const canTransitionToPendingConfirm = topic.state === "GRADING" && topic.type === "KLTN";
+  // BCTT: IN_PROGRESS -> GRADING (MOVE_TO_GRADING)
+  // KLTN: IN_PROGRESS -> PENDING_CONFIRM (REQUEST_CONFIRM)
+  const canTransitionToGrading = topic.state === "IN_PROGRESS" && topic.type === "BCTT";
+  const canTransitionToPendingConfirm = topic.state === "IN_PROGRESS" && topic.type === "KLTN";
   const canTransitionToCompleted = topic.state === "GRADING" && topic.type === "BCTT";
+  // Legacy support: handle topics stuck at CONFIRMED state
+  const canStartProgress = topic.state === "CONFIRMED";
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-24">
@@ -399,6 +403,16 @@ export default function GVHDTopicDetailPage() {
           <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/10 shadow-sm p-5">
             <h3 className="font-bold text-xs uppercase tracking-widest text-outline mb-4">Thao tác</h3>
             <div className="space-y-3">
+              {canStartProgress && (
+                <button
+                  onClick={() => void handleTransition("START_PROGRESS", "Bắt đầu thực hiện")}
+                  disabled={isTransitioning}
+                  className="w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isTransitioning ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Bắt đầu thực hiện
+                </button>
+              )}
               {canTransitionToGrading && (
                 <button
                   onClick={() => void handleTransition("MOVE_TO_GRADING", "Chấm điểm")}
@@ -411,12 +425,12 @@ export default function GVHDTopicDetailPage() {
               )}
               {canTransitionToPendingConfirm && (
                 <button
-                  onClick={() => void handleTransition("REQUEST_CONFIRM", "Chờ phản biện")}
+                  onClick={() => void handleTransition("REQUEST_CONFIRM", "Chờ xác nhận bảo vệ")}
                   disabled={isTransitioning}
                   className="w-full px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isTransitioning ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  Duyệt → Chờ phản biện
+                  Chuyển sang Chờ xác nhận bảo vệ
                 </button>
               )}
               {canTransitionToCompleted && (
@@ -429,7 +443,7 @@ export default function GVHDTopicDetailPage() {
                   Hoàn tất BCTT
                 </button>
               )}
-              {!canTransitionToGrading && !canTransitionToPendingConfirm && !canTransitionToCompleted && (
+              {!canStartProgress && !canTransitionToGrading && !canTransitionToPendingConfirm && !canTransitionToCompleted && (
                 <p className="text-xs text-outline text-center py-2">
                   Không có thao tác chuyển trạng thái khả dụng.
                 </p>

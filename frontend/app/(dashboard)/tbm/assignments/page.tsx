@@ -35,9 +35,13 @@ interface TeacherDto {
   id: string;
   fullName: string;
   email: string;
-  staffId?: string;
+  // Bug #9 fix: Use backend field names (lecturerId, totalQuota, quotaUsed)
+  lecturerId?: string;
+  staffId?: string; // Keep for backward compat, alias of lecturerId
   roles?: string[];
-  currentLoad?: number;
+  totalQuota?: number;
+  quotaUsed?: number;
+  currentLoad?: number; // Keep for backward compat, alias of quotaUsed
 }
 
 type AssignTab = "gvpb" | "council";
@@ -113,7 +117,9 @@ export default function TBMAssignmentsPage() {
       topic.supervisor?.fullName?.trim() ||
       mappedTeacher?.fullName?.trim() ||
       "Chưa cập nhật GVHD";
+    // Bug #9 fix: Use lecturerId (backend field) or fallback to staffId (alias)
     const codeOrEmail =
+      mappedTeacher?.lecturerId?.trim() ||
       mappedTeacher?.staffId?.trim() ||
       topic.supervisor?.email?.trim() ||
       mappedTeacher?.email?.trim() ||
@@ -397,11 +403,17 @@ export default function TBMAssignmentsPage() {
                                     <option value="">Chọn GV phản biện...</option>
                                     {teachers
                                       .filter(tc => tc.id !== t.supervisor?.id)
-                                      .map(tc => (
-                                        <option key={tc.id} value={tc.id}>
-                                          {tc.fullName}{tc.currentLoad != null ? ` (${tc.currentLoad})` : ""}
-                                        </option>
-                                      ))}
+                                      .map(tc => {
+                                        // Bug #9 fix: Show remaining quota (totalQuota - quotaUsed)
+                                        const remaining = tc.totalQuota != null && tc.quotaUsed != null 
+                                          ? tc.totalQuota - tc.quotaUsed 
+                                          : (tc.currentLoad ?? null);
+                                        return (
+                                          <option key={tc.id} value={tc.id}>
+                                            {tc.fullName}{remaining != null ? ` (còn ${remaining} slot)` : ""}
+                                          </option>
+                                        );
+                                      })}
                                   </select>
                                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-outline pointer-events-none" />
                                 </div>
