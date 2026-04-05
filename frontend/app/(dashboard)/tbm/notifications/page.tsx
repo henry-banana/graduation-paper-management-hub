@@ -170,7 +170,7 @@ export default function TBMNotificationsPage() {
         <p className="font-semibold mb-2">Lưu ý:</p>
         <ul className="list-disc list-inside space-y-1">
           <li>Thông báo sẽ được gửi đến tất cả người dùng trong nhóm đã chọn</li>
-          <li>Người nhận sẽ thấy thông báo trong trang "Thông báo" của họ</li>
+          <li>Người nhận sẽ thấy thông báo trong trang Thông báo của họ</li>
           <li>Không thể thu hồi thông báo sau khi gửi</li>
           <li>Tiêu đề và nội dung phải rõ ràng, dễ hiểu</li>
         </ul>

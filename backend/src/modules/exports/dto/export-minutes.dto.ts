@@ -19,6 +19,11 @@ export class ExportMinutesDto {
   @IsString()
   chairComments?: string;
 
+  @ApiPropertyOptional({ description: 'Góp ý của hội đồng' })
+  @IsOptional()
+  @IsString()
+  councilComments?: string;
+
   @ApiPropertyOptional({ description: 'Yêu cầu chỉnh sửa (nếu có)' })
   @IsOptional()
   @IsString()

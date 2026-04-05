@@ -1790,6 +1790,7 @@ export class TopicsService {
     | 'TOPIC_APPROVED'
     | 'TOPIC_REJECTED'
     | 'TOPIC_TRANSITION'
+    | 'TOPIC_TITLE_UPDATED'
     | 'DEADLINE_SET'
     | 'DEADLINE_EXTENDED'
     | 'REVISION_ROUND_OPENED'

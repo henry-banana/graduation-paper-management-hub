@@ -258,7 +258,7 @@ export default function GVHDNotificationsPage() {
         <p className="font-semibold mb-2">Lưu ý:</p>
         <ul className="list-disc list-inside space-y-1">
           <li>Thông báo chỉ gửi cho sinh viên được chọn</li>
-          <li>Sinh viên sẽ thấy thông báo trong trang "Thông báo" của họ</li>
+          <li>Sinh viên sẽ thấy thông báo trong trang Thông báo của họ</li>
           <li>Không thể thu hồi thông báo sau khi gửi</li>
           <li>Nội dung nên rõ ràng, mang tính hướng dẫn</li>
         </ul>

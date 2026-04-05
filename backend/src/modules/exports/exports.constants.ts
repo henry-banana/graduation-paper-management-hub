@@ -1,4 +1,4 @@
-export const KLTN_RUBRIC_EXPORT_ROLES = ['GVHD', 'GVPB', 'TV_HD'] as const;
+export const KLTN_RUBRIC_EXPORT_ROLES = ['GVHD', 'GVPB', 'TV_HD', 'CT_HD', 'TK_HD'] as const;
 
 export type KltnRubricExportRole = (typeof KLTN_RUBRIC_EXPORT_ROLES)[number];
 
