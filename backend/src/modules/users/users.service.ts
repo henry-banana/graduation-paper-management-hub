@@ -208,17 +208,12 @@ export class UsersService {
     const requiredCredits = user.requiredCredits;
     const completedBcttScore = user.completedBcttScore;
 
-    const hasRequiredCredits =
-      typeof earnedCredits === 'number' &&
-      typeof requiredCredits === 'number' &&
-      earnedCredits >= requiredCredits;
-
+    // Note: earnedCredits/requiredCredits check đã bỏ theo yêu cầu mới
+    // Chỉ check BCTT pass để đủ điều kiện đăng ký KLTN
     const hasPassedBctt = typeof completedBcttScore === 'number' && completedBcttScore > 5;
 
-    let kltnEligibilityReason: 'OK' | 'BCTT_INCOMPLETE' | 'BCTT_SCORE_TOO_LOW' | 'INSUFFICIENT_CREDITS' = 'OK';
-    if (!hasRequiredCredits) {
-      kltnEligibilityReason = 'INSUFFICIENT_CREDITS';
-    } else if (completedBcttScore === undefined || completedBcttScore === null) {
+    let kltnEligibilityReason: 'OK' | 'BCTT_INCOMPLETE' | 'BCTT_SCORE_TOO_LOW' = 'OK';
+    if (completedBcttScore === undefined || completedBcttScore === null) {
       kltnEligibilityReason = 'BCTT_INCOMPLETE';
     } else if (!hasPassedBctt) {
       kltnEligibilityReason = 'BCTT_SCORE_TOO_LOW';
@@ -235,7 +230,7 @@ export class UsersService {
       earnedCredits,
       requiredCredits,
       completedBcttScore,
-      canRegisterKltn: hasRequiredCredits && hasPassedBctt,
+      canRegisterKltn: hasPassedBctt, // Chỉ check BCTT pass, không check credits nữa
       kltnEligibilityReason,
       totalQuota: user.totalQuota,
       quotaUsed: user.quotaUsed,

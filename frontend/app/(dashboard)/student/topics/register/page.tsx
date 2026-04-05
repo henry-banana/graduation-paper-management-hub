@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, AlertCircle, ChevronDown, Send, Calendar, Info, Lock, Sparkles } from "lucide-react";
+import { BookOpen, AlertCircle, ChevronDown, Send, Calendar, Info, Lock, Sparkles, CheckCircle2 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 import {
   KLTN_ELIGIBILITY_REASONS,
@@ -24,6 +24,11 @@ interface TopicDto {
   id: string;
   type: "BCTT" | "KLTN";
   state: string;
+  supervisorUserId?: string;
+  supervisor?: {
+    fullName?: string;
+    email?: string;
+  };
 }
 
 interface UserProfileDto {
@@ -43,6 +48,7 @@ interface SupervisorOptionDto {
   email: string;
   lecturerId?: string;
   department?: string;
+  expertise?: string;
   totalQuota?: number;
   quotaUsed?: number;
 }
@@ -111,6 +117,7 @@ export default function StudentTopicRegisterPage() {
   });
   const [submittedTopicId, setSubmittedTopicId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   // F4A: Autocomplete state
   const [suggestions, setSuggestions] = useState<TopicSuggestionDto[]>([]);
@@ -124,7 +131,9 @@ export default function StudentTopicRegisterPage() {
     [topics],
   );
 
-  const canRegisterKLTN = profile?.canRegisterKltn ?? false;
+  const canRegisterKLTN =
+    profile?.canRegisterKltn ??
+    (typeof profile?.completedBcttScore === "number" && profile.completedBcttScore > 5);
   const kltnEligibilityReason = profile?.kltnEligibilityReason ?? "OK";
 
   const availablePeriods = useMemo(() => {
@@ -138,7 +147,7 @@ export default function StudentTopicRegisterPage() {
   }, [availablePeriods, form.periodId]);
 
   const availableSupervisors = useMemo(() => {
-    return supervisors.filter((supervisor) => {
+    const filtered = supervisors.filter((supervisor) => {
       const total = supervisor.totalQuota;
       const used = supervisor.quotaUsed;
 
@@ -148,7 +157,21 @@ export default function StudentTopicRegisterPage() {
 
       return total - used > 0;
     });
-  }, [supervisors]);
+
+    // Sort: GV có expertise match domain lên đầu
+    if (form.domain) {
+      const domainLower = form.domain.toLowerCase();
+      return filtered.sort((a, b) => {
+        const aMatch = a.expertise?.toLowerCase().includes(domainLower) ?? false;
+        const bMatch = b.expertise?.toLowerCase().includes(domainLower) ?? false;
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
+      });
+    }
+
+    return filtered;
+  }, [supervisors, form.domain]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -291,7 +314,36 @@ export default function StudentTopicRegisterPage() {
     }
 
     setError("");
-    setForm({ ...form, type: newType });
+    
+    // Auto-fill supervisor from previous BCTT topic when switching to KLTN
+    let autoFilledSupervisorId = form.supervisorUserId;
+    
+    if (newType === "KLTN") {
+      // Find previous completed BCTT topic
+      const completedBctt = topics.find((t) => 
+        t.type === "BCTT" && 
+        ["COMPLETED", "SCORING", "GRADING"].includes(t.state) &&
+        t.supervisorUserId
+      );
+      
+      if (completedBctt && completedBctt.supervisorUserId) {
+        // Check if the supervisor is still available (has quota)
+        const supervisor = availableSupervisors.find(
+          (s) => s.id === completedBctt.supervisorUserId
+        );
+        
+        if (supervisor) {
+          autoFilledSupervisorId = completedBctt.supervisorUserId;
+          // Show success message to inform user
+          setSuccess(
+            `Đã tự động chọn giáo viên hướng dẫn từ đợt BCTT: ${supervisor.fullName}`
+          );
+          setTimeout(() => setSuccess(""), 5000);
+        }
+      }
+    }
+    
+    setForm({ ...form, type: newType, supervisorUserId: autoFilledSupervisorId });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -388,6 +440,13 @@ export default function StudentTopicRegisterPage() {
                 <div className="flex items-start gap-3 bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3">
                   <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
                   <p className="text-sm text-error">{error}</p>
+                </div>
+              )}
+              
+              {success && (
+                <div className="flex items-start gap-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3">
+                  <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-green-800">{success}</p>
                 </div>
               )}
 
@@ -494,17 +553,25 @@ export default function StudentTopicRegisterPage() {
                       disabled={isSubmitting || isLoading || !availableSupervisors.length}
                       className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary appearance-none pr-9"
                     >
-                      {availableSupervisors.map((supervisor) => (
-                        <option key={supervisor.id} value={supervisor.id}>
-                          {supervisor.fullName} ({supervisor.department || 'Chưa rõ khoa'}) - Còn {(supervisor.totalQuota ?? 0) - (supervisor.quotaUsed ?? 0)}
-                        </option>
-                      ))}
+                      {availableSupervisors.map((supervisor) => {
+                        const hasExpertiseMatch = form.domain && supervisor.expertise?.toLowerCase().includes(form.domain.toLowerCase());
+                        return (
+                          <option key={supervisor.id} value={supervisor.id}>
+                            {hasExpertiseMatch ? '⭐ ' : ''}{supervisor.fullName} ({supervisor.department || 'Chưa rõ khoa'}) - Còn {(supervisor.totalQuota ?? 0) - (supervisor.quotaUsed ?? 0)}{hasExpertiseMatch ? ' - Chuyên môn phù hợp' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline pointer-events-none" />
                   </div>
                   {!availableSupervisors.length && (
                     <p className="text-[11px] text-error mt-1">
                       Hiện chưa có GVHD còn quota trống để phân công.
+                    </p>
+                  )}
+                  {form.domain && availableSupervisors.some(s => s.expertise?.toLowerCase().includes(form.domain.toLowerCase())) && (
+                    <p className="text-[11px] text-primary mt-1">
+                      ⭐ Các GV có chuyên môn phù hợp với lĩnh vực {form.domain} được xếp lên đầu danh sách.
                     </p>
                   )}
                 </div>
@@ -547,7 +614,10 @@ export default function StudentTopicRegisterPage() {
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline pointer-events-none" />
                   </div>
                   {!canRegisterKLTN && (
-                    <p className="text-[10px] text-error mt-1 flex items-center gap-1"><Lock className="w-3 h-3" /> Chưa hoàn thành BCTT</p>
+                    <p className="text-[10px] text-error mt-1 flex items-center gap-1">
+                      <Lock className="w-3 h-3" />
+                      {KLTN_ELIGIBILITY_REASONS[kltnEligibilityReason] || "Chưa đủ điều kiện KLTN"}
+                    </p>
                   )}
                 </div>
               </div>
@@ -607,16 +677,11 @@ export default function StudentTopicRegisterPage() {
               <Info className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
               <div className="text-xs text-blue-900 leading-relaxed space-y-1.5">
                 <p className="font-bold">Quy định KLTN</p>
-                <p>Sinh viên muốn đăng ký Khóa luận tốt nghiệp phải có <strong>BCTT COMPLETED</strong>, điểm BCTT <strong>&gt; 5.0</strong> và đủ tín chỉ theo hồ sơ học vụ.</p>
+                <p>Sinh viên muốn đăng ký Khóa luận tốt nghiệp phải có <strong>BCTT COMPLETED</strong> và điểm BCTT <strong>&gt; 5.0</strong>.</p>
                 {!canRegisterKLTN && (
                   <ul className="list-disc pl-4 space-y-1">
                     <li className="text-error font-medium">{KLTN_ELIGIBILITY_REASONS[kltnEligibilityReason] || "N/A"}</li>
                   </ul>
-                )}
-                {profile && (
-                  <p>
-                    Tín chỉ hiện tại: <strong>{profile.earnedCredits ?? 0}</strong> / yêu cầu <strong>{profile.requiredCredits ?? 0}</strong>
-                  </p>
                 )}
               </div>
             </div>

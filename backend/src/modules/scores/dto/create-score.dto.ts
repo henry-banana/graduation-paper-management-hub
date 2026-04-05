@@ -64,4 +64,14 @@ export class CreateDraftScoreDto {
   @ValidateNested({ each: true })
   @Type(() => RubricItemDto)
   rubricData!: RubricItemDto[];
+
+  @ApiPropertyOptional({
+    description: 'Questions for the student (GVPB role)',
+    type: [String],
+    example: ['How did you implement feature X?', 'Explain your architecture choice'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  questions?: string[];
 }

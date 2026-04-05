@@ -16,6 +16,14 @@ interface TopicDto {
   period?: { id: string; code: string };
 }
 
+interface BulkApproveResultDto {
+  succeeded: string[];
+  failed: Record<string, string>;
+  total: number;
+  successCount: number;
+  failureCount: number;
+}
+
 function deadlineBadge(createdAt: string): { label: string; urgent: boolean } {
   const created = new Date(createdAt).getTime();
   const deadline = created + 3 * 24 * 60 * 60 * 1000; // 3 days
@@ -31,6 +39,7 @@ export default function GVHDPendingPage() {
   const [topics, setTopics] = useState<TopicDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isActing, setIsActing] = useState<string | null>(null);
+  const [isBulkApproving, setIsBulkApproving] = useState(false);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -100,10 +109,49 @@ export default function GVHDPendingPage() {
 
   const handleBulkApprove = async () => {
     const ids = Array.from(selectedIds);
-    for (const id of ids) {
-      await handleApprove(id);
+    if (!ids.length) {
+      return;
     }
-    setSelectedIds(new Set());
+
+    setIsBulkApproving(true);
+    setError(null);
+
+    try {
+      const response = await api.post<ApiResponse<BulkApproveResultDto>>(
+        "/topics/bulk-approve",
+        { topicIds: ids },
+      );
+
+      const result = response.data;
+      const succeededSet = new Set(result.succeeded);
+
+      setTopics((prev) => prev.filter((topic) => !succeededSet.has(topic.id)));
+
+      const failedIds = Object.keys(result.failed ?? {});
+      setSelectedIds(new Set(failedIds));
+
+      if (result.successCount > 0) {
+        setSuccessMsg(`Đã duyệt ${result.successCount}/${result.total} đề tài.`);
+        if (result.failureCount === 0) {
+          setTimeout(() => setSuccessMsg(null), 3000);
+        }
+      }
+
+      if (result.failureCount > 0) {
+        const firstFailures = Object.entries(result.failed ?? {})
+          .slice(0, 2)
+          .map(([topicId, reason]) => `${topicId}: ${reason}`)
+          .join(" | ");
+
+        setError(
+          `Có ${result.failureCount} đề tài duyệt thất bại.${firstFailures ? ` ${firstFailures}` : ""}`,
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Duyệt hàng loạt thất bại.");
+    } finally {
+      setIsBulkApproving(false);
+    }
   };
 
   const toggleSelect = (id: string) => {
@@ -164,10 +212,11 @@ export default function GVHDPendingPage() {
         {selectedIds.size > 0 && (
           <button
             onClick={() => void handleBulkApprove()}
-            className="flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 transition-all"
+            disabled={isBulkApproving}
+            className="flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <CheckCheck className="w-4 h-4" />
-            Duyệt {selectedIds.size} đề tài
+            {isBulkApproving ? "Đang duyệt..." : `Duyệt ${selectedIds.size} đề tài`}
           </button>
         )}
       </div>
@@ -197,6 +246,7 @@ export default function GVHDPendingPage() {
           <input
             type="checkbox"
             checked={allSelected}
+            disabled={isBulkApproving}
             onChange={() => {
               if (allSelected) setSelectedIds(new Set());
               else setSelectedIds(new Set(filtered.map(t => t.id)));
@@ -226,6 +276,7 @@ export default function GVHDPendingPage() {
                     <input
                       type="checkbox"
                       checked={selectedIds.has(topic.id)}
+                      disabled={isBulkApproving}
                       onChange={() => toggleSelect(topic.id)}
                       className="w-4 h-4 rounded accent-primary cursor-pointer"
                     />
@@ -269,7 +320,7 @@ export default function GVHDPendingPage() {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       onClick={() => void handleApprove(topic.id)}
-                      disabled={acting}
+                      disabled={acting || isBulkApproving}
                       className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-xs font-semibold rounded-xl hover:bg-green-700 hover:shadow-lg hover:shadow-green-200 transition-all active:scale-95 disabled:opacity-60"
                     >
                       <Check className="w-3.5 h-3.5" />
@@ -277,7 +328,7 @@ export default function GVHDPendingPage() {
                     </button>
                     <button
                       onClick={() => { setRejectModal({ topicId: topic.id, title: topic.title }); setRejectReason(""); }}
-                      disabled={acting}
+                      disabled={acting || isBulkApproving}
                       className="flex items-center gap-1.5 px-4 py-2 bg-surface-container-low border border-outline-variant/30 text-on-surface-variant text-xs font-semibold rounded-xl hover:bg-error-container/20 hover:text-error hover:border-error/30 transition-all active:scale-95 disabled:opacity-60"
                     >
                       <X className="w-3.5 h-3.5" />

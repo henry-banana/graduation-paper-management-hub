@@ -509,7 +509,7 @@ export class SubmissionsService {
     topic: TopicRecord,
     fileType: FileType,
   ): Promise<RevisionRoundRecord> {
-    if (fileType !== 'REPORT') {
+    if (fileType !== 'REVISION') {
       return this.createPseudoRound(topic.submitStartAt, topic.submitEndAt, 1, topic.id, 'SYSTEM');
     }
 
@@ -725,8 +725,13 @@ export class SubmissionsService {
       return;
     }
 
-    // INTERNSHIP_CONFIRMATION: student upload for BCTT (phiếu xác nhận thực tập)
     if (fileType === 'INTERNSHIP_CONFIRMATION') {
+      if (topic.type !== 'BCTT') {
+        throw new ConflictException(
+          'INTERNSHIP_CONFIRMATION submissions are only supported for BCTT topics',
+        );
+      }
+
       if (user.role !== 'STUDENT' || topic.studentUserId !== user.userId) {
         throw new ForbiddenException(
           'Only the topic owner student can upload INTERNSHIP_CONFIRMATION files',
@@ -736,15 +741,35 @@ export class SubmissionsService {
       return;
     }
 
+    if (fileType === 'REVISION') {
+      if (topic.type !== 'KLTN') {
+        throw new ConflictException(
+          'REVISION submissions are only supported for KLTN topics',
+        );
+      }
+
+      if (user.role !== 'STUDENT' || topic.studentUserId !== user.userId) {
+        throw new ForbiddenException(
+          'Only the topic owner student can upload REVISION files',
+        );
+      }
+
+      return;
+    }
+
+    if (fileType !== 'TURNITIN') {
+      throw new ConflictException(`Unsupported submission file type: ${fileType}`);
+    }
+
     if (topic.type !== 'KLTN') {
       throw new ConflictException(
-        `${fileType} submissions are only supported for KLTN topics`,
+        'TURNITIN submissions are only supported for KLTN topics',
       );
     }
 
     if (user.role !== 'LECTURER' || topic.supervisorUserId !== user.userId) {
       throw new ForbiddenException(
-        `Only topic supervisor can upload ${fileType} files`,
+        'Only topic supervisor can upload TURNITIN files',
       );
     }
 
@@ -788,8 +813,13 @@ export class SubmissionsService {
       return;
     }
 
-    // INTERNSHIP_CONFIRMATION: allowed when topic is IN_PROGRESS (both BCTT and KLTN)
     if (fileType === 'INTERNSHIP_CONFIRMATION') {
+      if (topic.type !== 'BCTT') {
+        throw new ConflictException(
+          `Cannot upload INTERNSHIP_CONFIRMATION for topic type: ${topic.type}`,
+        );
+      }
+
       if (topic.state !== 'IN_PROGRESS') {
         throw new ConflictException(
           `Cannot upload INTERNSHIP_CONFIRMATION in topic state: ${topic.state}`,
@@ -811,7 +841,7 @@ export class SubmissionsService {
       return;
     }
 
-    const allowedRevisionStates = ['IN_PROGRESS', 'PENDING_CONFIRM', 'DEFENSE'];
+    const allowedRevisionStates = ['SCORING', 'COMPLETED'];
     if (!allowedRevisionStates.includes(topic.state)) {
       throw new ConflictException(
         `Cannot upload REVISION in topic state: ${topic.state}`,

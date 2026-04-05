@@ -33,9 +33,10 @@ export const TOPIC_DOMAIN_OPTIONS = [
 ];
 
 export const FILE_TYPE_LABELS: Record<string, string> = {
-  REPORT:   'Báo cáo',
-  TURNITIN: 'Kiểm tra đạo văn',
-  REVISION: 'Bản chỉnh sửa',
+  REPORT:                  'Báo cáo',
+  TURNITIN:                'Kiểm tra đạo văn',
+  REVISION:                'Bản chỉnh sửa',
+  INTERNSHIP_CONFIRMATION: 'Phiếu xác nhận thực tập',
 };
 
 export const PERIOD_STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -53,7 +54,6 @@ export const KLTN_ELIGIBILITY_REASONS: Record<string, string> = {
   OK:                    'Đủ điều kiện đăng ký KLTN',
   BCTT_INCOMPLETE:       'Chưa hoàn thành Báo cáo thực tập',
   BCTT_SCORE_TOO_LOW:    'Điểm BCTT phải lớn hơn 5.0',
-  INSUFFICIENT_CREDITS:  'Chưa đủ tín chỉ tích luỹ',
 };
 
 // Smart deadline display helper

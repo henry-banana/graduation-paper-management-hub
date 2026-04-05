@@ -42,6 +42,10 @@ function CouncilScoringContent() {
   const [comments, setComments] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  
+  // TK_HD council comments
+  const [councilComments, setCouncilComments] = useState("");
+  const [isSavingCouncilComments, setIsSavingCouncilComments] = useState(false);
 
   const totalScore = useMemo(() => RUBRIC_COUNCIL.reduce((s, c) => s + (scores[c.id] ?? 0), 0), [scores]);
   const maxScore = RUBRIC_COUNCIL.reduce((s, c) => s + c.max, 0);
@@ -88,6 +92,22 @@ function CouncilScoringContent() {
     })();
   }, [selectedId]);
 
+  // Load council comments for TK_HD
+  useEffect(() => {
+    if (!selectedId || !selectedTopic || selectedTopic.councilRole !== "TK_HD") {
+      setCouncilComments("");
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await api.get<ApiResponse<{ councilComments: string | null }>>(`/topics/${selectedId}/scores/council-comments`);
+        setCouncilComments(res.data?.councilComments ?? "");
+      } catch {
+        setCouncilComments("");
+      }
+    })();
+  }, [selectedId, selectedTopic]);
+
   const handleSaveDraft = async () => {
     if (!selectedId) return;
     setIsSaving(true);
@@ -102,6 +122,23 @@ function CouncilScoringContent() {
       setError(e instanceof Error ? e.message : "Lưu nháp thất bại.");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveCouncilComments = async () => {
+    if (!selectedId) return;
+    setIsSavingCouncilComments(true);
+    setError(null);
+    try {
+      await api.patch<ApiResponse<unknown>>(`/topics/${selectedId}/scores/council-comments`, {
+        councilComments,
+      });
+      setSuccess("Đã lưu góp ý hội đồng.");
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lưu góp ý thất bại.");
+    } finally {
+      setIsSavingCouncilComments(false);
     }
   };
 
@@ -251,6 +288,37 @@ function CouncilScoringContent() {
                 className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-60"
               />
             </div>
+
+            {/* TK_HD Council Comments - Chỉ hiển thị cho Thư ký */}
+            {selectedTopic?.councilRole === "TK_HD" && (
+              <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-2xl border border-purple-200/50 p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-700">Thư ký HĐ</span>
+                  <h4 className="text-sm font-semibold text-purple-900">Góp ý bổ sung của Hội đồng</h4>
+                </div>
+                <p className="text-xs text-purple-600 mb-3">
+                  Nhập các góp ý tổng hợp từ phiên bảo vệ để đưa vào Biên bản hội đồng. 
+                  Thông tin này sẽ hiển thị trong biên bản cùng với câu hỏi của GVPB.
+                </p>
+                <textarea 
+                  rows={5} 
+                  value={councilComments}
+                  onChange={e => setCouncilComments(e.target.value)}
+                  placeholder="VD: Hội đồng đề nghị SV bổ sung phần đánh giá hiệu năng, cập nhật tài liệu tham khảo mới hơn..."
+                  className="w-full px-4 py-3 bg-white rounded-xl border border-purple-200 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 resize-none"
+                />
+                <div className="flex justify-end mt-3">
+                  <button
+                    onClick={() => void handleSaveCouncilComments()}
+                    disabled={isSavingCouncilComments}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-colors disabled:opacity-60"
+                  >
+                    <Save className="w-4 h-4" />
+                    {isSavingCouncilComments ? "Đang lưu..." : "Lưu góp ý HĐ"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Score panel */}

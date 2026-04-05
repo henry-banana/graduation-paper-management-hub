@@ -35,8 +35,8 @@ export class UserResponseDto {
   @ApiPropertyOptional({ example: false })
   canRegisterKltn?: boolean;
 
-  @ApiPropertyOptional({ example: 'INSUFFICIENT_CREDITS' })
-  kltnEligibilityReason?: 'OK' | 'BCTT_INCOMPLETE' | 'BCTT_SCORE_TOO_LOW' | 'INSUFFICIENT_CREDITS';
+  @ApiPropertyOptional({ example: 'BCTT_SCORE_TOO_LOW' })
+  kltnEligibilityReason?: 'OK' | 'BCTT_INCOMPLETE' | 'BCTT_SCORE_TOO_LOW';
 
   @ApiPropertyOptional({ example: 10 })
   totalQuota?: number;

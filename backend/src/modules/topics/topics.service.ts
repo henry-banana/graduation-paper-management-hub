@@ -17,6 +17,7 @@ import {
   CreateRevisionRoundDto,
   RevisionRoundResponseDto,
   CloseRevisionRoundDto,
+  BulkApproveResultDto,
 } from './dto';
 import {
   TopicType,
@@ -446,7 +447,8 @@ export class TopicsService {
           'KLTN eligibility requires completed BCTT score greater than 5',
         );
       }
-
+      
+      // Note: earnedCredits/requiredCredits check đã bỏ theo yêu cầu mới
     }
 
     const now = new Date().toISOString();
@@ -638,8 +640,12 @@ export class TopicsService {
         currentUser,
       );
 
-      if (!authContext.isSupervisor) {
-        throw new ForbiddenException('Only the supervisor can approve this topic');
+      // Check if user is the assigned supervisor OR TBM (admin override)
+      const isAssignedSupervisor = topic.supervisorUserId === currentUser.userId;
+      if (!isAssignedSupervisor && !authContext.isTbm) {
+        throw new ForbiddenException(
+          'Only the assigned supervisor or TBM can approve this topic',
+        );
       }
 
       if (topic.state !== 'PENDING_GV') {
@@ -680,6 +686,39 @@ export class TopicsService {
     });
   }
 
+  /**
+   * Bulk approve multiple topics
+   * Each topic is approved independently with error handling
+   */
+  async bulkApprove(
+    topicIds: string[],
+    note: string | undefined,
+    currentUser: AuthUser,
+  ): Promise<BulkApproveResultDto> {
+    const succeeded: string[] = [];
+    const failed: Record<string, string> = {};
+
+    // Process each topic independently
+    for (const topicId of topicIds) {
+      try {
+        await this.approve(topicId, note, currentUser);
+        succeeded.push(topicId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        failed[topicId] = message;
+        this.logger.warn(`Bulk approve failed for topic ${topicId}: ${message}`);
+      }
+    }
+
+    return {
+      succeeded,
+      failed,
+      total: topicIds.length,
+      successCount: succeeded.length,
+      failureCount: Object.keys(failed).length,
+    };
+  }
+
   async reject(
     id: string,
     reason: string | undefined,
@@ -709,14 +748,17 @@ export class TopicsService {
         currentUser,
       );
 
+      // Check if user is the assigned supervisor for early-phase rejection
+      const isAssignedSupervisor = topic.supervisorUserId === currentUser.userId;
+
       if (topic.state === 'PENDING_GV') {
         if (authContext.isTbm) {
           throw new ForbiddenException(
             'TBM cannot force reject/approve/cancel in early phase',
           );
         }
-        if (!authContext.isSupervisor) {
-          throw new ForbiddenException('Only the supervisor can reject this topic');
+        if (!isAssignedSupervisor) {
+          throw new ForbiddenException('Only the assigned supervisor can reject this topic');
         }
         topic.state = 'DRAFT';
       } else if (topic.state === 'IN_PROGRESS' && topic.type === 'KLTN') {
@@ -725,8 +767,8 @@ export class TopicsService {
             'TBM cannot force reject/approve/cancel in early phase',
           );
         }
-        if (!authContext.isSupervisor) {
-          throw new ForbiddenException('Only the supervisor can reject this topic');
+        if (!isAssignedSupervisor) {
+          throw new ForbiddenException('Only the assigned supervisor can reject this topic');
         }
         // Canonical early-phase reject branch: remain IN_PROGRESS and require revisions.
         topic.state = 'IN_PROGRESS';
@@ -1248,6 +1290,13 @@ export class TopicsService {
       reason: round.reason,
       createdAt: round.createdAt,
       updatedAt: round.updatedAt,
+      // Approval fields
+      gvhdApprovalStatus: round.gvhdApprovalStatus,
+      gvhdApprovedAt: round.gvhdApprovedAt,
+      gvhdComments: round.gvhdComments,
+      ctHdApprovalStatus: round.ctHdApprovalStatus,
+      ctHdApprovedAt: round.ctHdApprovedAt,
+      ctHdComments: round.ctHdComments,
     };
   }
 
@@ -1590,5 +1639,313 @@ export class TopicsService {
     }
 
     return datePart;
+  }
+
+  /**
+   * GVHD approves revision submission
+   */
+  async approveRevisionByGvhd(
+    topicId: string,
+    roundId: string,
+    comments: string | undefined,
+    currentUser: AuthUser,
+  ): Promise<{ roundId: string; role: 'GVHD'; decision: 'APPROVED'; approvedAt: string; comments?: string }> {
+    if (currentUser.role !== 'LECTURER') {
+      throw new ForbiddenException('Only lecturers can approve revisions');
+    }
+
+    const topic = await this.topicsRepository.findById(topicId);
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    // Check if user is GVHD for this topic
+    const assignmentRoles = await this.getActiveAssignmentRoles(topicId, currentUser.userId);
+    if (!assignmentRoles.has('GVHD')) {
+      throw new ForbiddenException('Only the assigned supervisor (GVHD) can approve revisions');
+    }
+
+    const round = await this.revisionRoundsRepository.findById(roundId);
+    if (!round || round.topicId !== topicId) {
+      throw new NotFoundException('Revision round not found');
+    }
+
+    if (round.gvhdApprovalStatus === 'APPROVED') {
+      throw new ConflictException('GVHD already approved this revision');
+    }
+
+    const now = new Date().toISOString();
+    round.gvhdApprovalStatus = 'APPROVED';
+    round.gvhdApprovedAt = now;
+    round.gvhdApprovedBy = currentUser.userId;
+    round.gvhdComments = comments?.trim() || undefined;
+    round.updatedAt = now;
+
+    await this.revisionRoundsRepository.update(round.id, round);
+
+    await this.auditIfAvailable({
+      action: 'REVISION_ROUND_CLOSED', // Reuse for audit
+      actorId: currentUser.userId,
+      actorRole: currentUser.role,
+      topicId,
+      detail: {
+        revisionRoundId: round.id,
+        approvalRole: 'GVHD',
+        decision: 'APPROVED',
+      },
+    });
+
+    return {
+      roundId: round.id,
+      role: 'GVHD',
+      decision: 'APPROVED',
+      approvedAt: now,
+      comments: round.gvhdComments,
+    };
+  }
+
+  /**
+   * CT_HD approves revision submission (after GVHD approved)
+   */
+  async approveRevisionByCtHd(
+    topicId: string,
+    roundId: string,
+    comments: string | undefined,
+    currentUser: AuthUser,
+  ): Promise<{ roundId: string; role: 'CT_HD'; decision: 'APPROVED'; approvedAt: string; comments?: string }> {
+    if (currentUser.role !== 'LECTURER') {
+      throw new ForbiddenException('Only lecturers can approve revisions');
+    }
+
+    const topic = await this.topicsRepository.findById(topicId);
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    // Check if user is CT_HD for this topic
+    const assignmentRoles = await this.getActiveAssignmentRoles(topicId, currentUser.userId);
+    if (!assignmentRoles.has('CT_HD')) {
+      throw new ForbiddenException('Only the council chairman (CT_HD) can approve revisions');
+    }
+
+    const round = await this.revisionRoundsRepository.findById(roundId);
+    if (!round || round.topicId !== topicId) {
+      throw new NotFoundException('Revision round not found');
+    }
+
+    // CT_HD can only approve AFTER GVHD approved
+    if (round.gvhdApprovalStatus !== 'APPROVED') {
+      throw new BadRequestException('GVHD must approve first before CT_HD can approve');
+    }
+
+    if (round.ctHdApprovalStatus === 'APPROVED') {
+      throw new ConflictException('CT_HD already approved this revision');
+    }
+
+    const now = new Date().toISOString();
+    round.ctHdApprovalStatus = 'APPROVED';
+    round.ctHdApprovedAt = now;
+    round.ctHdApprovedBy = currentUser.userId;
+    round.ctHdComments = comments?.trim() || undefined;
+    round.updatedAt = now;
+    round.status = 'CLOSED'; // Close round when fully approved
+
+    await this.revisionRoundsRepository.update(round.id, round);
+
+    // Notify student
+    await this.notifyIfAvailable({
+      receiverUserId: topic.studentUserId,
+      type: 'REVISION_ROUND_CLOSED',
+      topicId,
+      context: {
+        topicTitle: topic.title,
+        roundNumber: String(round.roundNumber),
+      },
+    });
+
+    await this.auditIfAvailable({
+      action: 'REVISION_ROUND_CLOSED',
+      actorId: currentUser.userId,
+      actorRole: currentUser.role,
+      topicId,
+      detail: {
+        revisionRoundId: round.id,
+        approvalRole: 'CT_HD',
+        decision: 'APPROVED',
+        fullyApproved: true,
+      },
+    });
+
+    return {
+      roundId: round.id,
+      role: 'CT_HD',
+      decision: 'APPROVED',
+      approvedAt: now,
+      comments: round.ctHdComments,
+    };
+  }
+
+  /**
+   * GVHD or CT_HD requests changes (rejection)
+   */
+  async rejectRevision(
+    topicId: string,
+    roundId: string,
+    reason: string,
+    approverRole: 'GVHD' | 'CT_HD',
+    currentUser: AuthUser,
+  ): Promise<{ roundId: string; role: 'GVHD' | 'CT_HD'; decision: 'REJECTED'; rejectedAt: string; reason: string }> {
+    if (currentUser.role !== 'LECTURER') {
+      throw new ForbiddenException('Only lecturers can reject revisions');
+    }
+
+    const topic = await this.topicsRepository.findById(topicId);
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    // Check if user has the appropriate role
+    const assignmentRoles = await this.getActiveAssignmentRoles(topicId, currentUser.userId);
+    if (approverRole === 'GVHD' && !assignmentRoles.has('GVHD')) {
+      throw new ForbiddenException('Only the assigned supervisor (GVHD) can reject as GVHD');
+    }
+    if (approverRole === 'CT_HD' && !assignmentRoles.has('CT_HD')) {
+      throw new ForbiddenException('Only the council chairman (CT_HD) can reject as CT_HD');
+    }
+
+    const round = await this.revisionRoundsRepository.findById(roundId);
+    if (!round || round.topicId !== topicId) {
+      throw new NotFoundException('Revision round not found');
+    }
+
+    const now = new Date().toISOString();
+
+    if (approverRole === 'GVHD') {
+      round.gvhdApprovalStatus = 'REJECTED';
+      round.gvhdApprovedAt = now;
+      round.gvhdApprovedBy = currentUser.userId;
+      round.gvhdComments = reason.trim();
+    } else {
+      round.ctHdApprovalStatus = 'REJECTED';
+      round.ctHdApprovedAt = now;
+      round.ctHdApprovedBy = currentUser.userId;
+      round.ctHdComments = reason.trim();
+    }
+    round.updatedAt = now;
+
+    await this.revisionRoundsRepository.update(round.id, round);
+
+    // Notify student about rejection
+    await this.notifyIfAvailable({
+      receiverUserId: topic.studentUserId,
+      type: 'REVISION_ROUND_CLOSED',
+      topicId,
+      context: {
+        topicTitle: topic.title,
+        roundNumber: String(round.roundNumber),
+      },
+    });
+
+    await this.auditIfAvailable({
+      action: 'REVISION_ROUND_CLOSED',
+      actorId: currentUser.userId,
+      actorRole: currentUser.role,
+      topicId,
+      detail: {
+        revisionRoundId: round.id,
+        approvalRole: approverRole,
+        decision: 'REJECTED',
+        reason: reason.trim(),
+      },
+    });
+
+    return {
+      roundId: round.id,
+      role: approverRole,
+      decision: 'REJECTED',
+      rejectedAt: now,
+      reason: reason.trim(),
+    };
+  }
+
+  /**
+   * Get revision status for TBM dashboard
+   */
+  async getRevisionStatus(
+    periodId?: string,
+    currentUser?: AuthUser,
+  ): Promise<Array<{
+    topicId: string;
+    topicTitle: string;
+    studentName: string;
+    supervisorName: string;
+    roundNumber: number;
+    roundStatus: string;
+    gvhdApprovalStatus?: string;
+    gvhdApprovedAt?: string;
+    ctHdApprovalStatus?: string;
+    ctHdApprovedAt?: string;
+  }>> {
+    if (currentUser?.role !== 'TBM') {
+      throw new ForbiddenException('Only TBM can view revision status');
+    }
+
+    const allRounds = await this.revisionRoundsRepository.findAll();
+    const topics = await this.topicsRepository.findAll();
+    const users = await this.usersRepository.findAll();
+
+    // Filter by period if specified
+    let filteredTopics = topics;
+    if (periodId) {
+      filteredTopics = topics.filter(t => t.periodId === periodId);
+    }
+
+    const topicMap = new Map(filteredTopics.map(t => [t.id, t]));
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    // Get latest round for each topic
+    const topicRounds = new Map<string, typeof allRounds[0]>();
+    for (const round of allRounds) {
+      const existing = topicRounds.get(round.topicId);
+      if (!existing || round.roundNumber > existing.roundNumber) {
+        topicRounds.set(round.topicId, round);
+      }
+    }
+
+    const result: Array<{
+      topicId: string;
+      topicTitle: string;
+      studentName: string;
+      supervisorName: string;
+      roundNumber: number;
+      roundStatus: string;
+      gvhdApprovalStatus?: string;
+      gvhdApprovedAt?: string;
+      ctHdApprovalStatus?: string;
+      ctHdApprovedAt?: string;
+    }> = [];
+
+    for (const [topicId, round] of topicRounds) {
+      const topic = topicMap.get(topicId);
+      if (!topic) continue;
+
+      const student = userMap.get(topic.studentUserId);
+      const supervisor = userMap.get(topic.supervisorUserId);
+
+      result.push({
+        topicId,
+        topicTitle: topic.title,
+        studentName: student?.name ?? topic.studentUserId,
+        supervisorName: supervisor?.name ?? topic.supervisorUserId,
+        roundNumber: round.roundNumber,
+        roundStatus: round.status,
+        gvhdApprovalStatus: round.gvhdApprovalStatus,
+        gvhdApprovedAt: round.gvhdApprovedAt,
+        ctHdApprovalStatus: round.ctHdApprovalStatus,
+        ctHdApprovedAt: round.ctHdApprovedAt,
+      });
+    }
+
+    return result;
   }
 }

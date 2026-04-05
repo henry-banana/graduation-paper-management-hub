@@ -9,7 +9,7 @@ export class CreateSubmissionDto {
     example: 'REPORT',
   })
   @IsIn([...SUBMISSION_FILE_TYPES], {
-    message: 'fileType must be REPORT, TURNITIN, or REVISION',
+    message: 'fileType must be one of: REPORT, TURNITIN, REVISION, INTERNSHIP_CONFIRMATION',
   })
   @IsNotEmpty()
   fileType!: FileType;

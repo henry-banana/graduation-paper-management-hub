@@ -45,6 +45,11 @@ import {
   CreateRevisionRoundDto,
   RevisionRoundResponseDto,
   CloseRevisionRoundDto,
+  BulkApproveTopicsDto,
+  BulkApproveResultDto,
+  ApproveRevisionDto,
+  RejectRevisionDto,
+  RevisionApprovalResponseDto,
 } from './dto';
 
 @ApiTags('Topics')
@@ -182,6 +187,34 @@ export class TopicsController {
   ) {
     const result = await this.topicsService.approve(
       topicId,
+      dto.note,
+      currentUser,
+    );
+    return {
+      data: result,
+      meta: { requestId: `req_${Date.now()}` },
+    };
+  }
+
+  @Post('bulk-approve')
+  @Roles('LECTURER', 'TBM')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Bulk approve topics (GVHD or TBM)', 
+    description: 'Approve multiple topics at once. Returns success/failure status for each topic.' 
+  })
+  @ApiOkResponse({ 
+    description: 'Bulk approval results',
+    type: BulkApproveResultDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Unauthorized' })
+  @ApiForbiddenResponse({ description: 'Forbidden' })
+  async bulkApprove(
+    @Body() dto: BulkApproveTopicsDto,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    const result = await this.topicsService.bulkApprove(
+      dto.topicIds,
       dto.note,
       currentUser,
     );
@@ -333,6 +366,126 @@ export class TopicsController {
       dto,
       currentUser,
     );
+    return {
+      data: result,
+      meta: { requestId: `req_${Date.now()}` },
+    };
+  }
+
+  @Post(':topicId/revisions/rounds/:roundId/approve-gvhd')
+  @Roles('LECTURER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'GVHD approves revision submission' })
+  @ApiOkResponse({ type: RevisionApprovalResponseDto })
+  @ApiNotFoundResponse({ description: 'Topic or revision round not found' })
+  @ApiForbiddenResponse({ description: 'Only assigned GVHD can approve' })
+  @ApiConflictResponse({ description: 'Already approved' })
+  async approveRevisionByGvhd(
+    @Param('topicId') topicId: string,
+    @Param('roundId') roundId: string,
+    @Body() dto: ApproveRevisionDto,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    const result = await this.topicsService.approveRevisionByGvhd(
+      topicId,
+      roundId,
+      dto.comments,
+      currentUser,
+    );
+    return {
+      data: result,
+      meta: { requestId: `req_${Date.now()}` },
+    };
+  }
+
+  @Post(':topicId/revisions/rounds/:roundId/approve-cthd')
+  @Roles('LECTURER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'CT_HD approves revision submission (after GVHD approved)' })
+  @ApiOkResponse({ type: RevisionApprovalResponseDto })
+  @ApiNotFoundResponse({ description: 'Topic or revision round not found' })
+  @ApiForbiddenResponse({ description: 'Only assigned CT_HD can approve' })
+  @ApiBadRequestResponse({ description: 'GVHD must approve first' })
+  @ApiConflictResponse({ description: 'Already approved' })
+  async approveRevisionByCtHd(
+    @Param('topicId') topicId: string,
+    @Param('roundId') roundId: string,
+    @Body() dto: ApproveRevisionDto,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    const result = await this.topicsService.approveRevisionByCtHd(
+      topicId,
+      roundId,
+      dto.comments,
+      currentUser,
+    );
+    return {
+      data: result,
+      meta: { requestId: `req_${Date.now()}` },
+    };
+  }
+
+  @Post(':topicId/revisions/rounds/:roundId/reject-gvhd')
+  @Roles('LECTURER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'GVHD requests changes (rejects revision)' })
+  @ApiOkResponse({ description: 'Revision rejected by GVHD' })
+  @ApiNotFoundResponse({ description: 'Topic or revision round not found' })
+  @ApiForbiddenResponse({ description: 'Only assigned GVHD can reject' })
+  async rejectRevisionByGvhd(
+    @Param('topicId') topicId: string,
+    @Param('roundId') roundId: string,
+    @Body() dto: RejectRevisionDto,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    const result = await this.topicsService.rejectRevision(
+      topicId,
+      roundId,
+      dto.reason,
+      'GVHD',
+      currentUser,
+    );
+    return {
+      data: result,
+      meta: { requestId: `req_${Date.now()}` },
+    };
+  }
+
+  @Post(':topicId/revisions/rounds/:roundId/reject-cthd')
+  @Roles('LECTURER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'CT_HD requests changes (rejects revision)' })
+  @ApiOkResponse({ description: 'Revision rejected by CT_HD' })
+  @ApiNotFoundResponse({ description: 'Topic or revision round not found' })
+  @ApiForbiddenResponse({ description: 'Only assigned CT_HD can reject' })
+  async rejectRevisionByCtHd(
+    @Param('topicId') topicId: string,
+    @Param('roundId') roundId: string,
+    @Body() dto: RejectRevisionDto,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    const result = await this.topicsService.rejectRevision(
+      topicId,
+      roundId,
+      dto.reason,
+      'CT_HD',
+      currentUser,
+    );
+    return {
+      data: result,
+      meta: { requestId: `req_${Date.now()}` },
+    };
+  }
+
+  @Get('revision-status')
+  @Roles('TBM')
+  @ApiOperation({ summary: 'Get revision approval status for all topics (TBM dashboard)' })
+  @ApiOkResponse({ description: 'Revision status list' })
+  async getRevisionStatus(
+    @Query('periodId') periodId: string | undefined,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    const result = await this.topicsService.getRevisionStatus(periodId, currentUser);
     return {
       data: result,
       meta: { requestId: `req_${Date.now()}` },

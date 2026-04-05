@@ -11,6 +11,7 @@ import {
   HeadingLevel,
   Packer,
   ShadingType,
+  TableLayoutType,
   VerticalAlign,
 } from 'docx';
 
@@ -37,6 +38,11 @@ export interface BcttRubricData {
   comments?: string;
   evaluationDate?: string;
 }
+
+const FULL_TABLE_WIDTH_DXA = 9000;
+const HALF_TABLE_WIDTH_DXA = 4500;
+const INFO_COL_WIDTHS = [1500, 3000, 1500, 3000] as const;
+const SCORE_COL_WIDTHS = [700, 5300, 1500, 1500] as const;
 
 function noBorder() {
   return {
@@ -71,7 +77,7 @@ function headerCell(text: string, width?: number): TableCell {
   });
 }
 
-function dataCell(text: string, bold = false): TableCell {
+function dataCell(text: string, bold = false, width?: number): TableCell {
   return new TableCell({
     children: [
       new Paragraph({
@@ -81,10 +87,11 @@ function dataCell(text: string, bold = false): TableCell {
     ],
     borders: thinBorder(),
     verticalAlign: VerticalAlign.CENTER,
+    ...(width ? { width: { size: width, type: WidthType.DXA } } : {}),
   });
 }
 
-function leftCell(text: string, bold = false): TableCell {
+function leftCell(text: string, bold = false, width?: number): TableCell {
   return new TableCell({
     children: [
       new Paragraph({
@@ -94,6 +101,7 @@ function leftCell(text: string, bold = false): TableCell {
     ],
     borders: thinBorder(),
     verticalAlign: VerticalAlign.CENTER,
+    ...(width ? { width: { size: width, type: WidthType.DXA } } : {}),
   });
 }
 
@@ -131,59 +139,63 @@ export async function generateBcttRubricDocx(
 
           // Student info table
           new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
+            width: { size: FULL_TABLE_WIDTH_DXA, type: WidthType.DXA },
+            layout: TableLayoutType.FIXED,
+            columnWidths: [...INFO_COL_WIDTHS],
             rows: [
               new TableRow({
                 children: [
-                  headerCell('THÔNG TIN SINH VIÊN', 4000),
-                  headerCell('', 4000),
-                  headerCell('THÔNG TIN ĐỀ TÀI', 4000),
-                  headerCell('', 4000),
+                  headerCell('THÔNG TIN SINH VIÊN', INFO_COL_WIDTHS[0]),
+                  headerCell('', INFO_COL_WIDTHS[1]),
+                  headerCell('THÔNG TIN ĐỀ TÀI', INFO_COL_WIDTHS[2]),
+                  headerCell('', INFO_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  leftCell('Họ và tên SV:', true),
-                  leftCell(data.studentName),
-                  leftCell('Tên đề tài:', true),
-                  leftCell(data.topicTitle),
+                  leftCell('Họ và tên SV:', true, INFO_COL_WIDTHS[0]),
+                  leftCell(data.studentName, false, INFO_COL_WIDTHS[1]),
+                  leftCell('Tên đề tài:', true, INFO_COL_WIDTHS[2]),
+                  leftCell(data.topicTitle, false, INFO_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  leftCell('MSSV:', true),
-                  leftCell(data.studentId),
-                  leftCell('GVHD:', true),
-                  leftCell(data.advisorName),
+                  leftCell('MSSV:', true, INFO_COL_WIDTHS[0]),
+                  leftCell(data.studentId, false, INFO_COL_WIDTHS[1]),
+                  leftCell('GVHD:', true, INFO_COL_WIDTHS[2]),
+                  leftCell(data.advisorName, false, INFO_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  leftCell('Lớp:', true),
-                  leftCell(data.studentClass),
-                  leftCell('Ngành:', true),
-                  leftCell(data.major),
+                  leftCell('Lớp:', true, INFO_COL_WIDTHS[0]),
+                  leftCell(data.studentClass, false, INFO_COL_WIDTHS[1]),
+                  leftCell('Ngành:', true, INFO_COL_WIDTHS[2]),
+                  leftCell(data.major, false, INFO_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  leftCell('Công ty:', true),
-                  leftCell(data.company),
-                  leftCell('Khóa:', true),
-                  leftCell(data.course),
+                  leftCell('Công ty:', true, INFO_COL_WIDTHS[0]),
+                  leftCell(data.company, false, INFO_COL_WIDTHS[1]),
+                  leftCell('Khóa:', true, INFO_COL_WIDTHS[2]),
+                  leftCell(data.course, false, INFO_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  leftCell('Đợt đánh giá:', true),
-                  leftCell(data.period),
-                  leftCell('Ngày chấm:', true),
+                  leftCell('Đợt đánh giá:', true, INFO_COL_WIDTHS[0]),
+                  leftCell(data.period, false, INFO_COL_WIDTHS[1]),
+                  leftCell('Ngày chấm:', true, INFO_COL_WIDTHS[2]),
                   leftCell(
                     data.evaluationDate
                       ? new Date(data.evaluationDate).toLocaleDateString(
                           'vi-VN',
                         )
                       : '',
+                    false,
+                    INFO_COL_WIDTHS[3],
                   ),
                 ],
               }),
@@ -194,62 +206,70 @@ export async function generateBcttRubricDocx(
 
           // Score table
           new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
+            width: { size: FULL_TABLE_WIDTH_DXA, type: WidthType.DXA },
+            layout: TableLayoutType.FIXED,
+            columnWidths: [...SCORE_COL_WIDTHS],
             rows: [
               // Header
               new TableRow({
                 children: [
-                  headerCell('STT', 600),
-                  headerCell('TIÊU CHÍ ĐÁNH GIÁ', 5000),
-                  headerCell('ĐIỂM TỐI ĐA', 1500),
-                  headerCell('ĐIỂM CHẤM', 1500),
+                  headerCell('STT', SCORE_COL_WIDTHS[0]),
+                  headerCell('TIÊU CHÍ ĐÁNH GIÁ', SCORE_COL_WIDTHS[1]),
+                  headerCell('ĐIỂM TỐI ĐA', SCORE_COL_WIDTHS[2]),
+                  headerCell('ĐIỂM CHẤM', SCORE_COL_WIDTHS[3]),
                 ],
               }),
               // Criteria rows
               new TableRow({
                 children: [
-                  dataCell('1'),
-                  leftCell('Thái độ, tinh thần (chuyên cần, trách nhiệm)'),
-                  dataCell('2'),
-                  dataCell(String(data.scores.thaido)),
+                  dataCell('1', false, SCORE_COL_WIDTHS[0]),
+                  leftCell('Thái độ, tinh thần (chuyên cần, trách nhiệm)', false, SCORE_COL_WIDTHS[1]),
+                  dataCell('2', false, SCORE_COL_WIDTHS[2]),
+                  dataCell(String(data.scores.thaido), false, SCORE_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  dataCell('2'),
-                  leftCell('Hình thức báo cáo (trình bày, logic)'),
-                  dataCell('1'),
-                  dataCell(String(data.scores.hinhthuc)),
+                  dataCell('2', false, SCORE_COL_WIDTHS[0]),
+                  leftCell('Hình thức báo cáo (trình bày, logic)', false, SCORE_COL_WIDTHS[1]),
+                  dataCell('1', false, SCORE_COL_WIDTHS[2]),
+                  dataCell(String(data.scores.hinhthuc), false, SCORE_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  dataCell('3'),
+                  dataCell('3', false, SCORE_COL_WIDTHS[0]),
                   leftCell(
                     'Mở đầu / Giới thiệu công ty, vị trí thực tập, mục tiêu',
+                    false,
+                    SCORE_COL_WIDTHS[1],
                   ),
-                  dataCell('1'),
-                  dataCell(String(data.scores.modau)),
+                  dataCell('1', false, SCORE_COL_WIDTHS[2]),
+                  dataCell(String(data.scores.modau), false, SCORE_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  dataCell('4'),
+                  dataCell('4', false, SCORE_COL_WIDTHS[0]),
                   leftCell(
                     'Nội dung chính (công việc thực hiện, kiến thức áp dụng, thành quả)',
+                    false,
+                    SCORE_COL_WIDTHS[1],
                   ),
-                  dataCell('5'),
-                  dataCell(String(data.scores.noidung)),
+                  dataCell('5', false, SCORE_COL_WIDTHS[2]),
+                  dataCell(String(data.scores.noidung), false, SCORE_COL_WIDTHS[3]),
                 ],
               }),
               new TableRow({
                 children: [
-                  dataCell('5'),
+                  dataCell('5', false, SCORE_COL_WIDTHS[0]),
                   leftCell(
                     'Kết luận / Đề nghị (đánh giá bản thân, bài học, đề xuất)',
+                    false,
+                    SCORE_COL_WIDTHS[1],
                   ),
-                  dataCell('1'),
-                  dataCell(String(data.scores.ketluan)),
+                  dataCell('1', false, SCORE_COL_WIDTHS[2]),
+                  dataCell(String(data.scores.ketluan), false, SCORE_COL_WIDTHS[3]),
                 ],
               }),
               // Total row
@@ -265,10 +285,14 @@ export async function generateBcttRubricDocx(
                       }),
                     ],
                     columnSpan: 2,
+                    width: {
+                      size: SCORE_COL_WIDTHS[0] + SCORE_COL_WIDTHS[1],
+                      type: WidthType.DXA,
+                    },
                     borders: thinBorder(),
                     shading: { type: ShadingType.CLEAR, fill: 'FFF2CC' },
                   }),
-                  dataCell('10'),
+                  dataCell('10', false, SCORE_COL_WIDTHS[2]),
                   new TableCell({
                     children: [
                       new Paragraph({
@@ -283,6 +307,7 @@ export async function generateBcttRubricDocx(
                         alignment: AlignmentType.CENTER,
                       }),
                     ],
+                    width: { size: SCORE_COL_WIDTHS[3], type: WidthType.DXA },
                     borders: thinBorder(),
                     shading: { type: ShadingType.CLEAR, fill: 'FFF2CC' },
                   }),
@@ -306,6 +331,7 @@ export async function generateBcttRubricDocx(
                       }),
                     ],
                     columnSpan: 4,
+                    width: { size: FULL_TABLE_WIDTH_DXA, type: WidthType.DXA },
                     borders: thinBorder(),
                     shading: {
                       type: ShadingType.CLEAR,
@@ -321,7 +347,9 @@ export async function generateBcttRubricDocx(
 
           // Comments
           new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
+            width: { size: FULL_TABLE_WIDTH_DXA, type: WidthType.DXA },
+            layout: TableLayoutType.FIXED,
+            columnWidths: [FULL_TABLE_WIDTH_DXA],
             rows: [
               new TableRow({
                 children: [
@@ -341,6 +369,7 @@ export async function generateBcttRubricDocx(
                       new Paragraph({ text: '' }),
                       new Paragraph({ text: '' }),
                     ],
+                    width: { size: FULL_TABLE_WIDTH_DXA, type: WidthType.DXA },
                     borders: thinBorder(),
                   }),
                 ],
@@ -352,7 +381,9 @@ export async function generateBcttRubricDocx(
 
           // Signature
           new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
+            width: { size: FULL_TABLE_WIDTH_DXA, type: WidthType.DXA },
+            layout: TableLayoutType.FIXED,
+            columnWidths: [HALF_TABLE_WIDTH_DXA, HALF_TABLE_WIDTH_DXA],
             rows: [
               new TableRow({
                 children: [
@@ -363,7 +394,7 @@ export async function generateBcttRubricDocx(
                       }),
                     ],
                     borders: noBorder(),
-                    width: { size: 5000, type: WidthType.DXA },
+                    width: { size: HALF_TABLE_WIDTH_DXA, type: WidthType.DXA },
                   }),
                   new TableCell({
                     children: [
@@ -407,7 +438,7 @@ export async function generateBcttRubricDocx(
                       }),
                     ],
                     borders: noBorder(),
-                    width: { size: 5000, type: WidthType.DXA },
+                    width: { size: HALF_TABLE_WIDTH_DXA, type: WidthType.DXA },
                   }),
                 ],
               }),

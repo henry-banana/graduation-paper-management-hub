@@ -178,6 +178,7 @@ export class ScoresRepository extends SheetsBaseRepository<ScoreRecord> {
  * ScoreSummaries tab column layout (v3.2 — app-specific tab):
  * [0]=id [1]=topicId [2]=gvhdScore [3]=gvpbScore [4]=councilAvgScore
  * [5]=finalScore [6]=result [7]=confirmedByGvhd [8]=confirmedByCtHd [9]=published [10]=updatedAt
+ * [11]=councilComments (góp ý bổ sung của hội đồng - do Thư ký nhập)
  */
 @Injectable()
 export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryRecord> {
@@ -198,6 +199,7 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       confirmedByGvhd: this.bool(v[7]),
       confirmedByCtHd: this.bool(v[8]),
       published: this.bool(v[9]),
+      councilComments: this.optionalStr(v[11]),
     };
   }
 
@@ -213,7 +215,8 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       entity.confirmedByGvhd,
       entity.confirmedByCtHd,
       entity.published,
-      new Date().toISOString(), // DB-03 fix: was hardcoded '' — write real timestamp
+      new Date().toISOString(), // [10] updatedAt
+      entity.councilComments ?? '', // [11] councilComments
     ];
   }
 

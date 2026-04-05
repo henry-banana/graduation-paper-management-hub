@@ -8,7 +8,7 @@ import { FileUpload } from "@/components/ui/file-upload";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 import { formatDeadlineStatus, TOPIC_STATE_LABELS, TOPIC_TYPE_LABELS, FILE_TYPE_LABELS } from "@/lib/constants/vi-labels";
 
-type SubmissionFileType = "REPORT" | "TURNITIN" | "REVISION";
+type SubmissionFileType = "REPORT" | "TURNITIN" | "REVISION" | "INTERNSHIP_CONFIRMATION";
 
 interface TopicDto {
   id: string;
@@ -33,6 +33,14 @@ interface SubmissionDto {
   versionLabel?: string;
 }
 
+interface RevisionRoundDto {
+  id: string;
+  roundNumber: number;
+  status: "OPEN" | "CLOSED";
+  startAt: string;
+  endAt: string;
+}
+
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -53,7 +61,9 @@ function formatFileSize(value?: number): string {
 // F4C: upload guard — window time AND backend lock
 function getSubmissionWindowStatus(
   topic: TopicDto | null,
+  selectedFileType: SubmissionFileType,
   latestSubmission: SubmissionDto | null,
+  activeRevisionRound: RevisionRoundDto | null,
 ): { canUpload: boolean; reason: string; isLocked: boolean } {
   if (!topic) {
     return { canUpload: false, reason: "Vui lòng chọn đề tài trước khi nộp file.", isLocked: false };
@@ -65,6 +75,69 @@ function getSubmissionWindowStatus(
       canUpload: false,
       reason: "Bài nộp đã bị khóa. Chỉ có thể tải lại khi GVHD yêu cầu nộp lại.",
       isLocked: true,
+    };
+  }
+
+  if (selectedFileType === "REVISION") {
+    if (topic.type !== "KLTN") {
+      return {
+        canUpload: false,
+        reason: "Bản chỉnh sửa chỉ áp dụng cho đề tài KLTN.",
+        isLocked: false,
+      };
+    }
+
+    if (!["SCORING", "COMPLETED"].includes(topic.state)) {
+      return {
+        canUpload: false,
+        reason: "Chỉ được nộp bản chỉnh sửa khi đề tài ở trạng thái SCORING hoặc COMPLETED.",
+        isLocked: false,
+      };
+    }
+
+    if (!activeRevisionRound) {
+      return {
+        canUpload: false,
+        reason: "Chưa có vòng chỉnh sửa mở. Vui lòng liên hệ TBM.",
+        isLocked: false,
+      };
+    }
+
+    const startAt = new Date(activeRevisionRound.startAt).getTime();
+    const endAt = new Date(activeRevisionRound.endAt).getTime();
+    if (Number.isNaN(startAt) || Number.isNaN(endAt)) {
+      return {
+        canUpload: false,
+        reason: "Cửa sổ vòng chỉnh sửa không hợp lệ. Vui lòng liên hệ TBM.",
+        isLocked: false,
+      };
+    }
+
+    const now = Date.now();
+    if (now < startAt) {
+      return {
+        canUpload: false,
+        reason: "Chưa đến thời gian mở vòng chỉnh sửa.",
+        isLocked: false,
+      };
+    }
+
+    if (now > endAt) {
+      return {
+        canUpload: false,
+        reason: "Đã quá hạn vòng chỉnh sửa.",
+        isLocked: false,
+      };
+    }
+
+    return { canUpload: true, reason: "", isLocked: false };
+  }
+
+  if (selectedFileType === "INTERNSHIP_CONFIRMATION" && topic.type !== "BCTT") {
+    return {
+      canUpload: false,
+      reason: "Phiếu xác nhận thực tập chỉ áp dụng cho đề tài BCTT.",
+      isLocked: false,
     };
   }
 
@@ -109,7 +182,9 @@ function StudentSubmissionsContent() {
 
   const [topics, setTopics] = useState<TopicDto[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string>("");
+  const [selectedFileType, setSelectedFileType] = useState<SubmissionFileType>("REPORT");
   const [submissions, setSubmissions] = useState<SubmissionDto[]>([]);
+  const [activeRevisionRound, setActiveRevisionRound] = useState<RevisionRoundDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isReplacing, setIsReplacing] = useState<string | null>(null);
@@ -122,9 +197,58 @@ function StudentSubmissionsContent() {
     [topics, selectedTopicId],
   );
 
+  // Helper function to determine available file types based on topic type and state
+  const availableFileTypes = useMemo((): SubmissionFileType[] => {
+    if (!selectedTopic) return ["REPORT"];
+    
+    const types: SubmissionFileType[] = ["REPORT"];
+    
+    // Add INTERNSHIP_CONFIRMATION only for BCTT topics in IN_PROGRESS state
+    if (selectedTopic.type === "BCTT" && selectedTopic.state === "IN_PROGRESS") {
+      types.push("INTERNSHIP_CONFIRMATION");
+    }
+
+    if (
+      selectedTopic.type === "KLTN" &&
+      ["SCORING", "COMPLETED"].includes(selectedTopic.state)
+    ) {
+      types.push("REVISION");
+    }
+    
+    return types;
+  }, [selectedTopic]);
+
+  useEffect(() => {
+    if (!availableFileTypes.includes(selectedFileType)) {
+      setSelectedFileType(availableFileTypes[0] ?? "REPORT");
+    }
+  }, [availableFileTypes, selectedFileType]);
+
+  const latestSubmissionForSelectedType = useMemo(() => {
+    const candidates = submissions.filter(
+      (submission) => submission.fileType === selectedFileType,
+    );
+    if (!candidates.length) {
+      return null;
+    }
+
+    return candidates.sort((a, b) => {
+      if (b.version !== a.version) {
+        return b.version - a.version;
+      }
+      return new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime();
+    })[0];
+  }, [submissions, selectedFileType]);
+
   const submissionWindow = useMemo(
-    () => getSubmissionWindowStatus(selectedTopic, submissions[0] ?? null),
-    [selectedTopic, submissions],
+    () =>
+      getSubmissionWindowStatus(
+        selectedTopic,
+        selectedFileType,
+        latestSubmissionForSelectedType,
+        activeRevisionRound,
+      ),
+    [selectedTopic, selectedFileType, latestSubmissionForSelectedType, activeRevisionRound],
   );
 
   const canUpload = submissionWindow.canUpload;
@@ -160,25 +284,61 @@ function StudentSubmissionsContent() {
   useEffect(() => {
     if (!selectedTopicId) {
       setSubmissions([]);
+      setActiveRevisionRound(null);
       return;
     }
 
-    const loadSubmissions = async () => {
+    const loadSubmissionsAndRevisionRounds = async () => {
       setError(null);
 
       try {
-        const response = await api.get<ApiResponse<SubmissionDto[]>>(
-          `/topics/${selectedTopicId}/submissions`,
-        );
-        setSubmissions(response.data);
+        const [submissionsResponse, roundsResponse] = await Promise.all([
+          api.get<ApiResponse<SubmissionDto[]>>(
+            `/topics/${selectedTopicId}/submissions`,
+          ),
+          api
+            .get<ApiResponse<RevisionRoundDto[]>>(
+              `/topics/${selectedTopicId}/revisions/rounds`,
+            )
+            .catch(() => null),
+        ]);
+
+        setSubmissions(submissionsResponse.data);
+
+        const openRound = roundsResponse?.data
+          ?.filter((round) => round.status === "OPEN")
+          .sort((a, b) => b.roundNumber - a.roundNumber)[0] ?? null;
+
+        setActiveRevisionRound(openRound);
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : "Không thể tải lịch sử nộp bài.";
         setError(message);
       }
     };
 
-    void loadSubmissions();
+    void loadSubmissionsAndRevisionRounds();
   }, [selectedTopicId]);
+
+  const uploadRequirementLines = useMemo(() => {
+    const lines = [
+      "Hệ thống hiện chỉ chấp nhận file PDF.",
+      "Dung lượng tối đa mỗi file: 50MB.",
+    ];
+
+    if (selectedFileType === "INTERNSHIP_CONFIRMATION") {
+      lines.push("Phiếu xác nhận thực tập chỉ áp dụng cho đề tài BCTT trong giai đoạn thực hiện.");
+    } else if (selectedFileType === "REVISION") {
+      lines.push(
+        activeRevisionRound
+          ? `Bản chỉnh sửa nộp trong vòng chỉnh sửa V${activeRevisionRound.roundNumber}.`
+          : "Bản chỉnh sửa cần một vòng chỉnh sửa đang mở do TBM thiết lập.",
+      );
+    } else {
+      lines.push("Báo cáo nộp trong cửa sổ nộp bài của đề tài.");
+    }
+
+    return lines;
+  }, [selectedFileType, activeRevisionRound]);
 
   const handleUpload = async (file: File) => {
     if (!selectedTopicId) {
@@ -196,7 +356,7 @@ function StudentSubmissionsContent() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("fileType", "REPORT");
+      formData.append("fileType", selectedFileType);
 
       await api.postForm<ApiResponse<{ id: string; version: number }>>(
         `/topics/${selectedTopicId}/submissions`,
@@ -217,14 +377,18 @@ function StudentSubmissionsContent() {
     }
   };
 
-  const handleReplace = async (submissionId: string, file: File) => {
+  const handleReplace = async (
+    submissionId: string,
+    fileType: SubmissionFileType,
+    file: File,
+  ) => {
     setIsReplacing(submissionId);
     setError(null);
     setSuccessMessage(null);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("fileType", "REPORT");
+      formData.append("fileType", fileType);
       formData.append("replacementReason", "Nộp lại theo yêu cầu");
       await api.postForm<ApiResponse<{ id: string; version: number }>>(
         `/submissions/${submissionId}/replace`,
@@ -304,12 +468,33 @@ function StudentSubmissionsContent() {
                 </select>
               </label>
 
-              <div className="flex flex-col gap-1 text-sm text-on-surface-variant">
+              <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
                 <span className="font-semibold">Loại file</span>
-                <div className="px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface font-semibold">
-                  {FILE_TYPE_LABELS["REPORT"] || "REPORT"}
-                </div>
-              </div>
+                <select
+                  value={selectedFileType}
+                  onChange={(e) => setSelectedFileType(e.target.value as SubmissionFileType)}
+                  className="px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface font-medium cursor-pointer hover:border-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isLoading || isUploading || availableFileTypes.length === 1}
+                >
+                  {availableFileTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {FILE_TYPE_LABELS[type] || type}
+                    </option>
+                  ))}
+                </select>
+                {selectedTopic?.type === "BCTT" && selectedFileType === "INTERNSHIP_CONFIRMATION" && (
+                  <span className="text-xs text-on-surface-variant/70">
+                    Chỉ chấp nhận file PDF, tối đa 50MB
+                  </span>
+                )}
+                {selectedFileType === "REVISION" && (
+                  <span className="text-xs text-on-surface-variant/70">
+                    {activeRevisionRound
+                      ? `Vòng chỉnh sửa V${activeRevisionRound.roundNumber}: ${formatDateTime(activeRevisionRound.startAt)} - ${formatDateTime(activeRevisionRound.endAt)}`
+                      : "Chưa có vòng chỉnh sửa mở cho đề tài này"}
+                  </span>
+                )}
+              </label>
             </div>
 
             <FileUpload 
@@ -317,7 +502,13 @@ function StudentSubmissionsContent() {
               accept=".pdf"
               maxSize={50}
               requireConfirmation
-              confirmButtonText="Xác nhận nộp báo cáo"
+              confirmButtonText={
+                selectedFileType === "INTERNSHIP_CONFIRMATION" 
+                  ? "Xác nhận nộp phiếu xác nhận thực tập"
+                  : selectedFileType === "REVISION"
+                  ? "Xác nhận nộp bản chỉnh sửa"
+                  : "Xác nhận nộp báo cáo"
+              }
             />
 
             {!canUpload && selectedTopic && (
@@ -333,11 +524,7 @@ function StudentSubmissionsContent() {
               Yêu cầu file nộp
             </h4>
             <ul className="space-y-2 text-sm text-outline">
-              {[
-                "Hệ thống hiện chỉ chấp nhận file PDF.",
-                "Sinh viên chỉ được nộp loại file REPORT.",
-                "Dung lượng tối đa mỗi file: 50MB.",
-              ].map((req, i) => (
+              {uploadRequirementLines.map((req, i) => (
                 <li key={i} className="flex items-start gap-2.5">
                   <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
                   <span>{req}</span>
@@ -404,7 +591,9 @@ function StudentSubmissionsContent() {
                             disabled={isReplacing === item.id}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
-                              if (file) void handleReplace(item.id, file);
+                              if (file) {
+                                void handleReplace(item.id, item.fileType, file);
+                              }
                               e.target.value = "";
                             }}
                           />

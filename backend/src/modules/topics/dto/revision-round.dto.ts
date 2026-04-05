@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
-import type { RevisionRoundStatus } from '../../../infrastructure/google-sheets';
+import type { RevisionRoundStatus, RevisionApprovalStatus } from '../../../infrastructure/google-sheets';
 
 export class CreateRevisionRoundDto {
   @ApiProperty({
@@ -38,6 +38,29 @@ export class CloseRevisionRoundDto {
   reason?: string;
 }
 
+export class ApproveRevisionDto {
+  @ApiPropertyOptional({
+    description: 'Comments from approver',
+    example: 'Đã chỉnh sửa đầy đủ theo yêu cầu',
+    maxLength: 1000,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  comments?: string;
+}
+
+export class RejectRevisionDto {
+  @ApiProperty({
+    description: 'Reason for rejection',
+    example: 'Chưa chỉnh sửa đúng góp ý tại mục 3.2',
+  })
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(1000)
+  reason!: string;
+}
+
 export class RevisionRoundResponseDto {
   @ApiProperty({ description: 'Revision round ID', example: 'rr_ab12cd34ef56' })
   id!: string;
@@ -68,6 +91,24 @@ export class RevisionRoundResponseDto {
 
   @ApiProperty({ description: 'Updated at timestamp', example: '2026-03-30T09:30:00.000Z' })
   updatedAt!: string;
+
+  @ApiPropertyOptional({ enum: ['PENDING', 'APPROVED', 'REJECTED'], description: 'GVHD approval status' })
+  gvhdApprovalStatus?: RevisionApprovalStatus;
+
+  @ApiPropertyOptional({ description: 'GVHD approved at timestamp' })
+  gvhdApprovedAt?: string;
+
+  @ApiPropertyOptional({ description: 'GVHD comments' })
+  gvhdComments?: string;
+
+  @ApiPropertyOptional({ enum: ['PENDING', 'APPROVED', 'REJECTED'], description: 'CT_HD approval status' })
+  ctHdApprovalStatus?: RevisionApprovalStatus;
+
+  @ApiPropertyOptional({ description: 'CT_HD approved at timestamp' })
+  ctHdApprovedAt?: string;
+
+  @ApiPropertyOptional({ description: 'CT_HD comments' })
+  ctHdComments?: string;
 }
 
 export class RevisionRoundActionResponseDto {
@@ -76,4 +117,21 @@ export class RevisionRoundActionResponseDto {
 
   @ApiProperty({ enum: ['OPEN', 'CLOSED'], example: 'OPEN' })
   status!: RevisionRoundStatus;
+}
+
+export class RevisionApprovalResponseDto {
+  @ApiProperty({ description: 'Revision round ID' })
+  roundId!: string;
+
+  @ApiProperty({ enum: ['GVHD', 'CT_HD'], description: 'Approver role' })
+  role!: 'GVHD' | 'CT_HD';
+
+  @ApiProperty({ enum: ['APPROVED', 'REJECTED'], description: 'Approval decision' })
+  decision!: 'APPROVED' | 'REJECTED';
+
+  @ApiProperty({ description: 'Approved at timestamp' })
+  approvedAt!: string;
+
+  @ApiPropertyOptional({ description: 'Comments' })
+  comments?: string;
 }

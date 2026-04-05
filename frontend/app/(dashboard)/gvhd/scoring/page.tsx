@@ -5,9 +5,10 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, BookOpen, CheckCircle2, FileCheck, RefreshCw,
-  Save, Sliders, Upload, User, AlertCircle,
+  Save, Sliders, Upload, User, AlertCircle, FileUp,
 } from "lucide-react";
 import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
+import { FileUpload } from "@/components/ui/file-upload";
 
 /* ---------- Types ---------- */
 interface TopicDto {
@@ -62,6 +63,9 @@ function GVHDScoringContent() {
   const [existingScore, setExistingScore] = useState<ScoreDto | null>(null);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [turnitinLink, setTurnitinLink] = useState("");
+  const [turnitinUploadMode, setTurnitinUploadMode] = useState<"link" | "file">("link");
+  const [isUploadingTurnitin, setIsUploadingTurnitin] = useState(false);
+  const [turnitinFileUploaded, setTurnitinFileUploaded] = useState<{ name: string; link?: string } | null>(null);
   const [comments, setComments] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -167,6 +171,44 @@ function GVHDScoringContent() {
     }
   };
 
+  const handleTurnitinFileUpload = async (file: File) => {
+    if (!selectedId) {
+      setError("Vui lòng chọn đề tài trước khi upload file Turnitin.");
+      return;
+    }
+
+    setIsUploadingTurnitin(true);
+    setError(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("fileType", "TURNITIN");
+
+      const response = await api.postForm<ApiResponse<{ id: string; driveLink?: string }>>(
+        `/topics/${selectedId}/submissions`,
+        formData,
+      );
+
+      setTurnitinFileUploaded({
+        name: file.name,
+        link: response.data.driveLink,
+      });
+
+      // Auto-set turnitin link if upload returns drive link
+      if (response.data.driveLink) {
+        setTurnitinLink(response.data.driveLink);
+      }
+
+      setSuccess("Upload file Turnitin thành công!");
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Upload file Turnitin thất bại.");
+    } finally {
+      setIsUploadingTurnitin(false);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-8">
       {/* Header */}
@@ -261,16 +303,102 @@ function GVHDScoringContent() {
                     <BookOpen className="w-4 h-4" />
                     Mở bài của SV (Drive)
                   </a>
-                  <div className="flex-1 min-w-[200px]">
-                    <input
-                      ref={turnitinRef}
-                      value={turnitinLink}
-                      onChange={e => setTurnitinLink(e.target.value)}
-                      disabled={existingScore?.isSubmitted}
-                      placeholder="Link Turnitin (paste vào đây)..."
-                      className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/20 bg-surface-container text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
-                    />
-                    <p className="text-xs text-outline mt-1">Link Turnitin (tùy chọn)</p>
+                  
+                  {/* Turnitin section với toggle link/upload */}
+                  <div className="flex-1 min-w-[300px] space-y-2">
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-xs font-semibold uppercase text-outline">Turnitin (tùy chọn)</p>
+                      <div className="flex items-center gap-1 bg-surface-container rounded-lg p-0.5 border border-outline-variant/20">
+                        <button
+                          type="button"
+                          onClick={() => setTurnitinUploadMode("link")}
+                          disabled={existingScore?.isSubmitted}
+                          className={`px-2 py-0.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${
+                            turnitinUploadMode === "link"
+                              ? "bg-primary text-on-primary"
+                              : "text-on-surface-variant hover:bg-surface-container-high"
+                          }`}
+                        >
+                          Link
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTurnitinUploadMode("file")}
+                          disabled={existingScore?.isSubmitted}
+                          className={`px-2 py-0.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${
+                            turnitinUploadMode === "file"
+                              ? "bg-primary text-on-primary"
+                              : "text-on-surface-variant hover:bg-surface-container-high"
+                          }`}
+                        >
+                          Upload File
+                        </button>
+                      </div>
+                    </div>
+
+                    {turnitinUploadMode === "link" ? (
+                      <div>
+                        <input
+                          ref={turnitinRef}
+                          value={turnitinLink}
+                          onChange={e => setTurnitinLink(e.target.value)}
+                          disabled={existingScore?.isSubmitted}
+                          placeholder="Dán link Turnitin vào đây..."
+                          className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/20 bg-surface-container text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                        />
+                        {turnitinLink && (
+                          <a
+                            href={turnitinLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-primary hover:underline mt-1 inline-block"
+                          >
+                            Mở link Turnitin →
+                          </a>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {turnitinFileUploaded ? (
+                          <div className="p-3 rounded-xl bg-green-50 border border-green-200 flex items-start gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-green-900">{turnitinFileUploaded.name}</p>
+                              {turnitinFileUploaded.link && (
+                                <a
+                                  href={turnitinFileUploaded.link}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-xs text-green-700 hover:underline"
+                                >
+                                  Xem file trên Drive →
+                                </a>
+                              )}
+                            </div>
+                            {!existingScore?.isSubmitted && (
+                              <button
+                                type="button"
+                                onClick={() => setTurnitinFileUploaded(null)}
+                                className="text-xs text-green-700 hover:text-green-900 font-medium"
+                              >
+                                Xóa
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="text-xs text-on-surface-variant mb-2">Upload file PDF Turnitin (tối đa 50MB):</p>
+                            <FileUpload
+                              onUpload={handleTurnitinFileUpload}
+                              accept=".pdf"
+                              maxSize={50}
+                              requireConfirmation={false}
+                              confirmButtonText="Upload Turnitin"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

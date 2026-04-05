@@ -90,6 +90,8 @@ export class RubricGeneratorService {
     'resources',
     'docx-templates',
   );
+  private readonly templateRenderingEnabled =
+    process.env.RUBRIC_DOCX_USE_TEMPLATE === 'true';
 
   async generateBctt(data: BcttRubricData): Promise<GeneratedDocument> {
     this.logger.log(`Generating BCTT rubric for student ${data.studentId}`);
@@ -158,12 +160,24 @@ export class RubricGeneratorService {
     fallbackGenerator: () => Promise<Buffer>,
     filePrefix: string,
   ): Promise<GeneratedDocument> {
-    const renderedFromTemplate = this.renderTemplateIfPossible(rubricType, payload);
+    if (!this.templateRenderingEnabled) {
+      this.logger.log(
+        `Template rendering disabled (RUBRIC_DOCX_USE_TEMPLATE!=true), using deterministic generator for ${rubricType}`,
+      );
+    }
+
+    const renderedFromTemplate = this.templateRenderingEnabled
+      ? this.renderTemplateIfPossible(rubricType, payload)
+      : null;
+
     const buffer = renderedFromTemplate ?? (await fallbackGenerator());
+    const topicTitle = this.pickStringValue(payload, ['topicTitle']);
+    const studentSegment = this.sanitizeFilenameSegment(studentId, 32, 'unknown-student');
+    const topicSegment = this.sanitizeFilenameSegment(topicTitle, 72, 'khong-ten-de-tai');
 
     return {
       buffer,
-      filename: `${filePrefix}_${studentId}_${Date.now()}.docx`,
+      filename: `${filePrefix}_${studentSegment}_${topicSegment}_${Date.now()}.docx`,
       mimeType: DOCX_MIME_TYPE,
     };
   }
@@ -294,7 +308,7 @@ export class RubricGeneratorService {
     result = this.injectDatePlaceholders(result);
 
     // ── 6. Student name / MSSV / topic (fill blank dotted areas) ─────────────
-    result = this.injectHeaderFields(result, rubricType);
+    result = this.injectHeaderFields(result);
 
     return result;
   }
@@ -320,13 +334,24 @@ export class RubricGeneratorService {
         return row;
       }
 
-      // Check if row contains the max score text (to avoid matching header row)
-      // The max score cell contains just the number like "1", "2", "3"
+      // Real teacher templates use score ranges like "1,7 - 2,0" instead of a
+      // plain max-score value. Use table-shape heuristics to avoid false matches.
       const cellTexts = this.extractCellTexts(row);
-      const hasMaxScore = cellTexts.some(
-        (t) => t.trim() === config.maxScoreText,
+      const keywordCellIndex = cellTexts.findIndex((cellText) =>
+        this.normalizeVietnamese(cellText).includes(normalizedKeyword),
       );
-      if (!hasMaxScore) {
+
+      // Criterion rows are expected in the first/second cell. Description rows
+      // often have keyword words in later cells and must be ignored.
+      if (keywordCellIndex < 0 || keywordCellIndex > 1) {
+        return row;
+      }
+
+      // Must look like a scoring row (has numeric scale cells before score cell).
+      const hasScoreScale = cellTexts
+        .slice(0, Math.max(0, cellTexts.length - 1))
+        .some((t) => /\d/.test(t));
+      if (!hasScoreScale) {
         return row;
       }
 
@@ -404,7 +429,7 @@ export class RubricGeneratorService {
    * Inject header field placeholders for student name, MSSV, and topic title.
    * These replace the existing dotted (.....) patterns in the template.
    */
-  private injectHeaderFields(xml: string, rubricType: RubricType): string {
+  private injectHeaderFields(xml: string): string {
     let result = xml;
 
     // Unified: both ASCII dots (.....) and Unicode ellipsis (… U+2026)
@@ -412,32 +437,32 @@ export class RubricGeneratorService {
 
     // "Sinh viên thực hiện: …" OR "SVTH: ……" (BCTT template) → studentName
     result = result.replace(
-      new RegExp(`(<w:t[^>]*>)([^<]*(?:Sinh vi\u00ean th\u1ef1c hi\u1ec7n|SVTH):\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
-      '$1$2{{studentName}}$4$5',
+      new RegExp(`(<w:t[^>]*>)([^<]*(?:Sinh vi\u00ean th\u1ef1c hi\u1ec7n|SVTH)\\s*[:：]?\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
+      '$1$2{{studentName}} $4$5',
     );
 
     // MSSV: …… → studentId
     result = result.replace(
-      new RegExp(`(<w:t[^>]*>)([^<]*MSSV:\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
-      '$1$2{{studentId}}$4$5',
+      new RegExp(`(<w:t[^>]*>)([^<]*MSSV\\s*[:：]?\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
+      '$1$2{{studentId}} $4$5',
     );
 
     // Lớp: …… → studentClass (BCTT specific)
     result = result.replace(
-      new RegExp(`(<w:t[^>]*>)([^<]*L\u1edbp:\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
-      '$1$2{{studentClass}}$4$5',
+      new RegExp(`(<w:t[^>]*>)([^<]*L\u1edbp\\s*[:：]?\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
+      '$1$2{{studentClass}} $4$5',
     );
 
     // NGÀNH: ……………… → major (BCTT specific)
     result = result.replace(
-      new RegExp(`(<w:t[^>]*>)([^<]*(?:NG\u00c0NH|Ng\u00e0nh):\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
-      '$1$2{{major}}$4$5',
+      new RegExp(`(<w:t[^>]*>)([^<]*(?:NG\u00c0NH|Ng\u00e0nh)\\s*[:：]?\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
+      '$1$2{{major}} $4$5',
     );
 
     // Topic title: "Tên KLTN: …" / "Tên đề tài: …" / "Tên BCTT: …"
     result = result.replace(
-      new RegExp(`(<w:t[^>]*>)([^<]*(?:T\u00ean KLTN|T\u00ean \u0111\u1ec1 t\u00e0i|T\u00ean KL|T\u00ean BCTT):\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
-      '$1$2{{topicTitle}}$4$5',
+      new RegExp(`(<w:t[^>]*>)([^<]*(?:T\u00ean KLTN|T\u00ean \u0111\u1ec1 t\u00e0i|T\u00ean KL|T\u00ean BCTT)\\s*[:：]?\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
+      '$1$2{{topicTitle}} $4$5',
     );
 
     return result;
@@ -471,7 +496,7 @@ export class RubricGeneratorService {
     const lastCellText = lastCell.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
     // Only inject if the cell is empty or contains only whitespace/dots
-    if (lastCellText && !/^[.\s]*$/.test(lastCellText)) {
+    if (lastCellText && !/^[.\u2026_\s]*$/.test(lastCellText)) {
       return rowXml;
     }
 
@@ -661,7 +686,7 @@ export class RubricGeneratorService {
           value: studentId,
         },
         {
-          startLabelPattern: /(Tên đề tài|BCTT)/iu,
+          startLabelPattern: /(Tên đề tài|Ten de tai|Tên BCTT|Ten BCTT)/iu,
           endLabelPattern: /(Tiêu chí|STT|Ngày)/iu,
           maxSpanChars: 2400,
           value: topicTitle,
@@ -708,7 +733,7 @@ export class RubricGeneratorService {
     const replacedSegment = segment.replace(/[.\u2026]{2,}/g, () => {
       if (!inserted) {
         inserted = true;
-        return escapedValue;
+        return `${escapedValue} `;
       }
       return '';
     });
@@ -771,6 +796,23 @@ export class RubricGeneratorService {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
+  }
+
+  private sanitizeFilenameSegment(
+    value: string,
+    maxLen = 64,
+    fallback = 'unknown',
+  ): string {
+    const normalized = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, maxLen);
+
+    return normalized || fallback;
   }
 
   /**

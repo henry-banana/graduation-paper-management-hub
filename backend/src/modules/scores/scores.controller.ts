@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Param,
   Body,
   UseGuards,
@@ -24,6 +25,8 @@ import {
   DraftScoreResponseDto,
   SubmitScoreResponseDto,
   ConfirmScoreResponseDto,
+  UpdateCouncilCommentsDto,
+  CouncilCommentsResponseDto,
 } from './dto';
 import { CreateDraftScoreDto } from './dto/create-score.dto';
 import { SubmitScoreDto, ConfirmScoreDto, RequestSummaryDto, ConfirmScoreRole } from './dto/submit-score.dto';
@@ -328,6 +331,55 @@ export class ScoresController {
     );
     return {
       data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  /**
+   * Cập nhật góp ý bổ sung của hội đồng (do Thư ký nhập)
+   */
+  @Patch('topics/:topicId/scores/council-comments')
+  @Roles('LECTURER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cập nhật góp ý bổ sung của hội đồng (chỉ Thư ký HĐ)' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Góp ý đã được lưu',
+    type: CouncilCommentsResponseDto,
+  })
+  @ApiResponse({ status: 403, description: 'Không phải Thư ký HĐ của topic này' })
+  @ApiResponse({ status: 404, description: 'Topic không tồn tại' })
+  async updateCouncilComments(
+    @Param('topicId') topicId: string,
+    @Body() dto: UpdateCouncilCommentsDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const result = await this.scoresService.updateCouncilComments(
+      topicId,
+      dto.councilComments,
+      user,
+    );
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  /**
+   * Lấy góp ý hội đồng của topic
+   */
+  @Get('topics/:topicId/scores/council-comments')
+  @Roles('LECTURER', 'TBM')
+  @ApiOperation({ summary: 'Lấy góp ý bổ sung của hội đồng' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({ status: 200, description: 'Góp ý hội đồng (có thể null)' })
+  async getCouncilComments(
+    @Param('topicId') topicId: string,
+  ) {
+    const comments = await this.scoresService.getCouncilComments(topicId);
+    return {
+      data: { councilComments: comments },
       meta: { requestId: generateRequestId() },
     };
   }

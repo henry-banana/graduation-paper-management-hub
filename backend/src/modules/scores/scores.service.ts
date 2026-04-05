@@ -67,6 +67,7 @@ export interface ScoreSummaryRecord {
   confirmedByGvhd: boolean;
   confirmedByCtHd: boolean;
   published: boolean;
+  councilComments?: string; // Góp ý bổ sung của hội đồng (do Thư ký nhập)
 }
 
 const KLTN_SCORER_ROLES: ScorerRole[] = ['GVHD', 'GVPB', 'TV_HD'];
@@ -679,13 +680,18 @@ export class ScoresService {
       score: Math.min(def.max, Math.max(0, criteriaMap[def.id] ?? 0)),
       max: def.max,
       note: def.id === rubricDefinition[rubricDefinition.length - 1].id
-        ? (options.comments ?? options.questions)
+        ? options.comments
         : undefined,
     }));
 
     this.validateRubricData(rubricData);
 
     const totalScore = this.calculateTotalScore(rubricData);
+
+    // Parse questions string to array
+    const questions = options.questions 
+      ? options.questions.split('\n').map(q => q.trim()).filter(q => q.length > 0)
+      : undefined;
 
     const scores = await this.scoresRepository.findAll();
 
@@ -723,6 +729,7 @@ export class ScoresService {
     if (existingDraft) {
       existingDraft.rubricData = rubricData;
       existingDraft.totalScore = totalScore;
+      existingDraft.questions = questions;
       existingDraft.updatedAt = new Date().toISOString();
       await this.scoresRepository.update(existingDraft.id, existingDraft);
       scoreRecord = existingDraft;
@@ -735,6 +742,7 @@ export class ScoresService {
         status: 'DRAFT',
         totalScore,
         rubricData,
+        questions,
         updatedAt: new Date().toISOString(),
       };
       await this.scoresRepository.create(scoreRecord);
@@ -896,7 +904,7 @@ export class ScoresService {
   }
 
   private async auditIfAvailable(params: {
-    action: 'SCORE_SUBMITTED' | 'SCORE_CONFIRMED' | 'SCORE_PUBLISHED';
+    action: 'SCORE_SUBMITTED' | 'SCORE_CONFIRMED' | 'SCORE_PUBLISHED' | 'COUNCIL_COMMENTS_UPDATED';
     actorId: string;
     actorRole: string;
     topicId?: string;
@@ -907,5 +915,89 @@ export class ScoresService {
     }
 
     await this.auditService.log(params);
+  }
+
+  /**
+   * Cập nhật góp ý bổ sung của hội đồng (do Thư ký nhập)
+   * Chỉ TK_HD của topic này mới được phép
+   */
+  async updateCouncilComments(
+    topicId: string,
+    councilComments: string,
+    user: AuthUser,
+  ): Promise<{ topicId: string; councilComments: string; updatedAt: string }> {
+    if (user.role !== 'LECTURER') {
+      throw new ForbiddenException('Only lecturers can update council comments');
+    }
+
+    const topic = await this.getTopicOrThrow(topicId);
+
+    // Check if user is TK_HD for this topic
+    const assignments = await this.assignmentsRepository.findAll();
+    const tkHdAssignment = assignments.find(
+      (a) =>
+        a.topicId === topicId &&
+        a.userId === user.userId &&
+        a.topicRole === 'TK_HD' &&
+        a.status === 'ACTIVE',
+    );
+
+    if (!tkHdAssignment) {
+      throw new ForbiddenException('Only the assigned Secretary (TK_HD) can update council comments');
+    }
+
+    // Find or create score summary
+    let summary = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topicId,
+    );
+
+    const now = new Date().toISOString();
+
+    if (summary) {
+      // Update existing summary
+      await this.scoreSummariesRepository.update(summary.id, {
+        ...summary,
+        councilComments,
+      });
+    } else {
+      // Create minimal summary with just council comments
+      summary = {
+        id: crypto.randomUUID(),
+        topicId,
+        finalScore: 0,
+        result: 'PENDING',
+        confirmedByGvhd: false,
+        confirmedByCtHd: false,
+        published: false,
+        councilComments,
+      };
+      await this.scoreSummariesRepository.create(summary);
+    }
+
+    await this.auditIfAvailable({
+      action: 'COUNCIL_COMMENTS_UPDATED',
+      actorId: user.userId,
+      actorRole: user.role,
+      topicId,
+      detail: {
+        councilCommentsLength: councilComments.length,
+      },
+    });
+
+    return {
+      topicId,
+      councilComments,
+      updatedAt: now,
+    };
+  }
+
+  /**
+   * Get council comments for a topic
+   */
+  async getCouncilComments(topicId: string): Promise<string | null> {
+    const summary = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topicId,
+    );
+    return summary?.councilComments ?? null;
   }
 }

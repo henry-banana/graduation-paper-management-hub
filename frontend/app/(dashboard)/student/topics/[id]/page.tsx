@@ -25,7 +25,7 @@ import {
   formatDeadlineStatus,
 } from "@/lib/constants/vi-labels";
 
-type SubmissionFileType = "REPORT" | "TURNITIN" | "REVISION";
+type SubmissionFileType = "REPORT" | "TURNITIN" | "REVISION" | "INTERNSHIP_CONFIRMATION";
 
 interface TopicDto {
   id: string;
@@ -48,6 +48,14 @@ interface SubmissionDto {
   originalFileName?: string;
   fileSize?: number;
   driveLink?: string;
+}
+
+interface RevisionRoundDto {
+  id: string;
+  roundNumber: number;
+  status: "OPEN" | "CLOSED";
+  startAt: string;
+  endAt: string;
 }
 
 interface ScoreSummaryDto {
@@ -134,10 +142,57 @@ function formatFileSize(size?: number): string {
 
 function getSubmissionWindowStatus(
   topic: Pick<TopicDto, "state" | "submitStartAt" | "submitEndAt">,
+  selectedFileType: SubmissionFileType,
+  activeRevisionRound: RevisionRoundDto | null,
 ): {
   canUpload: boolean;
   reason: string;
 } {
+  if (selectedFileType === "REVISION") {
+    if (!["SCORING", "COMPLETED"].includes(topic.state)) {
+      return {
+        canUpload: false,
+        reason: "Chỉ được nộp bản chỉnh sửa khi đề tài ở trạng thái SCORING hoặc COMPLETED.",
+      };
+    }
+
+    if (!activeRevisionRound) {
+      return {
+        canUpload: false,
+        reason: "Chưa có vòng chỉnh sửa mở cho đề tài này.",
+      };
+    }
+
+    const startAt = new Date(activeRevisionRound.startAt).getTime();
+    const endAt = new Date(activeRevisionRound.endAt).getTime();
+    if (Number.isNaN(startAt) || Number.isNaN(endAt)) {
+      return {
+        canUpload: false,
+        reason: "Cửa sổ vòng chỉnh sửa không hợp lệ. Vui lòng liên hệ TBM.",
+      };
+    }
+
+    const now = Date.now();
+    if (now < startAt) {
+      return {
+        canUpload: false,
+        reason: "Chưa đến thời gian mở vòng chỉnh sửa.",
+      };
+    }
+
+    if (now > endAt) {
+      return {
+        canUpload: false,
+        reason: "Đã quá hạn vòng chỉnh sửa.",
+      };
+    }
+
+    return {
+      canUpload: true,
+      reason: "",
+    };
+  }
+
   if (topic.state !== "IN_PROGRESS") {
     return {
       canUpload: false,
@@ -222,15 +277,36 @@ function SubmissionPanel({
   topic,
   submissions,
   onUpload,
+  activeRevisionRound,
   isUploading,
 }: {
   topic: TopicDto;
   submissions: SubmissionDto[];
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File, fileType: SubmissionFileType) => Promise<void>;
+  activeRevisionRound: RevisionRoundDto | null;
   isUploading: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const submissionWindow = getSubmissionWindowStatus(topic);
+  const [selectedFileType, setSelectedFileType] = useState<SubmissionFileType>("REPORT");
+
+  const availableFileTypes = useMemo((): SubmissionFileType[] => {
+    const types: SubmissionFileType[] = ["REPORT"];
+    if (topic.type === "BCTT" && topic.state === "IN_PROGRESS") {
+      types.push("INTERNSHIP_CONFIRMATION");
+    }
+    if (topic.type === "KLTN" && ["SCORING", "COMPLETED"].includes(topic.state)) {
+      types.push("REVISION");
+    }
+    return types;
+  }, [topic.type, topic.state]);
+
+  useEffect(() => {
+    if (!availableFileTypes.includes(selectedFileType)) {
+      setSelectedFileType(availableFileTypes[0] ?? "REPORT");
+    }
+  }, [availableFileTypes, selectedFileType]);
+
+  const submissionWindow = getSubmissionWindowStatus(topic, selectedFileType, activeRevisionRound);
   const isLocked = !submissionWindow.canUpload;
 
   return (
@@ -271,21 +347,42 @@ function SubmissionPanel({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1 text-sm text-on-surface-variant">
                   <span className="font-semibold">Loại file</span>
-                  <div className="px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface font-semibold">
-                    REPORT
-                  </div>
+                  <select
+                    value={selectedFileType}
+                    onChange={(event) => setSelectedFileType(event.target.value as SubmissionFileType)}
+                    className="px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface"
+                    disabled={isUploading || availableFileTypes.length === 1}
+                  >
+                    {availableFileTypes.map((fileType) => (
+                      <option key={fileType} value={fileType}>
+                        {fileType}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="flex items-end text-xs text-outline">
-                  Chỉ hỗ trợ nộp báo cáo PDF, dung lượng tối đa 50MB.
+                  {selectedFileType === "INTERNSHIP_CONFIRMATION"
+                    ? "Phiếu xác nhận thực tập chỉ áp dụng cho đề tài BCTT, định dạng PDF tối đa 50MB."
+                    : selectedFileType === "REVISION"
+                    ? activeRevisionRound
+                      ? `Vòng chỉnh sửa V${activeRevisionRound.roundNumber}: ${formatDateTime(activeRevisionRound.startAt)} - ${formatDateTime(activeRevisionRound.endAt)}`
+                      : "Bản chỉnh sửa yêu cầu một vòng chỉnh sửa đang mở do TBM cấu hình."
+                    : "Báo cáo PDF, dung lượng tối đa 50MB."}
                 </div>
               </div>
 
               <FileUpload
-                onUpload={onUpload}
+                onUpload={(file) => onUpload(file, selectedFileType)}
                 accept=".pdf"
                 maxSize={50}
                 requireConfirmation
-                confirmButtonText="Xác nhận nộp báo cáo"
+                confirmButtonText={
+                  selectedFileType === "INTERNSHIP_CONFIRMATION"
+                    ? "Xác nhận nộp phiếu xác nhận thực tập"
+                    : selectedFileType === "REVISION"
+                    ? "Xác nhận nộp bản chỉnh sửa"
+                    : "Xác nhận nộp báo cáo"
+                }
               />
 
               <div className="w-full border border-outline-variant/15 rounded-xl overflow-hidden">
@@ -350,6 +447,7 @@ export default function StudentTopicDetailPage() {
 
   const [topic, setTopic] = useState<TopicDto | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionDto[]>([]);
+  const [activeRevisionRound, setActiveRevisionRound] = useState<RevisionRoundDto | null>(null);
   const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
   const [schedule, setSchedule] = useState<ScheduleDto | null>(null);
   const [notifications, setNotifications] = useState<NotificationDto[]>([]);
@@ -388,13 +486,20 @@ export default function StudentTopicDetailPage() {
           supervisorUserId: topicRes.data.supervisorUserId || "",
         });
 
-        const [submissionsRes, notificationsRes, supervisorsRes] = await Promise.all([
+        const [submissionsRes, notificationsRes, supervisorsRes, roundsRes] = await Promise.all([
           api.get<ApiResponse<SubmissionDto[]>>(`/topics/${topicId}/submissions`),
           api.get<ApiListResponse<NotificationDto>>("/notifications?page=1&size=100"),
           api.get<ApiResponse<SupervisorOptionDto[]>>("/users/supervisors/options"),
+          api
+            .get<ApiResponse<RevisionRoundDto[]>>(`/topics/${topicId}/revisions/rounds`)
+            .catch(() => null),
         ]);
 
         setSubmissions(submissionsRes.data);
+        const openRound = roundsRes?.data
+          ?.filter((round) => round.status === "OPEN")
+          .sort((a, b) => b.roundNumber - a.roundNumber)[0] ?? null;
+        setActiveRevisionRound(openRound);
         setNotifications(
           notificationsRes.data.filter((notification) => notification.topicId === topicId),
         );
@@ -464,12 +569,12 @@ export default function StudentTopicDetailPage() {
     return supervisors.find((supervisor) => supervisor.id === topic.supervisorUserId) ?? null;
   }, [supervisors, topic]);
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = async (file: File, fileType: SubmissionFileType) => {
     if (!topic) {
       throw new Error("Không tìm thấy đề tài.");
     }
 
-    const submissionWindow = getSubmissionWindowStatus(topic);
+    const submissionWindow = getSubmissionWindowStatus(topic, fileType, activeRevisionRound);
     if (!submissionWindow.canUpload) {
       throw new Error(submissionWindow.reason);
     }
@@ -480,7 +585,7 @@ export default function StudentTopicDetailPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("fileType", "REPORT");
+      formData.append("fileType", fileType);
 
       await api.postForm<ApiResponse<{ id: string; version: number }>>(
         `/topics/${topic.id}/submissions`,
@@ -720,6 +825,7 @@ export default function StudentTopicDetailPage() {
             topic={topic}
             submissions={submissions}
             onUpload={handleUpload}
+            activeRevisionRound={activeRevisionRound}
             isUploading={isUploading}
           />
         </div>

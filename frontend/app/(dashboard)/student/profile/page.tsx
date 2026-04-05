@@ -122,9 +122,7 @@ export default function StudentProfilePage() {
     : 0;
   const isKltnEligible = profile?.canRegisterKltn ?? (
     bcttState.status === "done" &&
-    completedBcttScore > 5 &&
-    requiredCredits > 0 &&
-    earnedCredits >= requiredCredits
+    completedBcttScore > 5
   );
 
   if (isLoading) {
@@ -179,7 +177,7 @@ export default function StudentProfilePage() {
               { icon: User, label: "Họ tên", value: profile.fullName },
               { icon: BookOpen, label: "Email", value: profile.email },
                 { icon: Calendar, label: "Số tín chỉ đã tích lũy", value: earnedCredits.toFixed(0) },
-                { icon: Users, label: "Số tín chỉ yêu cầu KLTN", value: requiredCredits > 0 ? requiredCredits.toFixed(0) : "Chưa cấu hình" },
+                { icon: Users, label: "Số tín chỉ yêu cầu (tham khảo)", value: requiredCredits > 0 ? requiredCredits.toFixed(0) : "Chưa cấu hình" },
                 { icon: Award, label: "Điểm BCTT đã xác nhận", value: completedBcttScore > 0 ? completedBcttScore.toFixed(2) : "Chưa có" },
                 { icon: GraduationCap, label: "Điều kiện đăng ký KLTN", value: isKltnEligible ? "Đủ điều kiện" : "Chưa đủ điều kiện" },
             ].map((item, i) => {
@@ -273,7 +271,7 @@ export default function StudentProfilePage() {
           <div className="px-6 py-4 border-t border-outline-variant/10 bg-amber-50/50">
             <p className="text-xs text-amber-700 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              Hệ thống chỉ mở khóa đăng ký KLTN khi hoàn thành điều kiện BCTT và tín chỉ theo dữ liệu học vụ.
+              Hệ thống chỉ mở khóa đăng ký KLTN khi BCTT hoàn thành và điểm BCTT lớn hơn 5.0.
             </p>
           </div>
         )}
