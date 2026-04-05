@@ -818,6 +818,40 @@ describe('TopicsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('should throw ConflictException when creating KLTN after completed KLTN already exists', async () => {
+      const studentWithCompletedKltn: AuthUser = {
+        userId: 'USR004',
+        email: 'low-eligibility@hcmute.edu.vn',
+        role: 'STUDENT',
+      };
+
+      topicsData.push({
+        id: 'tp_004_completed_kltn',
+        type: 'KLTN',
+        title: 'Completed KLTN',
+        domain: 'Software Engineering',
+        state: 'COMPLETED',
+        studentUserId: studentWithCompletedKltn.userId,
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_kltn',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      await expect(
+        service.create(
+          {
+            type: 'KLTN',
+            title: 'Another KLTN',
+            domain: 'Test',
+            periodId: 'prd_2026_hk1_kltn',
+            supervisorUserId: 'USR002',
+          },
+          studentWithCompletedKltn,
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
     it('should allow KLTN registration when completed BCTT summary score is > 5 even if profile score is stale', async () => {
       const studentWithStaleProfile: AuthUser = {
         userId: 'USR004',

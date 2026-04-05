@@ -177,25 +177,113 @@ export class ScoresService {
     return latest.driveLink ?? latest.downloadUrl ?? undefined;
   }
 
+  /**
+   * Get KLTN rubric export link by role (GVHD, GVPB, TV_HD)
+   */
+  private async getKltnRubricLink(
+    topicId: string,
+    role: 'GVHD' | 'GVPB' | 'TV_HD',
+  ): Promise<string | undefined> {
+    if (!this.exportFilesRepository) {
+      return undefined;
+    }
+
+    const exports = await this.exportFilesRepository.findWhere(
+      (record) =>
+        record.topicId === topicId &&
+        record.exportType === 'RUBRIC_KLTN' &&
+        record.status === 'COMPLETED',
+    );
+
+    if (exports.length === 0) {
+      return undefined;
+    }
+
+    // Filter by role via fileName pattern (role is embedded in filename)
+    // Example: rubric_kltn_GVHD_tp001.docx
+    const roleExports = exports.filter((exp) =>
+      exp.fileName?.includes(`_${role}_`),
+    );
+
+    if (roleExports.length === 0) {
+      return undefined;
+    }
+
+    const latest = roleExports.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )[0];
+
+    return latest.driveLink ?? latest.downloadUrl ?? undefined;
+  }
+
+  /**
+   * Get defense minutes link (PDF)
+   */
+  private async getMinutesLink(topicId: string): Promise<string | undefined> {
+    if (!this.exportFilesRepository) {
+      return undefined;
+    }
+
+    const exports = await this.exportFilesRepository.findWhere(
+      (record) =>
+        record.topicId === topicId &&
+        record.exportType === 'MINUTES' &&
+        record.status === 'COMPLETED',
+    );
+
+    if (exports.length === 0) {
+      return undefined;
+    }
+
+    const latest = exports.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )[0];
+
+    return latest.driveLink ?? latest.downloadUrl ?? undefined;
+  }
+
   private async attachStudentFacingFields(
     base: ScoreSummaryDto,
     topic: TopicRecord,
     summaryRecord?: ScoreSummaryRecord,
   ): Promise<ScoreSummaryDto> {
-    if (topic.type !== 'BCTT') {
-      return base;
+    if (topic.type === 'BCTT') {
+      // BCTT: rubric link + appeal info
+      const rubricDocxLink =
+        summaryRecord?.rubricDriveLink ?? (await this.getRubricDocxLink(topic.id));
+
+      return {
+        ...base,
+        rubricDocxLink,
+        appeal: this.toAppealInfo(summaryRecord),
+        appealChoice: summaryRecord?.appealChoice,
+        appealChoiceAt: summaryRecord?.appealChoiceAt,
+      };
     }
 
-    const rubricDocxLink =
-      summaryRecord?.rubricDriveLink ?? (await this.getRubricDocxLink(topic.id));
+    if (topic.type === 'KLTN') {
+      // KLTN: multiple rubric links + minutes link
+      const [gvhdRubricLink, gvpbRubricLink, councilRubricLink, minutesLink] =
+        await Promise.all([
+          this.getKltnRubricLink(topic.id, 'GVHD'),
+          this.getKltnRubricLink(topic.id, 'GVPB'),
+          this.getKltnRubricLink(topic.id, 'TV_HD'),
+          this.getMinutesLink(topic.id),
+        ]);
 
-    return {
-      ...base,
-      rubricDocxLink,
-      appeal: this.toAppealInfo(summaryRecord),
-      appealChoice: summaryRecord?.appealChoice,
-      appealChoiceAt: summaryRecord?.appealChoiceAt,
-    };
+      return {
+        ...base,
+        gvhdRubricLink,
+        gvpbRubricLink,
+        councilRubricLink,
+        minutesLink,
+      };
+    }
+
+    // Default: no extra fields
+    return base;
   }
 
   /**

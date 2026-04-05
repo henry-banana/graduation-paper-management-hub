@@ -96,12 +96,14 @@ export class SchedulesService {
       );
     }
 
-    if (new Date(dto.defenseAt) <= new Date()) {
-      this.logger.warn(
-        `[create:conflict] topicId=${topicId} reason=PAST_DEFENSE_DATE defenseAt=${dto.defenseAt}`,
-      );
-      throw new ConflictException('Defense date must be in the future');
-    }
+    // DEMO MODE: Skip future-time validation for easy demo
+    // TODO(DEMO): Restore this validation before production deployment
+    // if (new Date(dto.defenseAt) <= new Date()) {
+    //   this.logger.warn(
+    //     `[create:conflict] topicId=${topicId} reason=PAST_DEFENSE_DATE defenseAt=${dto.defenseAt}`,
+    //   );
+    //   throw new ConflictException('Defense date must be in the future');
+    // }
 
     const now = new Date().toISOString();
     const schedule: ScheduleRecord = {
@@ -203,12 +205,14 @@ export class SchedulesService {
     const topic = await this.topicsRepository.findById(topicId);
 
     if (dto.defenseAt) {
-      if (new Date(dto.defenseAt) <= new Date()) {
-        this.logger.warn(
-          `[update:conflict] topicId=${topicId} scheduleId=${schedule.id} reason=PAST_DEFENSE_DATE defenseAt=${dto.defenseAt}`,
-        );
-        throw new ConflictException('Defense date must be in the future');
-      }
+      // DEMO MODE: Skip future-time validation for easy demo
+      // TODO(DEMO): Restore this validation before production deployment
+      // if (new Date(dto.defenseAt) <= new Date()) {
+      //   this.logger.warn(
+      //     `[update:conflict] topicId=${topicId} scheduleId=${schedule.id} reason=PAST_DEFENSE_DATE defenseAt=${dto.defenseAt}`,
+      //   );
+      //   throw new ConflictException('Defense date must be in the future');
+      // }
       schedule.defenseAt = dto.defenseAt;
     }
     if (dto.locationType) schedule.locationType = dto.locationType;

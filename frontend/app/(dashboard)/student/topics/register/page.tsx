@@ -142,12 +142,20 @@ export default function StudentTopicRegisterPage() {
     [topics],
   );
 
-  const canRegisterKLTN =
+  const hasCompletedKltn = useMemo(
+    () => topics.some((topic) => topic.type === "KLTN" && topic.state === "COMPLETED"),
+    [topics],
+  );
+
+  const canRegisterKLTNByScore =
     profile?.canRegisterKltn ??
     (typeof profile?.completedBcttScore === "number" && profile.completedBcttScore > 5);
-  const kltnEligibilityReason = hasCompletedBctt
-    ? profile?.kltnEligibilityReason ?? "OK"
-    : "BCTT_INCOMPLETE";
+  const canRegisterKLTN = canRegisterKLTNByScore && !hasCompletedKltn;
+  const kltnEligibilityReason = hasCompletedKltn
+    ? "KLTN_COMPLETED_EXISTS"
+    : hasCompletedBctt
+      ? profile?.kltnEligibilityReason ?? (canRegisterKLTNByScore ? "OK" : "BCTT_SCORE_TOO_LOW")
+      : "BCTT_INCOMPLETE";
 
   const availablePeriods = useMemo(() => {
     return periods.filter(
@@ -208,6 +216,9 @@ export default function StudentTopicRegisterPage() {
         const completedBcttTopics = topicsRes.data
           .filter((topic) => topic.type === "BCTT" && topic.state === "COMPLETED")
           .sort((a, b) => b.id.localeCompare(a.id));
+        const completedKltnTopics = topicsRes.data.filter(
+          (topic) => topic.type === "KLTN" && topic.state === "COMPLETED",
+        );
 
         const latestCompletedBctt = completedBcttTopics[0];
         const canRegisterFromProfile =
@@ -215,31 +226,45 @@ export default function StudentTopicRegisterPage() {
           (typeof normalizedProfile.completedBcttScore === "number" &&
             normalizedProfile.completedBcttScore > 5);
 
-        if (!canRegisterFromProfile && latestCompletedBctt) {
-          try {
-            const summaryRes = await api.get<ApiResponse<ScoreSummaryDto>>(
-              `/topics/${latestCompletedBctt.id}/scores/summary`,
-            );
-            const summary = summaryRes.data;
-            if (summary.finalScore > 5) {
+        if (!canRegisterFromProfile && completedBcttTopics.length > 0) {
+          const completedBcttScores = (
+            await Promise.all(
+              completedBcttTopics.map(async (topic) => {
+                try {
+                  const summaryRes = await api.get<ApiResponse<ScoreSummaryDto>>(
+                    `/topics/${topic.id}/scores/summary`,
+                  );
+                  return Number.isFinite(summaryRes.data.finalScore)
+                    ? summaryRes.data.finalScore
+                    : null;
+                } catch {
+                  return null;
+                }
+              }),
+            )
+          ).filter((score): score is number => typeof score === "number" && Number.isFinite(score));
+
+          if (completedBcttScores.length > 0) {
+            const bestCompletedBcttScore = Math.max(...completedBcttScores);
+            if (bestCompletedBcttScore > 5) {
               normalizedProfile = {
                 ...normalizedProfile,
-                completedBcttScore: summary.finalScore,
+                completedBcttScore: bestCompletedBcttScore,
                 canRegisterKltn: true,
                 kltnEligibilityReason: "OK",
               };
             }
-          } catch {
-            // Keep profile fallback as-is when summary is unavailable.
           }
         }
 
         setProfile(normalizedProfile);
 
-        const canRegisterKltn =
+        const canRegisterKltnByScore =
           normalizedProfile.canRegisterKltn ??
           (typeof normalizedProfile.completedBcttScore === "number" &&
             normalizedProfile.completedBcttScore > 5);
+        const canRegisterKltn =
+          canRegisterKltnByScore && completedKltnTopics.length === 0;
 
         const firstOpenKltn = periodsRes.data.find(
           (period) => period.type === "KLTN" && isPeriodCurrentlyOpen(period),
@@ -381,6 +406,11 @@ export default function StudentTopicRegisterPage() {
       return;
     }
 
+    if (newType === "KLTN" && hasCompletedKltn) {
+      setError("Bạn đã có đề tài KLTN COMPLETED. Vui lòng xóa đề tài cũ trước khi đăng ký mới.");
+      return;
+    }
+
     if (newType === "KLTN" && !canRegisterKLTN) {
       setError(`Bạn chưa đủ điều kiện đăng ký KLTN: ${KLTN_ELIGIBILITY_REASONS[kltnEligibilityReason] || "N/A"}`);
       return;
@@ -439,6 +469,11 @@ export default function StudentTopicRegisterPage() {
 
     if (!selectedPeriod || !isPeriodCurrentlyOpen(selectedPeriod)) {
       setError("Đợt đăng ký này hiện không mở. Vui lòng chọn đợt khác hoặc chờ đến kỳ đăng ký tiếp theo.");
+      return;
+    }
+
+    if (form.type === "KLTN" && hasCompletedKltn) {
+      setError("Bạn đã có đề tài KLTN COMPLETED. Vui lòng xóa đề tài cũ trước khi đăng ký mới.");
       return;
     }
 
@@ -692,7 +727,9 @@ export default function StudentTopicRegisterPage() {
                       <option value="BCTT" disabled={hasCompletedBctt}>
                         Báo cáo thực tập {hasCompletedBctt && "(Đã hoàn thành trước đó)"}
                       </option>
-                      <option value="KLTN" disabled={!canRegisterKLTN}>Khóa luận tốt nghiệp {!canRegisterKLTN && "(Bị khóa)"}</option>
+                      <option value="KLTN" disabled={!canRegisterKLTN}>
+                        Khóa luận tốt nghiệp {hasCompletedKltn ? "(Đã hoàn thành trước đó)" : (!canRegisterKLTN && "(Bị khóa)")}
+                      </option>
                     </select>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline pointer-events-none" />
                   </div>

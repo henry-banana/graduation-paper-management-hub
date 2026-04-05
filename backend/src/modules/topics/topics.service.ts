@@ -452,8 +452,21 @@ export class TopicsService {
       }
     }
 
-    // KLTN eligibility: must have completed BCTT and final BCTT score > 5.
+    // KLTN eligibility: block duplicate completed KLTN and require completed BCTT with score > 5.
     if (dto.type === 'KLTN') {
+      const existingCompletedKltn = await this.topicsRepository.findFirst(
+        (topic) =>
+          topic.studentUserId === currentUser.userId &&
+          topic.type === 'KLTN' &&
+          topic.state === 'COMPLETED',
+      );
+
+      if (existingCompletedKltn) {
+        throw new ConflictException(
+          'Bạn đã có đề tài KLTN COMPLETED. Vui lòng xóa đề tài cũ trước khi đăng ký mới.',
+        );
+      }
+
       const completedBcttTopics = await this.getCompletedBcttTopicsForStudent(
         currentUser.userId,
       );

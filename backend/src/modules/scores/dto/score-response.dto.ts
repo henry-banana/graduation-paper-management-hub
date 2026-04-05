@@ -126,6 +126,30 @@ export class ScoreSummaryDto {
   rubricDocxLink?: string;
 
   @ApiPropertyOptional({
+    description: 'Link DOCX phiếu chấm GVHD (KLTN)',
+    example: 'https://drive.google.com/file/d/abc123/view',
+  })
+  gvhdRubricLink?: string;
+
+  @ApiPropertyOptional({
+    description: 'Link DOCX phiếu chấm GVPB (KLTN)',
+    example: 'https://drive.google.com/file/d/abc123/view',
+  })
+  gvpbRubricLink?: string;
+
+  @ApiPropertyOptional({
+    description: 'Link DOCX phiếu chấm Hội đồng (KLTN)',
+    example: 'https://drive.google.com/file/d/abc123/view',
+  })
+  councilRubricLink?: string;
+
+  @ApiPropertyOptional({
+    description: 'Link PDF biên bản bảo vệ (KLTN)',
+    example: 'https://drive.google.com/file/d/abc123/view',
+  })
+  minutesLink?: string;
+
+  @ApiPropertyOptional({
     description: 'Thông tin phúc khảo điểm (BCTT)',
     type: ScoreAppealInfoDto,
   })

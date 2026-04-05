@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Award, TrendingUp, CheckCircle, Star, BarChart2, FileText } from "lucide-react";
+import { Award, TrendingUp, CheckCircle, Star, BarChart2, FileText, Download, FileCheck } from "lucide-react";
 import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 
 interface TopicDto {
@@ -40,6 +40,10 @@ interface ScoreSummaryDto {
   confirmedByCtHd: boolean;
   published: boolean;
   rubricDocxLink?: string;
+  gvhdRubricLink?: string;
+  gvpbRubricLink?: string;
+  councilRubricLink?: string;
+  minutesLink?: string;
   appealChoice?: "NO_APPEAL" | "ACCEPT";
   appealChoiceAt?: string;
   appeal?: {
@@ -82,6 +86,46 @@ function toLetterGrade(score: number): string {
     return "D";
   }
   return "F";
+}
+
+interface DocumentCardProps {
+  title: string;
+  link?: string;
+  type: "DOCX" | "PDF";
+  icon: React.ReactNode;
+}
+
+function DocumentCard({ title, link, type, icon }: DocumentCardProps) {
+  return (
+    <div className="p-4 bg-surface-container rounded-xl border border-outline-variant/15">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 text-primary">
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-semibold text-on-surface mb-1">
+            {title}
+          </h4>
+          {link ? (
+            <a
+              href={link}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Tải xuống ${title} (${type})`}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+            >
+              <Download className="w-4 h-4" aria-hidden="true" />
+              Tải xuống ({type})
+            </a>
+          ) : (
+            <span className="text-xs text-outline">
+              Chưa có file
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function StudentScoresContent() {
@@ -428,7 +472,7 @@ function StudentScoresContent() {
           <div className="mx-6 mb-6 p-5 bg-surface-container rounded-2xl border border-outline-variant/15 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <h4 className="text-sm font-semibold text-on-surface">
-                Phiếu chấm BCTT (DOCX)
+                Phiếu chấm BCTT (PDF)
               </h4>
               {summary.rubricDocxLink ? (
                 <a
@@ -519,6 +563,50 @@ function StudentScoresContent() {
                 <p className="text-xs text-outline">{appealFeedback}</p>
               )}
             </div>
+          </div>
+        )}
+
+        {/* KLTN Documents Section */}
+        {selectedTopic?.type === "KLTN" && summary && summary.published && (
+          <div className="mx-6 mb-6 space-y-4">
+            <h3 className="text-base font-semibold text-on-surface px-1">
+              Tài liệu đánh giá KLTN
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <DocumentCard
+                title="Phiếu chấm GVHD"
+                link={summary.gvhdRubricLink}
+                type="PDF"
+                icon={<FileText className="w-5 h-5" />}
+              />
+              
+              <DocumentCard
+                title="Phiếu chấm GVPB"
+                link={summary.gvpbRubricLink}
+                type="PDF"
+                icon={<FileText className="w-5 h-5" />}
+              />
+              
+              <DocumentCard
+                title="Phiếu chấm Hội đồng"
+                link={summary.councilRubricLink}
+                type="PDF"
+                icon={<Award className="w-5 h-5" />}
+              />
+              
+              <DocumentCard
+                title="Biên bản bảo vệ"
+                link={summary.minutesLink}
+                type="PDF"
+                icon={<FileCheck className="w-5 h-5" />}
+              />
+            </div>
+
+            <p className="text-xs text-outline/70 px-1 pt-2">
+              Các file tài liệu được tự động tạo sau khi điểm được công bố. 
+              Nếu chưa thấy file, vui lòng liên hệ giảng viên.
+            </p>
           </div>
         )}
       </div>

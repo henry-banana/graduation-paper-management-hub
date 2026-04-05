@@ -37,6 +37,7 @@ import {
   RubricGeneratorService,
 } from './rubric-generator/rubric-generator.service';
 import { MinutesGeneratorService } from './minutes-generator/minutes-generator.service';
+import { PdfConverterService } from './pdf-converter/pdf-converter.service';
 import type { MinutesTemplateData } from './minutes-generator/minutes.template';
 import type { TopicRecord } from '../topics/topics.service';
 import type { ScoreRecord } from '../scores/scores.service';
@@ -93,6 +94,7 @@ export class ExportsService {
     private readonly googleDriveClient: GoogleDriveClient,
     private readonly rubricGeneratorService: RubricGeneratorService,
     private readonly minutesGeneratorService: MinutesGeneratorService,
+    private readonly pdfConverterService: PdfConverterService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -465,8 +467,33 @@ export class ExportsService {
 
     const id = `exp_${crypto.randomBytes(8).toString('hex')}`;
     const now = new Date().toISOString();
-    const fileToUpload =
+    let fileToUpload =
       generatedDoc ?? this.buildMetadataDocument(id, topicId, exportType, user, metadata, now);
+
+    // Convert rubric DOCX to PDF for better print quality
+    // Minutes are already PDF, so skip conversion
+    const isRubricExport = exportType.includes('RUBRIC');
+    if (isRubricExport && fileToUpload.mimeType === EXPORT_DOCX_MIME_TYPE) {
+      this.logger.log(`Converting rubric ${fileToUpload.filename} to PDF`);
+      try {
+        const converted = await this.pdfConverterService.convertDocxToPdf(
+          fileToUpload.buffer,
+          fileToUpload.filename,
+        );
+        fileToUpload = {
+          filename: converted.pdfFilename,
+          mimeType: EXPORT_PDF_MIME_TYPE,
+          buffer: converted.pdfBuffer,
+        };
+        this.logger.log(`Successfully converted to ${converted.pdfFilename}`);
+      } catch (conversionError) {
+        this.logger.warn(
+          `PDF conversion failed for ${fileToUpload.filename}, uploading DOCX instead:`,
+          conversionError,
+        );
+        // Continue with DOCX if conversion fails
+      }
+    }
 
     let uploadedFileName = fileToUpload.filename;
     const uploadedMimeType = fileToUpload.mimeType;
@@ -483,25 +510,27 @@ export class ExportsService {
     if (this.googleDriveClient.isReady()) {
       try {
         // Resolve the target folder:
-        // - Rubric exports → GOOGLE_DRIVE_RUBRIC_FOLDER_ID/[user.userId]/
-        //   (subfolder = ID của người đang query — GV hoặc TBM)
+        // - Rubric exports → GOOGLE_DRIVE_RUBRIC_FOLDER_ID/[topicId]/
+        //   (subfolder = ID của topic để group tất cả documents của 1 đề tài)
         // - Other exports  → GOOGLE_DRIVE_FOLDER_ID (default root)
         let targetFolderId: string | undefined;
         if (isRubricExport && rubricRootFolderId) {
           try {
             targetFolderId = await this.googleDriveClient.getOrCreateSubfolder(
               rubricRootFolderId,
-              user.userId,
+              topicId,
             );
           } catch (folderErr) {
-            const msg = `Could not create subfolder for user ${user.userId}: ${this.extractErrorMessage(folderErr)}. Falling back to rubric root.`;
+            const msg = `Could not create subfolder for topic ${topicId}: ${this.extractErrorMessage(folderErr)}. Falling back to rubric root.`;
             warnings.push(msg);
             this.logger.warn(msg);
             targetFolderId = rubricRootFolderId;
           }
         }
 
-        // Always upload as raw .docx (no Google Doc conversion).
+        // Upload file (DOCX or PDF depending on conversion result).
+        // For rubrics: PDF preferred (better print quality)
+        // For minutes: already PDF
         // This preserves table column widths and formatting perfectly.
         const upload = await this.googleDriveClient.uploadFile(
           fileToUpload.filename,

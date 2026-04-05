@@ -486,6 +486,64 @@ export class AssignmentsService {
       await this.assignmentsRepository.create(item);
     }
 
+    // DEMO MODE: Auto state transition PENDING_CONFIRM -> DEFENSE
+    // After council is assigned, automatically transition topic to DEFENSE state
+    if (topic.state === 'PENDING_CONFIRM') {
+      this.logger.log(
+        `[assignCouncil:autoStateTransition] topicId=${topicId} fromState=PENDING_CONFIRM toState=DEFENSE reason=COUNCIL_ASSIGNED`,
+      );
+      
+      try {
+        await this.topicsRepository.patch(topicId, { state: 'DEFENSE' });
+        this.logger.log(
+          `[assignCouncil:autoStateTransition:success] topicId=${topicId} newState=DEFENSE`,
+        );
+        
+        // Notify about state change
+        const stateChangeReceivers = new Set<string>([
+          topic.studentUserId,
+          topic.supervisorUserId,
+        ]);
+        
+        // Add GVPB if exists
+        const activeGvpb = assignments.find(
+          (a) =>
+            a.topicId === topicId &&
+            a.topicRole === 'GVPB' &&
+            a.status === 'ACTIVE',
+        );
+        if (activeGvpb) {
+          stateChangeReceivers.add(activeGvpb.userId);
+        }
+        
+        // Add all council members
+        for (const item of newAssignments) {
+          stateChangeReceivers.add(item.userId);
+        }
+        
+        for (const receiverUserId of stateChangeReceivers) {
+          await this.notifyIfAvailable({
+            receiverUserId,
+            type: 'GENERAL',
+            topicId,
+            context: {
+              message: `De tai "${topic.title}" da chuyen sang trang thai BAO VE sau khi phan cong hoi dong.`,
+            },
+          });
+        }
+        
+        this.logger.log(
+          `[assignCouncil:autoStateTransition:notified] topicId=${topicId} receivers=${stateChangeReceivers.size}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[assignCouncil:autoStateTransition:error] topicId=${topicId} error=${error}`,
+        );
+        // Non-blocking: Council assignment succeeded, state transition failed
+        // Topic stays in PENDING_CONFIRM, can be manually transitioned later
+      }
+    }
+
     for (const item of newAssignments) {
       await this.notifyIfAvailable({
         receiverUserId: item.userId,

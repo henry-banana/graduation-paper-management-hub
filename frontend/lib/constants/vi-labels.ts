@@ -54,6 +54,7 @@ export const KLTN_ELIGIBILITY_REASONS: Record<string, string> = {
   OK:                    'Đủ điều kiện đăng ký KLTN',
   BCTT_INCOMPLETE:       'Chưa hoàn thành Báo cáo thực tập',
   BCTT_SCORE_TOO_LOW:    'Điểm BCTT phải lớn hơn 5.0',
+  KLTN_COMPLETED_EXISTS: 'Bạn đã có đề tài KLTN COMPLETED',
 };
 
 // Smart deadline display helper
