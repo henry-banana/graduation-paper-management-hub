@@ -602,6 +602,18 @@ export class ScoresService {
       throw error;
     }
 
+    // Auto-export BCTT rubric when GVHD submits score
+    let rubricDriveLink = existing?.rubricDriveLink;
+    if (!rubricDriveLink) {
+      try {
+        rubricDriveLink = await this.getRubricDocxLink(topic.id);
+      } catch (error) {
+        this.logger.warn(
+          `[ensureBcttPublishedSummary] Failed to export BCTT rubric for topic ${topic.id}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
+      }
+    }
+
     const nextSummary: ScoreSummaryRecord = {
       ...(existing ?? {
         id: `sum_${crypto.randomBytes(6).toString('hex')}`,
@@ -616,6 +628,7 @@ export class ScoresService {
       confirmedByGvhd: true,
       confirmedByCtHd: true,
       published: true,
+      rubricDriveLink,
     };
 
     if (existing) {
