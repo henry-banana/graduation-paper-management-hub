@@ -709,6 +709,109 @@ describe('ScoresService', () => {
     });
   });
 
+  describe('submitted score edit window (KLTN GVHD)', () => {
+    const gvhdRubric = [{ id: 'quality', max: 10 }];
+
+    it('should allow GVHD to update submitted score before final confirmation', async () => {
+      await service.createAndSubmitDirect(
+        'tp_001',
+        { quality: 6.0 },
+        'GVHD',
+        gvhdRubric,
+        lecturerUser,
+        { isDraftOnly: false },
+      );
+
+      const updated = await service.createAndSubmitDirect(
+        'tp_001',
+        { quality: 8.0 },
+        'GVHD',
+        gvhdRubric,
+        lecturerUser,
+        { isDraftOnly: false },
+      );
+
+      expect(updated.status).toBe('SUBMITTED');
+      expect(updated.totalScore).toBe(8.0);
+
+      const gvhdScore = scores.find(
+        (score) =>
+          score.topicId === 'tp_001' &&
+          score.scorerUserId === lecturerUser.userId &&
+          score.scorerRole === 'GVHD' &&
+          score.status === 'SUBMITTED',
+      );
+
+      expect(gvhdScore?.totalScore).toBe(8.0);
+    });
+
+    it('should block submitted update after final confirmation starts', async () => {
+      await service.createAndSubmitDirect(
+        'tp_001',
+        { quality: 6.5 },
+        'GVHD',
+        gvhdRubric,
+        lecturerUser,
+        { isDraftOnly: false },
+      );
+
+      summaries.push({
+        id: 'sum_lock_001',
+        topicId: 'tp_001',
+        gvhdScore: 6.5,
+        gvpbScore: 7.0,
+        councilAvgScore: 7.5,
+        finalScore: 7.0,
+        result: 'PASS',
+        confirmedByGvhd: true,
+        confirmedByCtHd: false,
+        published: false,
+      });
+
+      await expect(
+        service.createAndSubmitDirect(
+          'tp_001',
+          { quality: 9.0 },
+          'GVHD',
+          gvhdRubric,
+          lecturerUser,
+          { isDraftOnly: false },
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('should report lock metadata in my-draft response when published', async () => {
+      await service.createAndSubmitDirect(
+        'tp_001',
+        { quality: 7.0 },
+        'GVHD',
+        gvhdRubric,
+        lecturerUser,
+        { isDraftOnly: false },
+      );
+
+      summaries.push({
+        id: 'sum_lock_002',
+        topicId: 'tp_001',
+        gvhdScore: 7.0,
+        gvpbScore: 7.0,
+        councilAvgScore: 7.0,
+        finalScore: 7.0,
+        result: 'PASS',
+        confirmedByGvhd: true,
+        confirmedByCtHd: true,
+        published: true,
+      });
+
+      const myDraft = await service.findMyDraft('tp_001', lecturerUser);
+
+      expect(myDraft).not.toBeNull();
+      expect(myDraft?.isSubmitted).toBe(true);
+      expect(myDraft?.isLocked).toBe(true);
+      expect(myDraft?.lockReason).toContain('published');
+    });
+  });
+
   describe('mapToDto', () => {
     it('should map ScoreRecord to ScoreResponseDto', () => {
       const record = {

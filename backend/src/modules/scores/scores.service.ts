@@ -236,6 +236,89 @@ export class ScoresService {
     }
   }
 
+  private async getSubmittedScoreEditability(
+    topic: TopicRecord,
+    score: ScoreRecord,
+  ): Promise<{ editable: boolean; reason?: string }> {
+    // Scope-limited behavior: only GVHD scores for KLTN can be edited after submit.
+    if (topic.type !== 'KLTN' || score.scorerRole !== 'GVHD') {
+      return {
+        editable: false,
+        reason: 'Submitted score is immutable for this role/topic',
+      };
+    }
+
+    const summary = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topic.id,
+    );
+
+    if (!summary) {
+      return { editable: true };
+    }
+
+    if (summary.published) {
+      return {
+        editable: false,
+        reason: 'Score summary has been published',
+      };
+    }
+
+    if (summary.confirmedByGvhd || summary.confirmedByCtHd) {
+      return {
+        editable: false,
+        reason: 'Score summary has been confirmed',
+      };
+    }
+
+    return { editable: true };
+  }
+
+  private async refreshSummaryAfterSubmittedScoreChange(
+    topicId: string,
+    topic: TopicRecord,
+  ): Promise<void> {
+    const existingSummary = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topicId,
+    );
+
+    if (!existingSummary) {
+      return;
+    }
+
+    // Safety guard: immutable once any final confirmation/publish happened.
+    if (
+      existingSummary.published ||
+      existingSummary.confirmedByGvhd ||
+      existingSummary.confirmedByCtHd
+    ) {
+      return;
+    }
+
+    let recalculated: ScoreSummaryDto | null = null;
+    try {
+      recalculated = await this.calculateSummary(topicId, topic);
+    } catch {
+      recalculated = null;
+    }
+
+    const nextSummary: ScoreSummaryRecord = {
+      ...existingSummary,
+      confirmedByGvhd: false,
+      confirmedByCtHd: false,
+      published: false,
+    };
+
+    if (recalculated) {
+      nextSummary.gvhdScore = recalculated.gvhdScore;
+      nextSummary.gvpbScore = recalculated.gvpbScore;
+      nextSummary.councilAvgScore = recalculated.councilAvgScore;
+      nextSummary.finalScore = recalculated.finalScore;
+      nextSummary.result = recalculated.result;
+    }
+
+    await this.scoreSummariesRepository.update(existingSummary.id, nextSummary);
+  }
+
   /**
    * Get all scores for a topic
    */
@@ -626,13 +709,15 @@ export class ScoresService {
     comments?: string;
     questions?: string;
     isSubmitted: boolean;
+    isLocked: boolean;
+    lockReason?: string;
     totalScore: number;
   } | null> {
     if (user.role !== 'LECTURER') {
       throw new ForbiddenException('Only lecturers can access score drafts');
     }
 
-    await this.getTopicOrThrow(topicId);
+    const topic = await this.getTopicOrThrow(topicId);
 
     const scores = await this.scoresRepository.findAll();
     const myScores = scores.filter(
@@ -654,12 +739,22 @@ export class ScoresService {
       criteria[item.criterion] = item.score;
     }
 
+    let isLocked = false;
+    let lockReason: string | undefined;
+    if (score.status === 'SUBMITTED') {
+      const editability = await this.getSubmittedScoreEditability(topic, score);
+      isLocked = !editability.editable;
+      lockReason = editability.reason;
+    }
+
     return {
       scoreId: score.id,
       criteria,
       turnitinLink: undefined, // stored in notes if needed
       comments: score.rubricData.find((r) => r.note)?.note,
       isSubmitted: score.status === 'SUBMITTED',
+      isLocked,
+      lockReason,
       totalScore: score.totalScore,
     };
   }
@@ -711,7 +806,7 @@ export class ScoresService {
 
     const scores = await this.scoresRepository.findAll();
 
-    // Check if already submitted — cannot overwrite
+    // Check if already submitted.
     const submittedScore = scores.find(
       (s) =>
         s.topicId === topicId &&
@@ -719,16 +814,42 @@ export class ScoresService {
         s.scorerUserId === user.userId &&
         s.status === 'SUBMITTED',
     );
-    if (submittedScore && !options.isDraftOnly) {
-      throw new ConflictException(
-        `Score for ${scorerRole} has already been submitted`,
-      );
-    }
     if (submittedScore) {
+      const editability = await this.getSubmittedScoreEditability(
+        topic,
+        submittedScore,
+      );
+      if (!editability.editable) {
+        throw new ConflictException(
+          editability.reason ?? `Score for ${scorerRole} has already been submitted`,
+        );
+      }
+
+      submittedScore.rubricData = rubricData;
+      submittedScore.totalScore = totalScore;
+      submittedScore.questions = questions;
+      submittedScore.updatedAt = new Date().toISOString();
+      await this.scoresRepository.update(submittedScore.id, submittedScore);
+
+      await this.refreshSummaryAfterSubmittedScoreChange(topicId, topic);
+
+      await this.auditIfAvailable({
+        action: 'SCORE_SUBMITTED',
+        actorId: user.userId,
+        actorRole: user.role,
+        topicId,
+        detail: {
+          scoreId: submittedScore.id,
+          scorerRole,
+          totalScore,
+          editedAfterSubmit: true,
+        },
+      });
+
       return {
         scoreId: submittedScore.id,
         status: 'SUBMITTED',
-        totalScore: submittedScore.totalScore,
+        totalScore,
       };
     }
 

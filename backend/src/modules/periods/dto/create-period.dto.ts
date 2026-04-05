@@ -5,9 +5,6 @@ import {
   IsNotEmpty,
   MaxLength,
   IsOptional,
-  IsInt,
-  Min,
-  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PeriodType } from './period-response.dto';
@@ -18,12 +15,6 @@ export class CreatePeriodDto {
   @IsString()
   @MaxLength(50)
   code!: string;
-
-  @ApiPropertyOptional({ example: 'Đợt BCTT HK1 2026', description: 'Display name', maxLength: 100 })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  name?: string;
 
   @ApiProperty({ enum: ['BCTT', 'KLTN'], example: 'BCTT' })
   @IsNotEmpty()
@@ -49,11 +40,4 @@ export class CreatePeriodDto {
   @IsOptional()
   @IsDateString()
   submitEndAt?: string;
-
-  @ApiPropertyOptional({ example: 5, description: 'Default supervisor quota (1-20)', minimum: 1, maximum: 20 })
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(20)
-  supervisorQuota?: number;
 }

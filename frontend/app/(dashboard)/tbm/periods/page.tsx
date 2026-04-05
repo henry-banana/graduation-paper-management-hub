@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle, BookOpen, Calendar, Check, CheckCircle2,
-  Clock, Edit, Plus, RefreshCw, Trash2, X,
+  Clock, Edit, Plus, RefreshCw, X,
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 
@@ -14,20 +14,17 @@ interface PeriodApiDto {
   openDate?: string;
   closeDate?: string;
   status?: "DRAFT" | "OPEN" | "CLOSED";
-  name?: string;
   registrationStartAt?: string;
   registrationEndAt?: string;
   submitStartAt?: string;
   submitEndAt?: string;
   isOpen?: boolean;
-  supervisorQuota?: number;
   topicsCount?: number;
 }
 
 interface PeriodDto {
   id: string;
   code: string;
-  name: string;
   type: "BCTT" | "KLTN";
   registrationStartAt: string;
   registrationEndAt: string;
@@ -35,7 +32,6 @@ interface PeriodDto {
   submitEndAt: string;
   isOpen: boolean;
   status: "DRAFT" | "OPEN" | "CLOSED";
-  supervisorQuota?: number;
   topicsCount?: number;
 }
 
@@ -43,24 +39,20 @@ type ModalMode = "create" | "edit" | null;
 
 interface FormState {
   code: string;
-  name: string;
   type: "BCTT" | "KLTN";
   registrationStartAt: string;
   registrationEndAt: string;
   submitStartAt: string;
   submitEndAt: string;
-  supervisorQuota: number;
 }
 
 const EMPTY_FORM: FormState = {
   code: "",
-  name: "",
   type: "BCTT",
   registrationStartAt: "",
   registrationEndAt: "",
   submitStartAt: "",
   submitEndAt: "",
-  supervisorQuota: 5,
 };
 
 function normalizePeriod(period: PeriodApiDto): PeriodDto {
@@ -73,7 +65,6 @@ function normalizePeriod(period: PeriodApiDto): PeriodDto {
   return {
     id: period.id,
     code: period.code,
-    name: period.name ?? `${period.type} ${period.code}`,
     type: period.type,
     registrationStartAt,
     registrationEndAt,
@@ -81,7 +72,6 @@ function normalizePeriod(period: PeriodApiDto): PeriodDto {
     submitEndAt: period.submitEndAt ?? "",
     isOpen,
     status,
-    supervisorQuota: period.supervisorQuota,
     topicsCount: period.topicsCount,
   };
 }
@@ -162,13 +152,11 @@ export default function TBMPeriodsPage() {
   const openEdit = (p: PeriodDto) => {
     setForm({
       code: p.code,
-      name: p.name,
       type: p.type,
       registrationStartAt: toInputDate(p.registrationStartAt),
       registrationEndAt: toInputDate(p.registrationEndAt),
       submitStartAt: toInputDate(p.submitStartAt),
       submitEndAt: toInputDate(p.submitEndAt),
-      supervisorQuota: p.supervisorQuota ?? 5,
     });
     setEditingPeriod(p);
     setModalMode("edit");
@@ -186,25 +174,21 @@ export default function TBMPeriodsPage() {
       if (modalMode === "create") {
         await api.post<ApiResponse<{ id: string }>>("/periods", {
           code: form.code,
-          name: form.name || undefined,
           type: form.type,
           openDate: toDateOnly(form.registrationStartAt),
           closeDate: toDateOnly(form.registrationEndAt),
           submitStartAt: form.submitStartAt ? toDateOnly(form.submitStartAt) : undefined,
           submitEndAt: form.submitEndAt ? toDateOnly(form.submitEndAt) : undefined,
-          supervisorQuota: form.supervisorQuota || undefined,
         });
       } else if (editingPeriod) {
         await api.patch<ApiResponse<{ updated: boolean }>>(
           `/periods/${editingPeriod.id}`,
           {
             code: form.code,
-            name: form.name || undefined,
             openDate: toDateOnly(form.registrationStartAt),
             closeDate: toDateOnly(form.registrationEndAt),
             submitStartAt: form.submitStartAt ? toDateOnly(form.submitStartAt) : undefined,
             submitEndAt: form.submitEndAt ? toDateOnly(form.submitEndAt) : undefined,
-            supervisorQuota: form.supervisorQuota || undefined,
           },
         );
       }
@@ -247,7 +231,7 @@ export default function TBMPeriodsPage() {
     }
   };
 
-  const setField = (k: keyof FormState, v: string | number) =>
+  const setField = (k: keyof FormState, v: string) =>
     setForm(prev => ({ ...prev, [k]: v }));
 
   return (
@@ -256,7 +240,7 @@ export default function TBMPeriodsPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight font-headline text-on-surface">Quản lý đợt BCTT / KLTN</h1>
-          <p className="text-sm text-outline mt-1">Thiết lập thời gian đăng ký, nộp bài và quota GVHD cho mỗi đợt.</p>
+          <p className="text-sm text-outline mt-1">Thiết lập thời gian đăng ký và nộp bài cho mỗi đợt.</p>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => void load()} className="p-2.5 rounded-xl border border-outline-variant/20 hover:bg-surface-container transition-colors">
@@ -338,7 +322,7 @@ export default function TBMPeriodsPage() {
               <table className="min-w-full divide-y divide-outline-variant/10">
                 <thead>
                   <tr className="bg-surface-container/50">
-                    {["Đợt", "Loại", "Đăng ký", "Nộp bài", "Quota GVHD", "SV ĐK", "Trạng thái", ""].map(h => (
+                    {["Đợt", "Loại", "Đăng ký", "Nộp bài", "SV ĐK", "Trạng thái", ""].map(h => (
                       <th key={h} className="px-5 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -350,8 +334,8 @@ export default function TBMPeriodsPage() {
                     return (
                       <tr key={p.id} className="hover:bg-surface-container-low/30 transition-colors">
                         <td className="px-5 py-4">
-                          <p className="text-sm font-semibold text-on-surface">{p.name}</p>
-                          <p className="text-xs text-outline mt-0.5 font-mono">{p.code}</p>
+                          <p className="text-sm font-semibold text-on-surface">{p.code}</p>
+                          <p className="text-xs text-outline mt-0.5">{p.type}</p>
                         </td>
                         <td className="px-5 py-4">
                           <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${p.type === "KLTN" ? "bg-purple-100 text-purple-700" : "bg-primary/10 text-primary"}`}>
@@ -363,9 +347,6 @@ export default function TBMPeriodsPage() {
                         </td>
                         <td className="px-5 py-4 whitespace-nowrap text-xs text-outline">
                           {fmtDate(p.submitStartAt)} → {fmtDate(p.submitEndAt)}
-                        </td>
-                        <td className="px-5 py-4 text-sm font-semibold text-on-surface text-center">
-                          {p.supervisorQuota ?? "—"}
                         </td>
                         <td className="px-5 py-4 text-sm font-semibold text-center text-on-surface">
                           {p.topicsCount ?? "—"}
@@ -418,7 +399,7 @@ export default function TBMPeriodsPage() {
               </button>
             </div>
             <div className="p-6 space-y-5">
-              {/* Row: code + name */}
+              {/* Row: code + type */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-outline mb-1.5 uppercase">Mã đợt *</label>
@@ -433,11 +414,6 @@ export default function TBMPeriodsPage() {
                     <option value="KLTN">KLTN</option>
                   </select>
                 </div>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-outline mb-1.5 uppercase">Tên đợt *</label>
-                <input value={form.name} onChange={e => setField("name", e.target.value)} placeholder="VD: Báo cáo thực tập HK1 2025-2026"
-                  className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
               </div>
               {/* Dates */}
               <div>
@@ -469,11 +445,6 @@ export default function TBMPeriodsPage() {
                       className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
                   </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-outline mb-1.5 uppercase">Quota GVHD (số SV tối đa/GV)</label>
-                <input type="number" min={1} max={20} value={form.supervisorQuota} onChange={e => setField("supervisorQuota", parseInt(e.target.value) || 5)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
               </div>
             </div>
             {error && (

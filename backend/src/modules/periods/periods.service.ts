@@ -122,6 +122,17 @@ export class PeriodsService {
       throw new BadRequestException('Close date must be after open date');
     }
 
+    if (
+      dto.submitStartAt &&
+      dto.submitEndAt &&
+      new Date(dto.submitEndAt) < new Date(dto.submitStartAt)
+    ) {
+      this.logger.warn(
+        `[create:invalidSubmitRange] code=${dto.code} submitStartAt=${dto.submitStartAt} submitEndAt=${dto.submitEndAt}`,
+      );
+      throw new BadRequestException('Submission end date must be on or after submission start date');
+    }
+
     // Check for duplicate code
     const existingCode = periods.find((p) => p.code === dto.code);
     if (existingCode) {
@@ -154,6 +165,8 @@ export class PeriodsService {
       type: dto.type,
       openDate: dto.openDate,
       closeDate: dto.closeDate,
+      submitStartAt: dto.submitStartAt,
+      submitEndAt: dto.submitEndAt,
       status: 'DRAFT',
       createdAt: now,
       updatedAt: now,
@@ -197,6 +210,19 @@ export class PeriodsService {
       throw new BadRequestException('Close date must be after open date');
     }
 
+    const submitStartAt = dto.submitStartAt ?? period.submitStartAt;
+    const submitEndAt = dto.submitEndAt ?? period.submitEndAt;
+    if (
+      submitStartAt &&
+      submitEndAt &&
+      new Date(submitEndAt) < new Date(submitStartAt)
+    ) {
+      this.logger.warn(
+        `[update:invalidSubmitRange] periodId=${id} submitStartAt=${submitStartAt} submitEndAt=${submitEndAt}`,
+      );
+      throw new BadRequestException('Submission end date must be on or after submission start date');
+    }
+
     // Check for duplicate code
     if (dto.code && dto.code !== period.code) {
       const existingCode = periods.find((p) => p.code === dto.code && p.id !== id);
@@ -212,6 +238,8 @@ export class PeriodsService {
     if (dto.code) period.code = dto.code;
     if (dto.openDate) period.openDate = dto.openDate;
     if (dto.closeDate) period.closeDate = dto.closeDate;
+    if (dto.submitStartAt !== undefined) period.submitStartAt = dto.submitStartAt;
+    if (dto.submitEndAt !== undefined) period.submitEndAt = dto.submitEndAt;
     period.updatedAt = new Date().toISOString();
 
     await this.periodsRepository.update(period.id, period);
@@ -293,6 +321,8 @@ export class PeriodsService {
       type: period.type,
       openDate: period.openDate,
       closeDate: period.closeDate,
+      submitStartAt: period.submitStartAt,
+      submitEndAt: period.submitEndAt,
       status: period.status,
       createdAt: period.createdAt,
       updatedAt: period.updatedAt,

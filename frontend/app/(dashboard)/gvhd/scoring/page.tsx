@@ -34,6 +34,8 @@ interface ScoreDto {
   comments?: string;
   submittedAt?: string;
   isSubmitted?: boolean;
+  isLocked?: boolean;
+  lockReason?: string;
 }
 
 /* ---------- Rubric definitions ---------- */
@@ -76,6 +78,23 @@ function GVHDScoringContent() {
   const totalScore = useMemo(() => rubric.reduce((s, c) => s + (scores[c.id] ?? 0), 0), [scores, rubric]);
   const maxScore = useMemo(() => rubric.reduce((s, c) => s + c.max, 0), [rubric]);
   const isPassed = totalScore >= 5.0;
+  const isSubmitted = existingScore?.isSubmitted ?? false;
+  const isScoreLocked = isSubmitted && (existingScore?.isLocked ?? true);
+  const isSubmittedEditable = isSubmitted && !isScoreLocked;
+
+  const submittedLockMessage = useMemo(() => {
+    if (!isSubmitted) return "";
+    if (!isScoreLocked) {
+      return "Phiếu điểm đã được nộp chính thức nhưng vẫn có thể chỉnh sửa trước xác nhận cuối. Hãy dùng nút 'Cập nhật điểm đã nộp' để lưu thay đổi.";
+    }
+    if (existingScore?.lockReason?.includes("published")) {
+      return "Phiếu điểm đã bị khóa vì điểm đã được công bố.";
+    }
+    if (existingScore?.lockReason?.includes("confirmed")) {
+      return "Phiếu điểm đã bị khóa vì đã có xác nhận cuối.";
+    }
+    return "Phiếu điểm đã được nộp chính thức và hiện không thể chỉnh sửa.";
+  }, [existingScore?.lockReason, isScoreLocked, isSubmitted]);
 
   // Load supervised topics
   useEffect(() => {
@@ -150,7 +169,10 @@ function GVHDScoringContent() {
 
   const handleSubmit = async () => {
     if (!selectedId) return;
-    if (!window.confirm("Sau khi nộp chính thức, điểm sẽ không thể chỉnh sửa. Xác nhận?")) return;
+    const confirmMessage = isSubmittedEditable
+      ? "Bạn muốn cập nhật phiếu điểm đã nộp? Thao tác này chỉ được phép trước khi xác nhận cuối."
+      : "Sau khi nộp chính thức, điểm sẽ không thể chỉnh sửa. Xác nhận?";
+    if (!window.confirm(confirmMessage)) return;
     setIsSubmitting(true);
     setError(null);
     try {
@@ -161,8 +183,23 @@ function GVHDScoringContent() {
         comments,
         role,
       });
-      setSuccess("Đã nộp phiếu điểm chính thức thành công!");
-      setExistingScore({ criteria: scores, ...existingScore, isSubmitted: true } as ScoreDto);
+      setSuccess(
+        isSubmittedEditable
+          ? "Đã cập nhật phiếu điểm đã nộp thành công!"
+          : "Đã nộp phiếu điểm chính thức thành công!",
+      );
+
+      // Refresh lock state from backend after submit/update.
+      try {
+        const refreshed = await api.get<ApiResponse<ScoreDto>>(`/topics/${selectedId}/scores/my-draft`);
+        setExistingScore(refreshed.data);
+        setScores(refreshed.data.criteria ?? {});
+        setTurnitinLink(refreshed.data.turnitinLink ?? "");
+        setComments(refreshed.data.comments ?? "");
+      } catch {
+        setExistingScore({ criteria: scores, ...existingScore, isSubmitted: true, isLocked: false } as ScoreDto);
+      }
+
       setTimeout(() => setSuccess(null), 5000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Nộp điểm thất bại.");
@@ -278,10 +315,10 @@ function GVHDScoringContent() {
           <p className="text-sm text-green-700">{success}</p>
         </div>
       )}
-      {existingScore?.isSubmitted && (
+      {isSubmitted && (
         <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-2xl px-4 py-3">
           <FileCheck className="w-4 h-4 text-primary" />
-          <p className="text-sm text-primary font-medium">Phiếu điểm đã được nộp chính thức. Không thể chỉnh sửa.</p>
+          <p className="text-sm text-primary font-medium">{submittedLockMessage}</p>
         </div>
       )}
 
@@ -312,7 +349,7 @@ function GVHDScoringContent() {
                         <button
                           type="button"
                           onClick={() => setTurnitinUploadMode("link")}
-                          disabled={existingScore?.isSubmitted}
+                          disabled={isScoreLocked}
                           className={`px-2 py-0.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${
                             turnitinUploadMode === "link"
                               ? "bg-primary text-on-primary"
@@ -324,7 +361,7 @@ function GVHDScoringContent() {
                         <button
                           type="button"
                           onClick={() => setTurnitinUploadMode("file")}
-                          disabled={existingScore?.isSubmitted}
+                          disabled={isScoreLocked}
                           className={`px-2 py-0.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${
                             turnitinUploadMode === "file"
                               ? "bg-primary text-on-primary"
@@ -342,7 +379,7 @@ function GVHDScoringContent() {
                           ref={turnitinRef}
                           value={turnitinLink}
                           onChange={e => setTurnitinLink(e.target.value)}
-                          disabled={existingScore?.isSubmitted}
+                          disabled={isScoreLocked}
                           placeholder="Dán link Turnitin vào đây..."
                           className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/20 bg-surface-container text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
                         />
@@ -375,7 +412,7 @@ function GVHDScoringContent() {
                                 </a>
                               )}
                             </div>
-                            {!existingScore?.isSubmitted && (
+                            {!isScoreLocked && (
                               <button
                                 type="button"
                                 onClick={() => setTurnitinFileUploaded(null)}
@@ -429,7 +466,7 @@ function GVHDScoringContent() {
                             min={0}
                             step={0.25}
                             value={current}
-                            disabled={existingScore?.isSubmitted}
+                            disabled={isScoreLocked}
                             onChange={e => setScores(prev => ({
                               ...prev,
                               [criterion.id]: Math.min(criterion.max, Math.max(0, parseFloat(e.target.value) || 0)),
@@ -458,7 +495,7 @@ function GVHDScoringContent() {
               <textarea
                 rows={4}
                 value={comments}
-                disabled={existingScore?.isSubmitted}
+                disabled={isScoreLocked}
                 onChange={e => setComments(e.target.value)}
                 placeholder="Nhận xét về bài làm, ưu điểm, hạn chế..."
                 className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-60"
@@ -512,7 +549,7 @@ function GVHDScoringContent() {
               <div className="p-5 flex flex-col gap-3">
                 <button
                   onClick={() => void handleSaveDraft()}
-                  disabled={isSaving || existingScore?.isSubmitted}
+                  disabled={isSaving || isSubmitted || isScoreLocked}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-outline-variant/20 text-sm font-semibold text-on-surface hover:bg-surface-container transition-all active:scale-95 disabled:opacity-60"
                 >
                   <Save className="w-4 h-4" />
@@ -520,11 +557,17 @@ function GVHDScoringContent() {
                 </button>
                 <button
                   onClick={() => void handleSubmit()}
-                  disabled={isSubmitting || existingScore?.isSubmitted}
+                  disabled={isSubmitting || isScoreLocked}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95 disabled:opacity-60"
                 >
                   <FileCheck className="w-4 h-4" />
-                  {isSubmitting ? "Đang nộp..." : existingScore?.isSubmitted ? "Đã nộp chính thức" : "Nộp phiếu chính thức"}
+                  {isSubmitting
+                    ? isSubmitted ? "Đang cập nhật..." : "Đang nộp..."
+                    : isScoreLocked
+                      ? "Đã khóa sau xác nhận cuối"
+                      : isSubmitted
+                        ? "Cập nhật điểm đã nộp"
+                        : "Nộp phiếu chính thức"}
                 </button>
               </div>
             </div>

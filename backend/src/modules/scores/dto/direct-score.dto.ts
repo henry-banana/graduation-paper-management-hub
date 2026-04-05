@@ -63,5 +63,7 @@ export interface MyDraftResponseDto {
   comments?: string;
   questions?: string;
   isSubmitted: boolean;
+  isLocked: boolean;
+  lockReason?: string;
   totalScore: number;
 }

@@ -331,6 +331,8 @@ describe('TopicsService', () => {
         type: 'BCTT',
         openDate: '2000-01-01',
         closeDate: '2099-12-31',
+        submitStartAt: '2026-06-01',
+        submitEndAt: '2026-06-15',
         status: 'OPEN',
         isActive: true,
         createdAt: now,
@@ -536,6 +538,26 @@ describe('TopicsService', () => {
         unassignedLecturerUser,
       );
       expect(topic.id).toBe('tp_unassigned_supervisor');
+    });
+
+    it('should fallback submission window from period for legacy topic missing topic-level window', async () => {
+      topicsData.push({
+        id: 'tp_legacy_window',
+        type: 'BCTT',
+        title: 'Legacy topic missing submit window',
+        domain: 'Software Engineering',
+        state: 'IN_PROGRESS',
+        studentUserId: 'USR001',
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_bctt',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const topic = await service.findByIdForUser('tp_legacy_window', studentUser);
+
+      expect(topic.submitStartAt).toBe('2026-06-01T00:00:00.000Z');
+      expect(topic.submitEndAt).toBe('2026-06-15T23:59:59.999Z');
     });
   });
 
@@ -752,10 +774,13 @@ describe('TopicsService', () => {
   });
 
   describe('approve', () => {
-    it('should approve topic in PENDING_GV state', async () => {
+    it('should approve topic in PENDING_GV state and auto-fill submission window from period', async () => {
       const result = await service.approve('tp_002', undefined, lecturerUser);
 
       expect(result.state).toBe('IN_PROGRESS');
+      const topic = await service.findById('tp_002');
+      expect(topic?.submitStartAt).toBe('2026-06-01T00:00:00.000Z');
+      expect(topic?.submitEndAt).toBe('2026-06-15T23:59:59.999Z');
     });
 
     it('should throw NotFoundException for non-existent topic', async () => {
