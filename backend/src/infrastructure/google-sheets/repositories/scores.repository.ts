@@ -114,8 +114,21 @@ export class ScoresRepository extends SheetsBaseRepository<ScoreRecord> {
       'GVPB': 'GVPB',
       'TV_HD': 'TV_HD',
       'TVHD': 'TV_HD',
+      // Council roles that score under TV_HD identity
+      'CT_HD': 'TV_HD',
+      'CTHD': 'TV_HD',
+      'TK_HD': 'TV_HD',
+      'THUKYHD': 'TV_HD',
     };
-    return mapping[normalized] ?? 'GVHD';
+    const resolved = mapping[normalized];
+    if (!resolved) {
+      // DB-02 fix: throw instead of silently falling back to GVHD
+      throw new Error(
+        `[ScoresRepository] Unknown scorerRole value: "${value}". ` +
+        `Expected one of GVHD | GVPB | TV_HD | CT_HD | TK_HD.`,
+      );
+    }
+    return resolved;
   }
 
   private parseScoreStatus(value: string): ScoreStatus {
@@ -200,7 +213,7 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       entity.confirmedByGvhd,
       entity.confirmedByCtHd,
       entity.published,
-      '',
+      new Date().toISOString(), // DB-03 fix: was hardcoded '' — write real timestamp
     ];
   }
 

@@ -9,5 +9,6 @@ export interface ProblemDetails {
   status: number;
   detail: string;
   instance: string;
+  requestId?: string;
   errors?: ProblemDetailsError[];
 }

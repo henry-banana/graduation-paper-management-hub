@@ -133,9 +133,11 @@ export const SHEET_HEADERS: Record<SheetName, string[]> = {
   'Data': [
     // Teacher cols
     'Email', 'MS', 'Ten', 'Role', 'Major', 'HeDaoTao',
-    // App cols
+    // App cols (G–N)
     'id', 'phone', 'completedBcttScore', 'totalQuota', 'quotaUsed',
     'expertise', 'isActive', 'createdAt',
+    // Extended app cols (O–P) — DB-01 fix: align with UsersRepository.toRow() 16-col output
+    'earnedCredits', 'requiredCredits',
   ],
 
   // ── Teacher tab: Dot ──

@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { AccountRole } from '../../common/types';
@@ -44,37 +44,63 @@ const CACHE_TTL = process.env.NODE_ENV === 'production' ? 180_000 : 0;
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
     private readonly usersRepository: UsersRepository,
   ) {}
 
   async findByEmail(email: string): Promise<UserRecord | null> {
+    this.logger.log(`[findByEmail:start] email=${email}`);
     const cacheKey = `user:email:${email}`;
     const cached = await this.cacheManager.get<UserRecord>(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.logger.log(`[findByEmail:cacheHit] email=${email} userId=${cached.id}`);
+      return cached;
+    }
 
     const user = await this.fetchUserFromSheet(email);
     if (user) {
       await this.cacheManager.set(cacheKey, user, CACHE_TTL);
+      this.logger.log(
+        `[findByEmail:success] email=${email} userId=${user.id} source=sheet cached=true ttlMs=${CACHE_TTL}`,
+      );
+      return user;
     }
-    return user;
+
+    this.logger.warn(`[findByEmail:notFound] email=${email}`);
+    return null;
   }
 
   async findById(id: string): Promise<UserRecord | null> {
+    this.logger.log(`[findById:start] userId=${id}`);
     const cacheKey = `user:id:${id}`;
     const cached = await this.cacheManager.get<UserRecord>(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.logger.log(`[findById:cacheHit] userId=${id}`);
+      return cached;
+    }
 
     const user = await this.fetchUserByIdFromSheet(id);
     if (user) {
       await this.cacheManager.set(cacheKey, user, CACHE_TTL);
+      this.logger.log(
+        `[findById:success] userId=${id} source=sheet cached=true ttlMs=${CACHE_TTL}`,
+      );
+      return user;
     }
-    return user;
+
+    this.logger.warn(`[findById:notFound] userId=${id}`);
+    return null;
   }
 
   async findAll(query: GetUsersQueryDto): Promise<PaginatedResult<UserResponseDto>> {
+    this.logger.log(
+      `[findAll:start] queryRole=${query.role ?? '-'} query=${query.q ?? '-'} page=${query.page ?? 1} size=${query.size ?? 20}`,
+    );
     let users = await this.usersRepository.findAll();
+    const totalRaw = users.length;
 
     // Filter by role
     if (query.role) {
@@ -96,6 +122,9 @@ export class UsersService {
     const size = query.size ?? 20;
     const start = (page - 1) * size;
     const paginatedUsers = users.slice(start, start + size);
+    this.logger.log(
+      `[findAll:success] totalRaw=${totalRaw} filtered=${total} returned=${paginatedUsers.length} page=${page} size=${size}`,
+    );
 
     return {
       data: paginatedUsers.map((u) => this.mapToDto(u)),
@@ -104,9 +133,9 @@ export class UsersService {
   }
 
   async findSupervisorOptions(): Promise<SupervisorOptionDto[]> {
+    this.logger.log('[findSupervisorOptions:start]');
     const users = await this.usersRepository.findAll();
-
-    return users
+    const options = users
       .filter((user) => {
         if (user.role !== 'LECTURER' || user.isActive === false) {
           return false;
@@ -126,14 +155,24 @@ export class UsersService {
         totalQuota: user.totalQuota,
         quotaUsed: user.quotaUsed,
       }));
+
+    this.logger.log(
+      `[findSupervisorOptions:success] totalUsers=${users.length} eligible=${options.length}`,
+    );
+
+    return options;
   }
 
   async updateProfile(
     userId: string,
     dto: UpdateUserProfileDto,
   ): Promise<{ updated: boolean }> {
+    this.logger.log(
+      `[updateProfile:start] userId=${userId} hasFullName=${Boolean(dto.fullName)} hasPhone=${Boolean(dto.phone)}`,
+    );
     const user = await this.usersRepository.findById(userId);
     if (!user) {
+      this.logger.warn(`[updateProfile:notFound] userId=${userId}`);
       throw new NotFoundException('User not found');
     }
 
@@ -150,15 +189,18 @@ export class UsersService {
       user.email,
       user.id,
     );
+    this.logger.log(`[updateProfile:success] userId=${userId}`);
 
     return { updated: true };
   }
 
   async invalidateUserCache(email: string, id: string): Promise<void> {
+    this.logger.log(`[invalidateUserCache:start] email=${email} userId=${id}`);
     await Promise.all([
       this.cacheManager.del(`user:email:${email}`),
       this.cacheManager.del(`user:id:${id}`),
     ]);
+    this.logger.log(`[invalidateUserCache:success] email=${email} userId=${id}`);
   }
 
   mapToDto(user: UserRecord): UserResponseDto {
@@ -202,12 +244,14 @@ export class UsersService {
   }
 
   private async fetchUserFromSheet(email: string): Promise<UserRecord | null> {
+    this.logger.log(`[fetchUserFromSheet:start] email=${email}`);
     return this.usersRepository.findFirst(
       (u) => u.email.toLowerCase() === email.toLowerCase(),
     );
   }
 
   private async fetchUserByIdFromSheet(id: string): Promise<UserRecord | null> {
+    this.logger.log(`[fetchUserByIdFromSheet:start] userId=${id}`);
     return this.usersRepository.findById(id);
   }
 }

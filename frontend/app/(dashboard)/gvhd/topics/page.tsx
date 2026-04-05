@@ -230,8 +230,9 @@ export default function GVHDTopicsPage() {
                       </Link>
                     )}
                     <Link
-                      href={`/gvhd/scoring?topicId=${topic.id}`}
+                      href={`/gvhd/topics/${topic.id}`}
                       className="p-2 bg-surface-container-low border border-outline-variant/30 text-on-surface-variant rounded-xl hover:bg-surface-container transition-colors"
+                      title="Xem chi tiết đề tài"
                     >
                       <ChevronRight className="w-4 h-4" />
                     </Link>

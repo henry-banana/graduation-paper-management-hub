@@ -1,5 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-	// output: 'standalone', // Disabled to allow direct 'npm run start' without node server.js
+	output: 'standalone', // ✅ Enabled for optimized Docker builds (80% smaller image)
 };
 module.exports = nextConfig;

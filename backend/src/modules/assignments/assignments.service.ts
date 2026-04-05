@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   Optional,
   NotFoundException,
   ConflictException,
@@ -34,6 +35,7 @@ export interface AssignmentRecord {
 
 @Injectable()
 export class AssignmentsService {
+  private readonly logger = new Logger(AssignmentsService.name);
   private readonly quotaTrackedRoles: TopicRole[] = ['GVHD', 'GVPB'];
 
   constructor(
@@ -53,11 +55,16 @@ export class AssignmentsService {
     totalQuota: number;
     usedQuota: number;
   }> {
+    this.logger.log(`[getLecturerQuota:start] userId=${userId}`);
     const lecturer = await this.usersRepository.findById(userId);
     if (!lecturer || lecturer.role === 'STUDENT') {
+      this.logger.warn(`[getLecturerQuota:invalidLecturer] userId=${userId}`);
       throw new BadRequestException(`User ${userId} is not a valid lecturer`);
     }
 
+    this.logger.log(
+      `[getLecturerQuota:success] userId=${userId} totalQuota=${lecturer.totalQuota ?? 10} usedQuota=${lecturer.quotaUsed ?? 0}`,
+    );
     return {
       userId,
       totalQuota: lecturer.totalQuota ?? 10,
@@ -67,15 +74,25 @@ export class AssignmentsService {
 
   private async ensureQuotaAvailable(userId: string, role: TopicRole): Promise<void> {
     if (!this.quotaTrackedRoles.includes(role)) {
+      this.logger.log(
+        `[ensureQuotaAvailable:skip] userId=${userId} role=${role} reason=ROLE_NOT_TRACKED`,
+      );
       return;
     }
 
     const quota = await this.getLecturerQuota(userId);
     if (quota.usedQuota >= quota.totalQuota) {
+      this.logger.warn(
+        `[ensureQuotaAvailable:conflict] userId=${userId} role=${role} usedQuota=${quota.usedQuota} totalQuota=${quota.totalQuota}`,
+      );
       throw new ConflictException(
         `Lecturer ${userId} has reached quota limit for role ${role}`,
       );
     }
+
+    this.logger.log(
+      `[ensureQuotaAvailable:success] userId=${userId} role=${role} usedQuota=${quota.usedQuota} totalQuota=${quota.totalQuota}`,
+    );
   }
 
   private async applyQuotaDelta(
@@ -84,17 +101,27 @@ export class AssignmentsService {
     delta: 1 | -1,
   ): Promise<void> {
     if (!this.quotaTrackedRoles.includes(role)) {
+      this.logger.log(
+        `[applyQuotaDelta:skip] userId=${userId} role=${role} delta=${delta} reason=ROLE_NOT_TRACKED`,
+      );
       return;
     }
 
+    this.logger.log(`[applyQuotaDelta:start] userId=${userId} role=${role} delta=${delta}`);
     const lecturer = await this.usersRepository.findById(userId);
     if (!lecturer || lecturer.role === 'STUDENT') {
+      this.logger.warn(
+        `[applyQuotaDelta:skip] userId=${userId} role=${role} delta=${delta} reason=INVALID_LECTURER`,
+      );
       return;
     }
 
     const current = lecturer.quotaUsed ?? 0;
     lecturer.quotaUsed = Math.max(0, current + delta);
     await this.usersRepository.update(lecturer.id, lecturer);
+    this.logger.log(
+      `[applyQuotaDelta:success] userId=${userId} role=${role} delta=${delta} quotaBefore=${current} quotaAfter=${lecturer.quotaUsed}`,
+    );
   }
 
   /**
@@ -104,19 +131,29 @@ export class AssignmentsService {
     topicId: string,
     user: AuthUser,
   ): Promise<AssignmentResponseDto[]> {
+    this.logger.log(
+      `[findByTopicId:start] topicId=${topicId} requesterUserId=${user.userId} requesterRole=${user.role}`,
+    );
     const topic = await this.topicsRepository.findById(topicId);
     if (!topic) {
+      this.logger.warn(`[findByTopicId:notFound] topicId=${topicId}`);
       throw new NotFoundException(`Topic with ID ${topicId} not found`);
     }
 
     // Authorization: Students can only view their own topic assignments
     if (user.role === 'STUDENT' && topic.studentUserId !== user.userId) {
+      this.logger.warn(
+        `[findByTopicId:forbidden] topicId=${topicId} requesterUserId=${user.userId} ownerUserId=${topic.studentUserId}`,
+      );
       throw new ForbiddenException('Cannot view assignments for this topic');
     }
 
     const assignments = await this.assignmentsRepository.findAll();
     const topicAssignments = assignments.filter(
       (a) => a.topicId === topicId,
+    );
+    this.logger.log(
+      `[findByTopicId:success] topicId=${topicId} totalAssignments=${topicAssignments.length}`,
     );
 
     return topicAssignments.map((a) => this.mapToDto(a));
@@ -129,17 +166,34 @@ export class AssignmentsService {
     assignmentId: string,
     user: AuthUser,
   ): Promise<AssignmentRecord | null> {
+    this.logger.log(
+      `[findById:start] assignmentId=${assignmentId} requesterUserId=${user.userId} requesterRole=${user.role}`,
+    );
     const assignment = await this.assignmentsRepository.findById(assignmentId);
-    if (!assignment) return null;
+    if (!assignment) {
+      this.logger.warn(`[findById:notFound] assignmentId=${assignmentId}`);
+      return null;
+    }
 
     const topic = await this.topicsRepository.findById(assignment.topicId);
-    if (!topic) return null;
+    if (!topic) {
+      this.logger.warn(
+        `[findById:topicMissing] assignmentId=${assignmentId} topicId=${assignment.topicId}`,
+      );
+      return null;
+    }
 
     // Authorization check
     if (user.role === 'STUDENT' && topic.studentUserId !== user.userId) {
+      this.logger.warn(
+        `[findById:forbidden] assignmentId=${assignmentId} requesterUserId=${user.userId} topicOwnerUserId=${topic.studentUserId}`,
+      );
       throw new ForbiddenException('Cannot view this assignment');
     }
 
+    this.logger.log(
+      `[findById:success] assignmentId=${assignmentId} topicId=${assignment.topicId} topicRole=${assignment.topicRole}`,
+    );
     return assignment;
   }
 
@@ -151,13 +205,20 @@ export class AssignmentsService {
     dto: AssignGvpbDto,
     user: AuthUser,
   ): Promise<{ assignmentId: string; topicRole: TopicRole }> {
+    this.logger.log(
+      `[assignGvpb:start] topicId=${topicId} gvpbUserId=${dto.userId} actorUserId=${user.userId} actorRole=${user.role}`,
+    );
     // Only TBM can assign GVPB
     if (user.role !== 'TBM') {
+      this.logger.warn(
+        `[assignGvpb:forbidden] topicId=${topicId} actorUserId=${user.userId} actorRole=${user.role}`,
+      );
       throw new ForbiddenException('Only TBM can assign GVPB');
     }
 
     const topic = await this.topicsRepository.findById(topicId);
     if (!topic) {
+      this.logger.warn(`[assignGvpb:notFound] topicId=${topicId}`);
       throw new NotFoundException(`Topic with ID ${topicId} not found`);
     }
 
@@ -165,12 +226,18 @@ export class AssignmentsService {
 
     // GVPB can only be assigned to KLTN topics
     if (topic.type !== 'KLTN') {
+      this.logger.warn(
+        `[assignGvpb:badRequest] topicId=${topicId} type=${topic.type} reason=NON_KLTN`,
+      );
       throw new BadRequestException('GVPB can only be assigned to KLTN topics');
     }
 
     // Topic must be in a valid state (e.g., CONFIRMED or later)
     const validStates = ['CONFIRMED', 'IN_PROGRESS', 'PENDING_CONFIRM', 'DEFENSE'];
     if (!validStates.includes(topic.state)) {
+      this.logger.warn(
+        `[assignGvpb:conflict] topicId=${topicId} state=${topic.state} reason=INVALID_STATE`,
+      );
       throw new ConflictException(
         `Cannot assign GVPB in topic state: ${topic.state}`,
       );
@@ -184,6 +251,9 @@ export class AssignmentsService {
         a.status === 'ACTIVE',
     );
     if (existingGvpb) {
+      this.logger.warn(
+        `[assignGvpb:conflict] topicId=${topicId} reason=GVPB_ALREADY_EXISTS assignmentId=${existingGvpb.id}`,
+      );
       throw new ConflictException('Topic already has an active GVPB assigned');
     }
 
@@ -192,6 +262,9 @@ export class AssignmentsService {
 
     // Cannot assign GVHD as GVPB (conflict)
     if (dto.userId === topic.supervisorUserId) {
+      this.logger.warn(
+        `[assignGvpb:conflict] topicId=${topicId} gvpbUserId=${dto.userId} reason=SUPERVISOR_CONFLICT`,
+      );
       throw new ConflictException('GVHD cannot be assigned as GVPB for the same topic');
     }
 
@@ -202,6 +275,9 @@ export class AssignmentsService {
         a.status === 'ACTIVE',
     );
     if (alreadyAssignedOnTopic) {
+      this.logger.warn(
+        `[assignGvpb:conflict] topicId=${topicId} gvpbUserId=${dto.userId} reason=ALREADY_ASSIGNED topicRole=${alreadyAssignedOnTopic.topicRole}`,
+      );
       throw new ConflictException(
         'Lecturer already has an active role on this topic',
       );
@@ -230,6 +306,9 @@ export class AssignmentsService {
         topicTitle: topic.title,
       },
     });
+    this.logger.log(
+      `[assignGvpb:success] topicId=${topicId} assignmentId=${newAssignment.id} gvpbUserId=${dto.userId}`,
+    );
 
     return {
       assignmentId: newAssignment.id,
@@ -245,13 +324,20 @@ export class AssignmentsService {
     dto: AssignCouncilDto,
     user: AuthUser,
   ): Promise<{ created: boolean; count: number }> {
+    this.logger.log(
+      `[assignCouncil:start] topicId=${topicId} chair=${dto.chairUserId} secretary=${dto.secretaryUserId} members=${dto.memberUserIds.join(',')} actorUserId=${user.userId} actorRole=${user.role}`,
+    );
     // Only TBM can assign council
     if (user.role !== 'TBM') {
+      this.logger.warn(
+        `[assignCouncil:forbidden] topicId=${topicId} actorUserId=${user.userId} actorRole=${user.role}`,
+      );
       throw new ForbiddenException('Only TBM can assign council');
     }
 
     const topic = await this.topicsRepository.findById(topicId);
     if (!topic) {
+      this.logger.warn(`[assignCouncil:notFound] topicId=${topicId}`);
       throw new NotFoundException(`Topic with ID ${topicId} not found`);
     }
 
@@ -259,12 +345,18 @@ export class AssignmentsService {
 
     // Council only for KLTN topics
     if (topic.type !== 'KLTN') {
+      this.logger.warn(
+        `[assignCouncil:badRequest] topicId=${topicId} type=${topic.type} reason=NON_KLTN`,
+      );
       throw new BadRequestException('Council can only be assigned to KLTN topics');
     }
 
     // Topic must be in a valid state for council assignment
     const validStates = ['DEFENSE', 'PENDING_CONFIRM'];
     if (!validStates.includes(topic.state)) {
+      this.logger.warn(
+        `[assignCouncil:conflict] topicId=${topicId} state=${topic.state} reason=INVALID_STATE`,
+      );
       throw new ConflictException(
         `Cannot assign council in topic state: ${topic.state}`,
       );
@@ -278,6 +370,9 @@ export class AssignmentsService {
         a.status === 'ACTIVE',
     );
     if (existingCouncil.length > 0) {
+      this.logger.warn(
+        `[assignCouncil:conflict] topicId=${topicId} reason=COUNCIL_ALREADY_EXISTS existingCount=${existingCouncil.length}`,
+      );
       throw new ConflictException('Topic already has an active council');
     }
 
@@ -294,11 +389,17 @@ export class AssignmentsService {
     // Validate no duplicate members
     const uniqueUserIds = new Set(allUserIds);
     if (uniqueUserIds.size !== allUserIds.length) {
+      this.logger.warn(
+        `[assignCouncil:conflict] topicId=${topicId} reason=DUPLICATE_MEMBERS rawCount=${allUserIds.length} uniqueCount=${uniqueUserIds.size}`,
+      );
       throw new ConflictException('Council members must be unique');
     }
 
     // Validate no conflict with GVHD
     if (allUserIds.includes(topic.supervisorUserId)) {
+      this.logger.warn(
+        `[assignCouncil:conflict] topicId=${topicId} reason=SUPERVISOR_IN_COUNCIL supervisorUserId=${topic.supervisorUserId}`,
+      );
       throw new ConflictException('GVHD cannot be a council member');
     }
 
@@ -309,6 +410,9 @@ export class AssignmentsService {
         a.status === 'ACTIVE',
     );
     if (activeGvpb && allUserIds.includes(activeGvpb.userId)) {
+      this.logger.warn(
+        `[assignCouncil:conflict] topicId=${topicId} reason=GVPB_IN_COUNCIL gvpbUserId=${activeGvpb.userId}`,
+      );
       throw new ConflictException(
         'GVPB cannot be a council member for the same topic',
       );
@@ -387,6 +491,9 @@ export class AssignmentsService {
         },
       });
     }
+    this.logger.log(
+      `[assignCouncil:success] topicId=${topicId} createdAssignments=${newAssignments.length} notifiedReceivers=${receivers.size}`,
+    );
 
     return {
       created: true,
@@ -402,22 +509,35 @@ export class AssignmentsService {
     dto: ReplaceAssignmentDto,
     user: AuthUser,
   ): Promise<{ replaced: boolean }> {
+    this.logger.log(
+      `[replaceAssignment:start] assignmentId=${assignmentId} newUserId=${dto.newUserId} actorUserId=${user.userId} actorRole=${user.role}`,
+    );
     // Only TBM can replace assignments
     if (user.role !== 'TBM') {
+      this.logger.warn(
+        `[replaceAssignment:forbidden] assignmentId=${assignmentId} actorUserId=${user.userId} actorRole=${user.role}`,
+      );
       throw new ForbiddenException('Only TBM can replace assignments');
     }
 
     const assignment = await this.assignmentsRepository.findById(assignmentId);
     if (!assignment) {
+      this.logger.warn(`[replaceAssignment:notFound] assignmentId=${assignmentId}`);
       throw new NotFoundException(`Assignment with ID ${assignmentId} not found`);
     }
 
     if (assignment.status !== 'ACTIVE') {
+      this.logger.warn(
+        `[replaceAssignment:conflict] assignmentId=${assignmentId} reason=ASSIGNMENT_REVOKED`,
+      );
       throw new ConflictException('Cannot replace a revoked assignment');
     }
 
     const topic = await this.topicsRepository.findById(assignment.topicId);
     if (!topic) {
+      this.logger.warn(
+        `[replaceAssignment:notFound] assignmentId=${assignmentId} topicId=${assignment.topicId}`,
+      );
       throw new NotFoundException('Topic not found');
     }
 
@@ -428,11 +548,17 @@ export class AssignmentsService {
 
     // Cannot replace with same user
     if (assignment.userId === dto.newUserId) {
+      this.logger.warn(
+        `[replaceAssignment:conflict] assignmentId=${assignmentId} reason=SAME_ASSIGNEE userId=${dto.newUserId}`,
+      );
       throw new ConflictException('New user must be different from current assignee');
     }
 
     // Cannot assign GVHD to other roles on same topic (conflict check)
     if (dto.newUserId === topic.supervisorUserId && assignment.topicRole !== 'GVHD') {
+      this.logger.warn(
+        `[replaceAssignment:conflict] assignmentId=${assignmentId} reason=SUPERVISOR_CONFLICT supervisorUserId=${topic.supervisorUserId}`,
+      );
       throw new ConflictException('GVHD cannot hold another role on the same topic');
     }
 
@@ -443,6 +569,9 @@ export class AssignmentsService {
         a.status === 'ACTIVE',
     );
     if (hasExistingRole) {
+      this.logger.warn(
+        `[replaceAssignment:conflict] assignmentId=${assignmentId} reason=NEW_USER_HAS_ACTIVE_ROLE newUserId=${dto.newUserId}`,
+      );
       throw new ConflictException('New user already has an active role on this topic');
     }
 
@@ -466,6 +595,9 @@ export class AssignmentsService {
     await this.assignmentsRepository.create(newAssignment);
     await this.applyQuotaDelta(assignment.userId, assignment.topicRole, -1);
     await this.applyQuotaDelta(dto.newUserId, assignment.topicRole, 1);
+    this.logger.log(
+      `[replaceAssignment:success] assignmentId=${assignmentId} oldUserId=${assignment.userId} newUserId=${dto.newUserId} topicId=${assignment.topicId} topicRole=${assignment.topicRole}`,
+    );
 
     return { replaced: true };
   }
@@ -478,14 +610,21 @@ export class AssignmentsService {
     userId: string,
     roles: TopicRole[],
   ): Promise<boolean> {
+    this.logger.log(
+      `[hasRoleOnTopic:start] topicId=${topicId} userId=${userId} roles=${roles.join(',')}`,
+    );
     const assignments = await this.assignmentsRepository.findAll();
-    return assignments.some(
+    const hasRole = assignments.some(
       (a) =>
         a.topicId === topicId &&
         a.userId === userId &&
         roles.includes(a.topicRole) &&
         a.status === 'ACTIVE',
     );
+    this.logger.log(
+      `[hasRoleOnTopic:success] topicId=${topicId} userId=${userId} hasRole=${hasRole}`,
+    );
+    return hasRole;
   }
 
   /**
@@ -495,12 +634,17 @@ export class AssignmentsService {
     topicId: string,
     userId: string,
   ): Promise<TopicRole | null> {
+    this.logger.log(`[getUserRoleOnTopic:start] topicId=${topicId} userId=${userId}`);
     const assignments = await this.assignmentsRepository.findAll();
     const assignment = assignments.find(
       (a) =>
         a.topicId === topicId && a.userId === userId && a.status === 'ACTIVE',
     );
-    return assignment?.topicRole || null;
+    const role = assignment?.topicRole || null;
+    this.logger.log(
+      `[getUserRoleOnTopic:success] topicId=${topicId} userId=${userId} role=${role ?? '-'}`,
+    );
+    return role;
   }
 
   /**
@@ -525,9 +669,18 @@ export class AssignmentsService {
     topicId?: string;
   }): Promise<void> {
     if (!this.notificationsService) {
+      this.logger.log(
+        `[notifyIfAvailable:skip] receiverUserId=${params.receiverUserId} type=${params.type} reason=NOTIFICATIONS_SERVICE_UNAVAILABLE`,
+      );
       return;
     }
 
+    this.logger.log(
+      `[notifyIfAvailable:start] receiverUserId=${params.receiverUserId} type=${params.type} topicId=${params.topicId ?? '-'}`,
+    );
     await this.notificationsService.create(params);
+    this.logger.log(
+      `[notifyIfAvailable:success] receiverUserId=${params.receiverUserId} type=${params.type} topicId=${params.topicId ?? '-'}`,
+    );
   }
 }

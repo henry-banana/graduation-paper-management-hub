@@ -33,7 +33,8 @@ export class TopicsRepository extends SheetsBaseRepository<TopicRecord> {
       submitStartAt: this.optionalStr(v[10]),
       submitEndAt: this.optionalStr(v[11]),
       reasonRejected: this.optionalStr(v[12]),
-      revisionsAllowed: this.optionalStr(v[13]),
+      // DB-06 fix: read as boolean (sheet stores 'TRUE'/'FALSE'/'1'/'0'/''/null)
+      revisionsAllowed: this.str(v[13]) ? this.bool(v[13]) : undefined,
       createdAt: this.str(v[14]),
       updatedAt: this.str(v[15]),
     };
@@ -54,7 +55,8 @@ export class TopicsRepository extends SheetsBaseRepository<TopicRecord> {
       this.str(entity.submitStartAt ?? ''),
       this.str(entity.submitEndAt ?? ''),
       this.str(entity.reasonRejected ?? ''),
-      this.str(entity.revisionsAllowed ?? ''),
+      // DB-06 fix: serialise boolean as 'TRUE'/'FALSE' in sheet
+      entity.revisionsAllowed !== undefined ? this.boolStr(entity.revisionsAllowed) : '',
       this.str(entity.createdAt),
       this.str(entity.updatedAt),
     ];

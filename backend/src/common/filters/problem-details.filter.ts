@@ -8,6 +8,11 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { ProblemDetails, ProblemDetailsError } from '../types';
+import {
+  sanitizeErrorForLog,
+  sanitizeForLog,
+  serializeForLog,
+} from '../logging/log-sanitizer.util';
 
 interface MulterLikeError {
   code: string;
@@ -15,14 +20,24 @@ interface MulterLikeError {
   field?: string;
 }
 
+type RequestWithLogContext = Request & {
+  requestId?: string;
+  user?: {
+    userId?: string;
+    email?: string;
+    role?: string;
+  };
+};
+
 @Catch()
 export class ProblemDetailsFilter implements ExceptionFilter {
   private readonly logger = new Logger(ProblemDetailsFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
-    const request = ctx.getRequest<Request>();
+    const request = ctx.getRequest<RequestWithLogContext>();
     const response = ctx.getResponse<Response>();
+    const requestId = resolveRequestId(request, response);
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let title = 'Internal Server Error';
@@ -31,11 +46,11 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
-      const payload = exception.getResponse() as Record<string, unknown>;
-      title = (payload.error as string) || title;
+      const payload = normalizeExceptionPayload(exception.getResponse());
+      title = extractString(payload.error) ?? title;
       detail = Array.isArray(payload.message)
         ? 'Validation failed'
-        : (payload.message as string) || detail;
+        : extractString(payload.message) ?? detail;
 
       if (Array.isArray(payload.message)) {
         errors = payload.message.map((message) => ({
@@ -57,23 +72,28 @@ export class ProblemDetailsFilter implements ExceptionFilter {
           },
         ];
       }
-    } else {
-      const trace = exception instanceof Error ? exception.stack : String(exception);
-      this.logger.error(
-        `Unhandled exception at ${request.method} ${request.url}`,
-        trace,
-      );
     }
 
     // Extract errorCode from exception payload (allows frontend to handle specific errors)
     let errorCode: string | undefined;
     if (exception instanceof HttpException) {
-      const payload = exception.getResponse() as Record<string, unknown>;
+      const payload = normalizeExceptionPayload(exception.getResponse());
       const code = payload.errorCode ?? payload.code;
       if (typeof code === 'string' && code.trim()) {
         errorCode = code.trim();
       }
     }
+
+    this.logException({
+      request,
+      status,
+      title,
+      detail,
+      errorCode,
+      errors,
+      exception,
+      requestId,
+    });
 
     const body: ProblemDetails & { errorCode?: string } = {
       type: `https://kltn.hcmute.edu.vn/errors/${status}`,
@@ -81,6 +101,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       status,
       detail,
       instance: request.url,
+      requestId,
       ...(errorCode ? { errorCode } : {}),
       ...(errors ? { errors } : {}),
     };
@@ -114,4 +135,94 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       detail: exception.message || 'Invalid multipart payload',
     };
   }
+
+  private logException(params: {
+    request: RequestWithLogContext;
+    requestId: string;
+    status: number;
+    title: string;
+    detail: string;
+    errorCode?: string;
+    errors?: ProblemDetailsError[];
+    exception: unknown;
+  }): void {
+    const { request, requestId, status, title, detail, errorCode, errors, exception } =
+      params;
+    const context = {
+      requestId,
+      method: request.method,
+      path: request.url,
+      status,
+      title,
+      detail,
+      errorCode,
+      actor: sanitizeForLog(request.user ?? null),
+      requestPayload: {
+        query: sanitizeForLog(request.query),
+        params: sanitizeForLog(request.params),
+        body: sanitizeForLog(request.body),
+      },
+      errors,
+      exception: sanitizeErrorForLog(exception),
+    };
+
+    const message = `HTTP exception captured: ${request.method} ${request.url} status=${status} requestId=${requestId} context=${serializeForLog(
+      context,
+    )}`;
+
+    if (status >= 500) {
+      this.logger.error(message);
+      return;
+    }
+
+    this.logger.warn(message);
+  }
+}
+
+function normalizeExceptionPayload(payload: unknown): Record<string, unknown> {
+  if (typeof payload === 'string') {
+    return { message: payload };
+  }
+
+  if (payload && typeof payload === 'object') {
+    return payload as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function extractString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  return undefined;
+}
+
+function resolveRequestId(request: RequestWithLogContext, response: Response): string {
+  const fromRequest = extractHeaderValue(request.headers['x-request-id']);
+  if (fromRequest) {
+    return fromRequest;
+  }
+
+  const fromResponseLocals = response.locals?.requestId;
+  if (typeof fromResponseLocals === 'string' && fromResponseLocals.trim().length > 0) {
+    return fromResponseLocals.trim();
+  }
+
+  return 'unknown-request-id';
+}
+
+function extractHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  if (Array.isArray(value) && value.length > 0) {
+    return extractHeaderValue(value[0]);
+  }
+
+  return undefined;
 }

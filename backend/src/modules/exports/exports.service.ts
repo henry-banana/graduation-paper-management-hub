@@ -445,6 +445,28 @@ export class ExportsService {
       expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12 hours
     };
 
+    // DB-07 fix: idempotency guard for rubric exports.
+    // If an identical (topicId + exportType) record was created in the last 15 minutes
+    // and has not expired yet, return it instead of appending a duplicate row.
+    if (isRubricExport) {
+      const deduplicationWindowMs = 15 * 60 * 1000; // 15 minutes
+      const cutoff = Date.now() - deduplicationWindowMs;
+      const existingRecords = await this.exportFilesRepository.findWhere(
+        (r) =>
+          r.topicId === topicId &&
+          r.exportType === exportType &&
+          r.status === 'COMPLETED' &&
+          new Date(r.createdAt).getTime() > cutoff &&
+          (!r.expiresAt || new Date(r.expiresAt) > new Date()),
+      );
+      if (existingRecords.length > 0) {
+        this.logger.log(
+          `[DB-07] Returning cached export record ${existingRecords[0].id} (dedup hit for ${exportType}/${topicId})`,
+        );
+        return this.mapToDto(existingRecords[0]);
+      }
+    }
+
     await this.exportFilesRepository.create(newExport);
 
     return this.mapToDto(newExport);

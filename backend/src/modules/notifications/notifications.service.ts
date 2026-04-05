@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -115,6 +116,8 @@ const NOTIFICATION_TEMPLATES: Record<
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   private static readonly GLOBAL_RECEIVER_IDS = new Set([
     'ALL',
     'COMMON',
@@ -141,6 +144,9 @@ export class NotificationsService {
     data: NotificationResponseDto[];
     pagination: { page: number; size: number; total: number };
   }> {
+    this.logger.log(
+      `[findAll:start] userId=${user.userId} role=${user.role} isRead=${query.isRead ?? '-'} page=${query.page ?? 1} size=${query.size ?? 20}`,
+    );
     const notifications = await this.notificationsRepository.findAll();
     let userNotifications = notifications.filter(
       (n) => this.canAccessNotification(n, user),
@@ -168,6 +174,9 @@ export class NotificationsService {
       startIndex,
       startIndex + size,
     );
+    this.logger.log(
+      `[findAll:success] userId=${user.userId} totalRaw=${notifications.length} accessible=${total} returned=${paginatedNotifications.length}`,
+    );
 
     return {
       data: paginatedNotifications.map((n) => this.mapToDto(n)),
@@ -182,13 +191,25 @@ export class NotificationsService {
     notificationId: string,
     user: AuthUser,
   ): Promise<NotificationRecord | null> {
+    this.logger.log(
+      `[findById:start] notificationId=${notificationId} requesterUserId=${user.userId}`,
+    );
     const notification = await this.notificationsRepository.findById(notificationId);
-    if (!notification) return null;
+    if (!notification) {
+      this.logger.warn(`[findById:notFound] notificationId=${notificationId}`);
+      return null;
+    }
 
     if (!this.canAccessNotification(notification, user)) {
+      this.logger.warn(
+        `[findById:forbidden] notificationId=${notificationId} requesterUserId=${user.userId} receiverUserId=${notification.receiverUserId}`,
+      );
       throw new ForbiddenException('Cannot access this notification');
     }
 
+    this.logger.log(
+      `[findById:success] notificationId=${notificationId} requesterUserId=${user.userId}`,
+    );
     return notification;
   }
 
@@ -200,20 +221,30 @@ export class NotificationsService {
     isRead: boolean,
     user: AuthUser,
   ): Promise<{ updated: boolean }> {
+    this.logger.log(
+      `[markRead:start] notificationId=${notificationId} isRead=${isRead} requesterUserId=${user.userId}`,
+    );
     const notification = await this.notificationsRepository.findById(notificationId);
     if (!notification) {
+      this.logger.warn(`[markRead:notFound] notificationId=${notificationId}`);
       throw new NotFoundException(
         `Notification with ID ${notificationId} not found`,
       );
     }
 
     if (!this.canAccessNotification(notification, user)) {
+      this.logger.warn(
+        `[markRead:forbidden] notificationId=${notificationId} requesterUserId=${user.userId} receiverUserId=${notification.receiverUserId}`,
+      );
       throw new ForbiddenException('Cannot modify this notification');
     }
 
     notification.isRead = isRead;
     notification.readAt = isRead ? new Date().toISOString() : undefined;
     await this.notificationsRepository.update(notification.id, notification);
+    this.logger.log(
+      `[markRead:success] notificationId=${notificationId} isRead=${isRead} requesterUserId=${user.userId}`,
+    );
 
     return { updated: true };
   }
@@ -225,6 +256,9 @@ export class NotificationsService {
     notificationIds: string[],
     user: AuthUser,
   ): Promise<{ updatedCount: number }> {
+    this.logger.log(
+      `[markBulkRead:start] requesterUserId=${user.userId} ids=${notificationIds.join(',')}`,
+    );
     const notifications = await this.notificationsRepository.findAll();
     let updatedCount = 0;
 
@@ -239,6 +273,9 @@ export class NotificationsService {
         }
       }
     }
+    this.logger.log(
+      `[markBulkRead:success] requesterUserId=${user.userId} updatedCount=${updatedCount}`,
+    );
 
     return { updatedCount };
   }
@@ -253,6 +290,9 @@ export class NotificationsService {
     context: Record<string, string>;
     topicId?: string;
   }): Promise<NotificationRecord> {
+    this.logger.log(
+      `[create:start] receiverUserId=${params.receiverUserId} type=${params.type} scope=${params.scope ?? 'PERSONAL'} topicId=${params.topicId ?? '-'}`,
+    );
     const template = NOTIFICATION_TEMPLATES[params.type];
 
     const deepLink = params.topicId
@@ -273,6 +313,9 @@ export class NotificationsService {
     };
 
     await this.notificationsRepository.create(notification);
+    this.logger.log(
+      `[create:success] notificationId=${notification.id} receiverUserId=${notification.receiverUserId} type=${notification.type} scope=${notification.scope ?? 'PERSONAL'}`,
+    );
 
     return notification;
   }
@@ -287,6 +330,9 @@ export class NotificationsService {
     body?: string;
     context?: Record<string, string>;
   }): Promise<NotificationRecord> {
+    this.logger.log(
+      `[broadcast:start] type=${params.type} customTitle=${Boolean(params.title)} customBody=${Boolean(params.body)}`,
+    );
     const template = NOTIFICATION_TEMPLATES[params.type];
     const ctx = params.context ?? {};
 
@@ -303,6 +349,9 @@ export class NotificationsService {
     };
 
     await this.notificationsRepository.create(notification);
+    this.logger.log(
+      `[broadcast:success] notificationId=${notification.id} type=${notification.type}`,
+    );
 
     return notification;
   }
@@ -311,10 +360,16 @@ export class NotificationsService {
    * Get unread count for user
    */
   async getUnreadCount(user: AuthUser): Promise<number> {
+    this.logger.log(`[getUnreadCount:start] userId=${user.userId}`);
     const notifications = await this.notificationsRepository.findAll();
-    return notifications.filter(
+    const unreadCount = notifications.filter(
       (n) => this.canAccessNotification(n, user) && !n.isRead,
     ).length;
+
+    this.logger.log(
+      `[getUnreadCount:success] userId=${user.userId} unreadCount=${unreadCount}`,
+    );
+    return unreadCount;
   }
 
   /**

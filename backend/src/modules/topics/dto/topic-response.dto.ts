@@ -100,8 +100,9 @@ export class TopicResponseDto {
   @ApiPropertyOptional({ example: 'Topic scope is too broad' })
   reasonRejected?: string;
 
-  @ApiPropertyOptional({ example: 'reserved' })
-  revisionsAllowed?: string;
+  /** DB-06 fix: was `string?` — semantically a boolean flag */
+  @ApiPropertyOptional({ example: true })
+  revisionsAllowed?: boolean;
 
   @ApiPropertyOptional({ example: '2026-01-15T00:00:00Z' })
   createdAt?: string;

@@ -40,10 +40,22 @@ describe('createAccessLogMiddleware', () => {
     expect(next).toHaveBeenCalledTimes(1);
     response.emit('finish');
 
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining('GET /api/v1/health 200 12ms 127.0.0.1'),
+    expect(log).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('[incoming] GET /api/v1/health'),
     );
+    expect(log).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining(
+        '[completed] GET /api/v1/health 200 12ms requestId=',
+      ),
+    );
+    expect(log).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('ip=127.0.0.1'),
+    );
+    expect(response.getHeader('x-request-id')).toBeDefined();
   });
 
   it('prefers x-forwarded-for over socket ip', () => {
@@ -69,8 +81,15 @@ describe('createAccessLogMiddleware', () => {
     middleware(request, response as unknown as Response, jest.fn() as NextFunction);
     response.emit('finish');
 
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining('POST /api/v1/topics 201 25ms 203.0.113.10'),
+    expect(log).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining(
+        '[completed] POST /api/v1/topics 201 25ms requestId=',
+      ),
+    );
+    expect(log).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('ip=203.0.113.10'),
     );
   });
 });

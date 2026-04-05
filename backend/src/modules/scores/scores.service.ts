@@ -351,20 +351,29 @@ export class ScoresService {
       updatedAt: new Date().toISOString(),
       // Populate teacher-visible reference columns
       _tenDetai: topic.title,
-      _gvName: user.email, // best we have from JWT; display name not in token
+      _gvName: user.email, // fallback; overwritten below after DB lookup
     };
 
-    // Lookup student info to populate Email, Tên SV, MSSV columns
+    // Lookup scorer's display name for rubric exports (DB-10 fix)
+    // and student reference columns simultaneously to avoid sequential sheet reads.
     try {
-      const student = await this.usersRepository.findById(topic.studentUserId);
+      const [student, scorer] = await Promise.all([
+        this.usersRepository.findById(topic.studentUserId),
+        this.usersRepository.findById(user.userId),
+      ]);
       if (student) {
         newScore._email = student.email;
         newScore._tenSV = student.name;
         newScore._mssv = student.studentId ?? student.lecturerId ?? '';
       }
+      if (scorer?.name) {
+        // DB-10 fix: use real display name instead of JWT email
+        newScore._gvName = scorer.name;
+      }
     } catch { /* non-blocking: sheet columns optional */ }
 
     await this.scoresRepository.create(newScore);
+
 
     return {
       scoreId: newScore.id,

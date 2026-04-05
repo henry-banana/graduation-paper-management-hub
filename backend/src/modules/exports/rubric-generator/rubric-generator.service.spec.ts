@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it } from '@jest/globals';
+import * as fs from 'fs';
+import Docxtemplater = require('docxtemplater');
+import PizZip = require('pizzip');
 import { RubricGeneratorService } from './rubric-generator.service';
 
 describe('RubricGeneratorService (legacy template fill)', () => {
@@ -65,5 +68,50 @@ describe('RubricGeneratorService (legacy template fill)', () => {
     }) as string | null;
 
     expect(output).toBeNull();
+  });
+
+  it('returns null and skips Path C when injected docxtemplater render fails on non-placeholder template', () => {
+    const zip = new PizZip();
+    zip.file(
+      'word/document.xml',
+      '<w:document><w:body><w:p><w:r><w:t>No placeholders here</w:t></w:r></w:p></w:body></w:document>',
+    );
+    const templateBinary = zip.generate({ type: 'string' }) as string;
+
+    const existsSpy = jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+    const readSpy = jest.spyOn(fs, 'readFileSync').mockReturnValue(templateBinary);
+    const injectSpy = jest
+      .spyOn(service as any, 'injectPlaceholders')
+      .mockReturnValue(
+        '<w:document><w:body><w:p><w:r><w:t>{{studentName}}</w:t></w:r></w:p></w:body></w:document>',
+      );
+    const legacySpy = jest
+      .spyOn(service as any, 'renderLegacyTemplateIfPossible')
+      .mockReturnValue(Buffer.from('legacy'));
+    const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+    const renderSpy = jest
+      .spyOn((Docxtemplater as unknown as { prototype: { render: (payload: Record<string, unknown>) => void } }).prototype, 'render')
+      .mockImplementation(() => {
+        throw new Error('duplicate_open_tag');
+      });
+
+    const output = (service as any).renderTemplateIfPossible('BCTT', {
+      studentName: 'Nguyen Van A',
+      studentId: '20110001',
+      topicTitle: 'De tai',
+    }) as Buffer | null;
+
+    expect(output).toBeNull();
+    expect(legacySpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping Path C for safety and falling back to deterministic generator.'),
+    );
+
+    renderSpy.mockRestore();
+    warnSpy.mockRestore();
+    legacySpy.mockRestore();
+    injectSpy.mockRestore();
+    readSpy.mockRestore();
+    existsSpy.mockRestore();
   });
 });

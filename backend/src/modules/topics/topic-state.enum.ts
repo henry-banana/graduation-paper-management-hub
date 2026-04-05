@@ -43,7 +43,8 @@ export type TopicAction =
 // Valid state transitions for BCTT
 export const BCTT_STATE_TRANSITIONS: Record<BcttState, BcttState[]> = {
   DRAFT: ['PENDING_GV', 'CANCELLED'],
-  PENDING_GV: ['CONFIRMED', 'CANCELLED'],
+  // DB-05 fix: REJECT from PENDING_GV goes back to DRAFT (not CANCELLED)
+  PENDING_GV: ['CONFIRMED', 'DRAFT', 'CANCELLED'],
   CONFIRMED: ['IN_PROGRESS', 'CANCELLED'],
   IN_PROGRESS: ['GRADING', 'CANCELLED'],
   GRADING: ['COMPLETED', 'CANCELLED'],
@@ -54,7 +55,8 @@ export const BCTT_STATE_TRANSITIONS: Record<BcttState, BcttState[]> = {
 // Valid state transitions for KLTN
 export const KLTN_STATE_TRANSITIONS: Record<KltnState, KltnState[]> = {
   DRAFT: ['PENDING_GV', 'CANCELLED'],
-  PENDING_GV: ['CONFIRMED', 'CANCELLED'],
+  // DB-05 fix: REJECT from PENDING_GV goes back to DRAFT (not CANCELLED)
+  PENDING_GV: ['CONFIRMED', 'DRAFT', 'CANCELLED'],
   CONFIRMED: ['IN_PROGRESS', 'CANCELLED'],
   IN_PROGRESS: ['PENDING_CONFIRM', 'CANCELLED'],
   PENDING_CONFIRM: ['DEFENSE', 'IN_PROGRESS', 'CANCELLED'],
@@ -79,7 +81,9 @@ export const DEADLINE_EDITABLE_STATES: TopicState[] = [
 export const ACTION_TO_STATE: Record<TopicAction, TopicState> = {
   SUBMIT_TO_GV: 'PENDING_GV',
   APPROVE: 'CONFIRMED',
-  REJECT: 'CANCELLED',
+  // DB-05 fix: REJECT returns to DRAFT so student can edit and re-submit
+  // topics.service.ts reject() already sets state='DRAFT' for PENDING_GV
+  REJECT: 'DRAFT',
   START_PROGRESS: 'IN_PROGRESS',
   MOVE_TO_GRADING: 'GRADING',
   REQUEST_CONFIRM: 'PENDING_CONFIRM',

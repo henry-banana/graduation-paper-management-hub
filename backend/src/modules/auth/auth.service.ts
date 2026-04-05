@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   ForbiddenException,
   UnauthorizedException,
   Inject,
@@ -12,6 +13,10 @@ import { UsersService, UserRecord } from '../users/users.service';
 import { GoogleUser } from './strategies/google.strategy';
 import { AuthResponseDto, AuthUserDto, TokenPairDto, RefreshTokenDto } from './dto';
 import { AccountRole } from '../../common/types';
+import {
+  sanitizeErrorForLog,
+  serializeForLog,
+} from '../../common/logging/log-sanitizer.util';
 
 interface JwtPayload {
   sub: string;
@@ -28,6 +33,7 @@ interface GoogleIdTokenPayload {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly accessTokenTtl: number;
   private readonly refreshTokenTtl: number;
 
@@ -42,9 +48,15 @@ export class AuthService {
   }
 
   async validateGoogleUser(googleUser: GoogleUser): Promise<AuthResponseDto> {
+    this.logger.log(
+      `[validateGoogleUser:start] email=${googleUser.email} picture=${Boolean(googleUser.picture)}`,
+    );
     const user = await this.usersService.findByEmail(googleUser.email);
 
     if (!user) {
+      this.logger.warn(
+        `[validateGoogleUser:forbidden] email=${googleUser.email} reason=NOT_WHITELISTED`,
+      );
       throw new ForbiddenException({
         message: 'Email chưa được cấp quyền truy cập. Vui lòng liên hệ Bộ môn.',
         code: 'USER_NOT_WHITELISTED',
@@ -53,18 +65,34 @@ export class AuthService {
 
     const authUser = this.mapToAuthUser(user, googleUser.picture);
     const tokens = await this.generateTokens(authUser);
+    this.logger.log(
+      `[validateGoogleUser:success] userId=${authUser.userId} role=${authUser.role} email=${authUser.email}`,
+    );
 
     return { user: authUser, tokens };
   }
 
   async authenticateWithGoogleIdToken(idToken: string): Promise<AuthResponseDto> {
+    this.logger.log(
+      `[authenticateWithGoogleIdToken:start] token=${fingerprintToken(idToken)}`,
+    );
     const googleUser = this.extractGoogleUserFromIdToken(idToken);
-    return this.validateGoogleUser(googleUser);
+    const authResult = await this.validateGoogleUser(googleUser);
+    this.logger.log(
+      `[authenticateWithGoogleIdToken:success] userId=${authResult.user.userId} role=${authResult.user.role}`,
+    );
+    return authResult;
   }
 
   async refreshAccessToken(refreshToken: string): Promise<RefreshTokenDto> {
+    this.logger.log(
+      `[refreshAccessToken:start] refreshToken=${fingerprintToken(refreshToken)}`,
+    );
     const isBlacklisted = await this.cacheManager.get<boolean>(`blacklist:${refreshToken}`);
     if (isBlacklisted) {
+      this.logger.warn(
+        `[refreshAccessToken:forbidden] refreshToken=${fingerprintToken(refreshToken)} reason=BLACKLISTED`,
+      );
       throw new UnauthorizedException('Token đã bị thu hồi');
     }
 
@@ -78,31 +106,65 @@ export class AuthService {
         { expiresIn: this.accessTokenTtl },
       );
 
+      this.logger.log(
+        `[refreshAccessToken:success] userId=${payload.sub} role=${payload.role} expiresIn=${this.accessTokenTtl}`,
+      );
       return { accessToken, expiresIn: this.accessTokenTtl };
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        `[refreshAccessToken:failed] refreshToken=${fingerprintToken(refreshToken)} error=${serializeForLog(
+          sanitizeErrorForLog(error),
+        )}`,
+      );
       throw new UnauthorizedException('Token không hợp lệ hoặc đã hết hạn');
     }
   }
 
   async getCurrentProfile(userId: string): Promise<AuthUserDto | null> {
+    this.logger.log(`[getCurrentProfile:start] userId=${userId}`);
     const user = await this.usersService.findById(userId);
     if (!user) {
+      this.logger.warn(`[getCurrentProfile:notFound] userId=${userId}`);
       return null;
     }
 
+    this.logger.log(
+      `[getCurrentProfile:success] userId=${userId} role=${user.role} email=${user.email}`,
+    );
     return this.mapToAuthUser(user);
   }
 
   async logout(refreshToken: string): Promise<void> {
+    this.logger.log(`[logout:start] refreshToken=${fingerprintToken(refreshToken)}`);
     try {
       const payload = this.jwtService.decode(refreshToken) as JwtPayload & { exp: number };
       if (payload?.exp) {
         const ttl = payload.exp * 1000 - Date.now();
         if (ttl > 0) {
           await this.cacheManager.set(`blacklist:${refreshToken}`, true, ttl);
+          this.logger.log(
+            `[logout:success] userId=${payload.sub} ttlMs=${ttl} refreshToken=${fingerprintToken(
+              refreshToken,
+            )}`,
+          );
+          return;
         }
+
+        this.logger.log(
+          `[logout:skip] userId=${payload.sub} reason=TOKEN_ALREADY_EXPIRED refreshToken=${fingerprintToken(
+            refreshToken,
+          )}`,
+        );
+        return;
       }
+
+      this.logger.log(
+        `[logout:skip] reason=TOKEN_HAS_NO_EXP refreshToken=${fingerprintToken(refreshToken)}`,
+      );
     } catch {
+      this.logger.warn(
+        `[logout:skip] reason=TOKEN_INVALID refreshToken=${fingerprintToken(refreshToken)}`,
+      );
       // Token invalid, nothing to blacklist
     }
   }
@@ -122,12 +184,18 @@ export class AuthService {
       }),
     ]);
 
+    this.logger.log(
+      `[generateTokens:success] userId=${user.userId} role=${user.role} accessTtl=${this.accessTokenTtl} refreshTtl=${this.refreshTokenTtl}`,
+    );
     return { accessToken, refreshToken, expiresIn: this.accessTokenTtl };
   }
 
   private extractGoogleUserFromIdToken(idToken: string): GoogleUser {
     const parts = idToken.split('.');
     if (parts.length < 2) {
+      this.logger.warn(
+        `[extractGoogleUserFromIdToken:failed] reason=INVALID_FORMAT token=${fingerprintToken(idToken)}`,
+      );
       throw new UnauthorizedException('Invalid Google ID token format');
     }
 
@@ -136,9 +204,17 @@ export class AuthService {
       const payload = JSON.parse(payloadJson) as GoogleIdTokenPayload;
 
       if (!payload.email) {
+        this.logger.warn(
+          `[extractGoogleUserFromIdToken:failed] reason=MISSING_EMAIL token=${fingerprintToken(
+            idToken,
+          )}`,
+        );
         throw new UnauthorizedException('Google ID token does not include email');
       }
 
+      this.logger.log(
+        `[extractGoogleUserFromIdToken:success] email=${payload.email} subject=${payload.sub ?? '-'}`,
+      );
       return {
         email: payload.email,
         name: payload.name || payload.email,
@@ -150,6 +226,11 @@ export class AuthService {
         throw error;
       }
 
+      this.logger.warn(
+        `[extractGoogleUserFromIdToken:failed] reason=UNPARSEABLE token=${fingerprintToken(
+          idToken,
+        )} error=${serializeForLog(sanitizeErrorForLog(error))}`,
+      );
       throw new UnauthorizedException('Unable to parse Google ID token');
     }
   }
@@ -169,4 +250,12 @@ export class AuthService {
       picture,
     };
   }
+}
+
+function fingerprintToken(token: string): string {
+  if (!token || token.length <= 12) {
+    return '[REDACTED]';
+  }
+
+  return `${token.slice(0, 6)}...${token.slice(-4)}[len=${token.length}]`;
 }

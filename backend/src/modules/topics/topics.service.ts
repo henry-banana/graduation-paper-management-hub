@@ -56,7 +56,11 @@ export interface TopicRecord {
   submitStartAt?: string;
   submitEndAt?: string;
   reasonRejected?: string;
-  revisionsAllowed?: string;
+  /**
+   * DB-06 fix: was `string?` — changed to `boolean?` to match semantic intent.
+   * Stored in sheet as 'TRUE'/'FALSE'; repository serialises via boolStr().
+   */
+  revisionsAllowed?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -465,6 +469,19 @@ export class TopicsService {
 
     await this.topicsRepository.create(newTopic);
 
+    // Tự động tạo assignment GVHD cho supervisor
+    if (this.assignmentsRepository) {
+      const gvhdAssignment = {
+        id: `as_${crypto.randomBytes(6).toString('hex')}`,
+        topicId: newTopic.id,
+        userId: newTopic.supervisorUserId,
+        topicRole: 'GVHD' as TopicRole,
+        status: 'ACTIVE' as const,
+        assignedAt: now,
+      };
+      await this.assignmentsRepository.create(gvhdAssignment);
+    }
+
     await this.notifyIfAvailable({
       receiverUserId: newTopic.supervisorUserId,
       type: 'TOPIC_PENDING',
@@ -522,6 +539,7 @@ export class TopicsService {
 
     const now = new Date();
     let supervisorChanged = false;
+    const oldSupervisorId = topic.supervisorUserId;
     if (dto.supervisorUserId !== undefined) {
       const nextSupervisorId = dto.supervisorUserId.trim();
       if (!nextSupervisorId) {
@@ -549,6 +567,39 @@ export class TopicsService {
             student?.name ?? student?.email ?? topic.studentUserId,
         },
       });
+
+      // Cập nhật assignment khi đổi supervisor
+      if (this.assignmentsRepository) {
+        const assignments = await this.assignmentsRepository.findAll();
+        
+        // Revoke assignment cũ của supervisor cũ
+        const oldGvhdAssignment = assignments.find(
+          (a) =>
+            a.topicId === topic.id &&
+            a.userId === oldSupervisorId &&
+            a.topicRole === 'GVHD' &&
+            a.status === 'ACTIVE',
+        );
+        if (oldGvhdAssignment) {
+          oldGvhdAssignment.status = 'REVOKED';
+          oldGvhdAssignment.revokedAt = now.toISOString();
+          await this.assignmentsRepository.update(
+            oldGvhdAssignment.id,
+            oldGvhdAssignment,
+          );
+        }
+
+        // Tạo assignment mới cho supervisor mới
+        const newGvhdAssignment = {
+          id: `as_${crypto.randomBytes(6).toString('hex')}`,
+          topicId: topic.id,
+          userId: topic.supervisorUserId,
+          topicRole: 'GVHD' as TopicRole,
+          status: 'ACTIVE' as const,
+          assignedAt: now.toISOString(),
+        };
+        await this.assignmentsRepository.create(newGvhdAssignment);
+      }
     }
 
     topic.updatedAt = now.toISOString();
