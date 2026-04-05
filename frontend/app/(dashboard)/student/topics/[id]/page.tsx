@@ -514,7 +514,7 @@ export default function StudentTopicDetailPage() {
             .get<ApiResponse<RevisionRoundDto[]>>(`/topics/${topicId}/revisions/rounds`)
             .catch(() => null),
           api
-            .get<ApiListResponse<PeriodOptionDto>>("/periods?page=1&size=200")
+            .get<ApiListResponse<PeriodOptionDto>>("/periods?page=1&size=100")
             .catch(() => EMPTY_PERIODS_RESPONSE),
         ]);
 

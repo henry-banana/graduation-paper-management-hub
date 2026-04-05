@@ -26,13 +26,8 @@ interface LecturerDto {
   email?: string;
 }
 
-const EMPTY_LECTURERS_RESPONSE: ApiListResponse<LecturerDto> = {
+const EMPTY_LECTURERS_RESPONSE: ApiResponse<LecturerDto[]> = {
   data: [],
-  pagination: {
-    page: 1,
-    size: 0,
-    total: 0,
-  },
 };
 
 interface ScoreSummaryDto {
@@ -103,9 +98,7 @@ function StudentScoresContent() {
             "/topics?role=student&page=1&size=100",
           ),
           api
-            .get<ApiListResponse<LecturerDto>>(
-              "/users?role=LECTURER&page=1&size=200",
-            )
+            .get<ApiResponse<LecturerDto[]>>("/users/supervisors/options")
             .catch(() => EMPTY_LECTURERS_RESPONSE),
         ]);
 

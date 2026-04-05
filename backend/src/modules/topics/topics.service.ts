@@ -86,6 +86,11 @@ interface TransitionAuthorizationContext {
   assignmentRoles: Set<TopicRole>;
 }
 
+interface SubmissionWindowSource {
+  submitStartAt?: string;
+  submitEndAt?: string;
+}
+
 @Injectable()
 export class TopicsService {
   private readonly logger = new Logger(TopicsService.name);
@@ -191,7 +196,7 @@ export class TopicsService {
     const shouldEnrich = this.shouldEnrichTopicList(query.role);
     const data = shouldEnrich
       ? await this.enrichTopicListDtos(paginatedTopics, query.role, currentUser)
-      : paginatedTopics.map((t) => this.mapToDto(t));
+      : await this.mapTopicDtosWithPeriodFallback(paginatedTopics);
 
     return {
       data,
@@ -210,7 +215,8 @@ export class TopicsService {
     }
 
     await this.ensureCanReadTopic(topic, user);
-    return topic;
+    const period = await this.periodsRepository.findById(topic.periodId);
+    return this.applyEffectiveSubmissionWindow(topic, period);
   }
 
   async listRevisionRounds(
@@ -662,6 +668,14 @@ export class TopicsService {
       // Previously stopped at CONFIRMED, requiring another manual action
       // Now: PENDING_GV -> IN_PROGRESS (skip CONFIRMED intermediate state)
       topic.state = 'IN_PROGRESS';
+      const period = await this.periodsRepository.findById(topic.periodId);
+      const effectiveWindow = this.resolveEffectiveSubmissionWindow(topic, period);
+      if (!topic.submitStartAt && effectiveWindow.submitStartAt) {
+        topic.submitStartAt = effectiveWindow.submitStartAt;
+      }
+      if (!topic.submitEndAt && effectiveWindow.submitEndAt) {
+        topic.submitEndAt = effectiveWindow.submitEndAt;
+      }
       topic.updatedAt = new Date().toISOString();
       try {
         await this.topicsRepository.update(topic.id, topic);
@@ -1016,6 +1030,73 @@ export class TopicsService {
     );
   }
 
+  private async mapTopicDtosWithPeriodFallback(
+    topics: TopicRecord[],
+  ): Promise<TopicResponseDto[]> {
+    if (topics.length === 0) {
+      return [];
+    }
+
+    const uniquePeriodIds = Array.from(
+      new Set(topics.map((topic) => topic.periodId)),
+    );
+    const periodPairs = await Promise.all(
+      uniquePeriodIds.map(async (periodId) => [
+        periodId,
+        await this.periodsRepository.findById(periodId),
+      ] as const),
+    );
+    const periodsById = new Map(periodPairs);
+
+    return topics.map((topic) =>
+      this.mapToDto(topic, periodsById.get(topic.periodId)),
+    );
+  }
+
+  private applyEffectiveSubmissionWindow(
+    topic: TopicRecord,
+    period?: SubmissionWindowSource | null,
+  ): TopicRecord {
+    const effectiveWindow = this.resolveEffectiveSubmissionWindow(topic, period);
+    return {
+      ...topic,
+      submitStartAt: effectiveWindow.submitStartAt,
+      submitEndAt: effectiveWindow.submitEndAt,
+    };
+  }
+
+  private resolveEffectiveSubmissionWindow(
+    topic: SubmissionWindowSource,
+    period?: SubmissionWindowSource | null,
+  ): SubmissionWindowSource {
+    return {
+      submitStartAt:
+        topic.submitStartAt ??
+        this.normalizeSubmissionWindowBoundary(period?.submitStartAt, 'start'),
+      submitEndAt:
+        topic.submitEndAt ??
+        this.normalizeSubmissionWindowBoundary(period?.submitEndAt, 'end'),
+    };
+  }
+
+  private normalizeSubmissionWindowBoundary(
+    value: string | undefined,
+    boundary: 'start' | 'end',
+  ): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const normalizedDate = this.normalizeDateOnly(value);
+    if (normalizedDate) {
+      return boundary === 'start'
+        ? `${normalizedDate}T00:00:00.000Z`
+        : `${normalizedDate}T23:59:59.999Z`;
+    }
+
+    return value;
+  }
+
   private async enrichTopicListDtos(
     topics: TopicRecord[],
     requestedRole: GetTopicsQueryDto['role'] | undefined,
@@ -1146,7 +1227,8 @@ export class TopicsService {
     const roundTo2 = (value: number): number => Math.round(value * 100) / 100;
 
     return topics.map((topic) => {
-      const dto: TopicResponseDto = this.mapToDto(topic);
+      const period = periodsById.get(topic.periodId);
+      const dto: TopicResponseDto = this.mapToDto(topic, period);
 
       const student = usersById.get(topic.studentUserId);
       const supervisor = usersById.get(topic.supervisorUserId);
@@ -1159,7 +1241,6 @@ export class TopicsService {
         ? usersById.get(reviewerAssignment.userId)
         : null;
 
-      const period = periodsById.get(topic.periodId);
       const latestSubmission = latestSubmissionByTopic.get(topic.id);
       const topicScores = submittedScoresByTopic.get(topic.id) ?? [];
       const summary = summaryByTopic.get(topic.id);
@@ -1280,7 +1361,11 @@ export class TopicsService {
     });
   }
 
-  mapToDto(topic: TopicRecord): TopicResponseDto {
+  mapToDto(
+    topic: TopicRecord,
+    period?: SubmissionWindowSource | null,
+  ): TopicResponseDto {
+    const effectiveWindow = this.resolveEffectiveSubmissionWindow(topic, period);
     return {
       id: topic.id,
       type: topic.type,
@@ -1292,8 +1377,8 @@ export class TopicsService {
       supervisorUserId: topic.supervisorUserId,
       periodId: topic.periodId,
       approvalDeadlineAt: topic.approvalDeadlineAt,
-      submitStartAt: topic.submitStartAt,
-      submitEndAt: topic.submitEndAt,
+      submitStartAt: effectiveWindow.submitStartAt,
+      submitEndAt: effectiveWindow.submitEndAt,
       reasonRejected: topic.reasonRejected,
       revisionsAllowed: topic.revisionsAllowed,
       createdAt: topic.createdAt,

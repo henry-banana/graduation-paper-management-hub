@@ -113,7 +113,7 @@ export default function GVHDTopicDetailPage() {
         api.get<ApiResponse<UserDto>>(`/users/${t.studentUserId}`).catch(() => null),
         api.get<ApiResponse<SubmissionDto[]>>(`/topics/${topicId}/submissions`).catch(() => ({ data: [] })),
         api
-          .get<ApiListResponse<PeriodOptionDto>>("/periods?page=1&size=200")
+          .get<ApiListResponse<PeriodOptionDto>>("/periods?page=1&size=100")
           .catch(() => EMPTY_PERIODS_RESPONSE),
       ]);
 

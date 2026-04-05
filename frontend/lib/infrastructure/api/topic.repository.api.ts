@@ -1,4 +1,4 @@
-import { ApiListResponse, api } from "@/lib/api";
+import { ApiListResponse, ApiResponse, api } from "@/lib/api";
 import { Topic, TopicRepository } from "../../domain/repositories/topic.repository";
 
 interface TopicDto {
@@ -17,20 +17,15 @@ interface TopicDto {
   };
 }
 
-interface TeacherDto {
+interface SupervisorOptionDto {
   id: string;
   fullName: string;
   email?: string;
   lecturerId?: string;
 }
 
-const EMPTY_TEACHERS_RESPONSE: ApiListResponse<TeacherDto> = {
+const EMPTY_SUPERVISORS_RESPONSE: ApiResponse<SupervisorOptionDto[]> = {
   data: [],
-  pagination: {
-    page: 1,
-    size: 0,
-    total: 0,
-  },
 };
 
 interface PeriodDto {
@@ -59,8 +54,8 @@ export class ApiTopicRepository implements TopicRepository {
       api.get<ApiListResponse<TopicDto>>("/topics?role=student&page=1&size=100"),
       api.get<ApiListResponse<PeriodDto>>("/periods?page=1&size=100"),
       api
-        .get<ApiListResponse<TeacherDto>>("/users?role=LECTURER&page=1&size=200")
-        .catch(() => EMPTY_TEACHERS_RESPONSE),
+        .get<ApiResponse<SupervisorOptionDto[]>>("/users/supervisors/options")
+        .catch(() => EMPTY_SUPERVISORS_RESPONSE),
     ]);
 
     const periodMap = new Map(

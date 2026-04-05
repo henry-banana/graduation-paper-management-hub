@@ -10,9 +10,6 @@ export class PeriodResponseDto {
   @ApiProperty({ example: 'HK1-2026' })
   code!: string;
 
-  @ApiPropertyOptional({ example: 'Đợt BCTT HK1 2026', description: 'Display name for the period' })
-  name?: string;
-
   @ApiProperty({ enum: ['BCTT', 'KLTN'], example: 'BCTT' })
   type!: PeriodType;
 
@@ -27,9 +24,6 @@ export class PeriodResponseDto {
 
   @ApiPropertyOptional({ example: '2026-05-15', description: 'Submission end date' })
   submitEndAt?: string;
-
-  @ApiPropertyOptional({ example: 5, description: 'Default supervisor quota for this period' })
-  supervisorQuota?: number;
 
   @ApiProperty({ enum: ['DRAFT', 'OPEN', 'CLOSED'], example: 'OPEN' })
   status!: PeriodStatus;
