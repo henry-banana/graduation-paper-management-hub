@@ -40,6 +40,8 @@ interface ScoreSummaryDto {
   confirmedByCtHd: boolean;
   published: boolean;
   rubricDocxLink?: string;
+  appealChoice?: "NO_APPEAL" | "ACCEPT";
+  appealChoiceAt?: string;
   appeal?: {
     requestedAt?: string;
     requestedBy?: string;
@@ -93,6 +95,7 @@ function StudentScoresContent() {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [appealReason, setAppealReason] = useState("");
   const [isSubmittingAppeal, setIsSubmittingAppeal] = useState(false);
+  const [isSubmittingNoAppeal, setIsSubmittingNoAppeal] = useState(false);
   const [appealFeedback, setAppealFeedback] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -191,6 +194,7 @@ function StudentScoresContent() {
   const canRequestAppeal =
     selectedTopic?.type === "BCTT" &&
     Boolean(summary?.published) &&
+    !summary?.appealChoice &&
     !summary?.appeal?.requestedAt;
 
   const handleSubmitAppeal = async () => {
@@ -227,6 +231,50 @@ function StudentScoresContent() {
       setAppealFeedback(message);
     } finally {
       setIsSubmittingAppeal(false);
+    }
+  };
+
+  const handleSubmitNoAppeal = async () => {
+    if (!selectedTopicId || selectedTopic?.type !== "BCTT" || !summary?.published) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Bạn xác nhận KHÔNG phúc khảo? Sau khi xác nhận, hệ thống sẽ hoàn tất đề tài BCTT.",
+      )
+    ) {
+      return;
+    }
+
+    setAppealFeedback(null);
+    setIsSubmittingNoAppeal(true);
+
+    try {
+      const response = await api.post<
+        ApiResponse<{
+          choice: "NO_APPEAL" | "ACCEPT";
+          message: string;
+          topicState?: string;
+          rubricLink?: string;
+        }>
+      >(`/topics/${selectedTopicId}/scores/appeal-choice`, {
+        choice: "NO_APPEAL",
+      });
+
+      const refreshed = await api.get<ApiResponse<ScoreSummaryDto>>(
+        `/topics/${selectedTopicId}/scores/summary`,
+      );
+      setSummary(refreshed.data);
+      setAppealFeedback(response.data.message);
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : "Không thể ghi nhận lựa chọn không phúc khảo.";
+      setAppealFeedback(message);
+    } finally {
+      setIsSubmittingNoAppeal(false);
     }
   };
 
@@ -425,6 +473,25 @@ function StudentScoresContent() {
                     <p>Phản hồi GVHD: {summary.appeal.resolutionNote}</p>
                   )}
                 </div>
+              ) : summary.appealChoice ? (
+                <div className="text-sm text-on-surface-variant space-y-1.5">
+                  <p>
+                    Đã ghi nhận lựa chọn:{" "}
+                    <strong>
+                      {summary.appealChoice === "NO_APPEAL"
+                        ? "Không phúc khảo"
+                        : "Chấp nhận điểm"}
+                    </strong>
+                  </p>
+                  {summary.appealChoiceAt && (
+                    <p>
+                      Thời điểm:{" "}
+                      {new Date(summary.appealChoiceAt).toLocaleString("vi-VN", {
+                        hour12: false,
+                      })}
+                    </p>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-3">
                   <textarea
@@ -434,14 +501,24 @@ function StudentScoresContent() {
                     placeholder="Nêu rõ lý do phúc khảo điểm..."
                     className="w-full px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
-                  <button
-                    type="button"
-                    onClick={() => void handleSubmitAppeal()}
-                    disabled={isSubmittingAppeal}
-                    className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
-                  >
-                    {isSubmittingAppeal ? "Đang gửi..." : "Gửi phúc khảo"}
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleSubmitAppeal()}
+                      disabled={isSubmittingAppeal || isSubmittingNoAppeal}
+                      className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+                    >
+                      {isSubmittingAppeal ? "Đang gửi..." : "Gửi phúc khảo"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSubmitNoAppeal()}
+                      disabled={isSubmittingAppeal || isSubmittingNoAppeal}
+                      className="px-4 py-2 rounded-xl border border-outline-variant/30 text-sm font-semibold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-60"
+                    >
+                      {isSubmittingNoAppeal ? "Đang xử lý..." : "Không phúc khảo"}
+                    </button>
+                  </div>
                 </div>
               )}
 

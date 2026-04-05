@@ -79,12 +79,13 @@
  *   A=id, B=topicId, C=roundNumber, D=status, E=startAt,
  *   F=endAt, G=requestedBy, H=reason, I=createdAt, J=updatedAt
  *
- * ScoreSummaries — A-T (20 cols):
+ * ScoreSummaries — A-W (23 cols):
  *   A=id, B=topicId, C=gvhdScore, D=gvpbScore, E=councilAvgScore,
  *   F=finalScore, G=result, H=confirmedByGvhd, I=confirmedByCtHd, J=published, K=updatedAt,
  *   L=councilComments,
  *   M=appealRequestedAt, N=appealRequestedBy, O=appealReason, P=appealStatus,
- *   Q=appealResolvedAt, R=appealResolvedBy, S=appealResolutionNote, T=appealScoreAdjusted
+ *   Q=appealResolvedAt, R=appealResolvedBy, S=appealResolutionNote, T=appealScoreAdjusted,
+ *   U=appealChoice, V=appealChoiceAt, W=rubricDriveLink
  *
  * Notifications — A-K (11 cols):
  *   A=id, B=receiverUserId, C=topicId, D=type, E=title, F=body,
@@ -251,6 +252,7 @@ export const SHEET_HEADERS: Record<SheetName, string[]> = {
     'councilComments',
     'appealRequestedAt', 'appealRequestedBy', 'appealReason', 'appealStatus',
     'appealResolvedAt', 'appealResolvedBy', 'appealResolutionNote', 'appealScoreAdjusted',
+    'appealChoice', 'appealChoiceAt', 'rubricDriveLink',
   ],
   'Notifications': [
     'id', 'receiverUserId', 'topicId', 'type', 'title', 'body',

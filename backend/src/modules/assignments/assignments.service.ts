@@ -294,6 +294,20 @@ export class AssignmentsService {
       assignedAt: new Date().toISOString(),
     };
 
+    // DB-13 fix: Populate teacher-visible reference columns
+    try {
+      const [student, lecturer] = await Promise.all([
+        this.usersRepository.findById(topic.studentUserId),
+        this.usersRepository.findById(dto.userId),
+      ]);
+      if (student) {
+        (newAssignment as any)._emailSV = student.email;
+      }
+      if (lecturer) {
+        (newAssignment as any)._emailGV = lecturer.email;
+      }
+    } catch { /* non-blocking: teacher columns optional */ }
+
     await this.assignmentsRepository.create(newAssignment);
     await this.applyQuotaDelta(dto.userId, 'GVPB', 1);
 
@@ -454,6 +468,20 @@ export class AssignmentsService {
       });
     }
 
+    // DB-13 fix: Populate teacher-visible reference columns for all assignments
+    try {
+      const student = await this.usersRepository.findById(topic.studentUserId);
+      for (const item of newAssignments) {
+        const lecturer = await this.usersRepository.findById(item.userId);
+        if (student) {
+          (item as any)._emailSV = student.email;
+        }
+        if (lecturer) {
+          (item as any)._emailGV = lecturer.email;
+        }
+      }
+    } catch { /* non-blocking: teacher columns optional */ }
+
     for (const item of newAssignments) {
       await this.assignmentsRepository.create(item);
     }
@@ -591,6 +619,23 @@ export class AssignmentsService {
       status: 'ACTIVE',
       assignedAt: new Date().toISOString(),
     };
+
+    // DB-13 fix: Populate teacher-visible reference columns
+    try {
+      const topic = await this.topicsRepository.findById(assignment.topicId);
+      if (topic) {
+        const [student, lecturer] = await Promise.all([
+          this.usersRepository.findById(topic.studentUserId),
+          this.usersRepository.findById(dto.newUserId),
+        ]);
+        if (student) {
+          (newAssignment as any)._emailSV = student.email;
+        }
+        if (lecturer) {
+          (newAssignment as any)._emailGV = lecturer.email;
+        }
+      }
+    } catch { /* non-blocking: teacher columns optional */ }
 
     await this.assignmentsRepository.create(newAssignment);
     await this.applyQuotaDelta(assignment.userId, assignment.topicRole, -1);

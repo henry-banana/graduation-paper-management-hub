@@ -22,6 +22,9 @@ import {
   ScoreStatus,
   ScoreResult,
   RubricItem,
+  SubmitAppealChoiceDto,
+  AppealChoiceResponseDto,
+  AppealChoice,
 } from './dto';
 import { CreateDraftScoreDto } from './dto/create-score.dto';
 import { AuthUser, TopicRole } from '../../common/types';
@@ -41,6 +44,7 @@ import {
 import type { TopicRecord } from '../topics/topics.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
+import { ExportsService } from '../exports/exports.service';
 
 export interface ScoreRecord {
   id: string;
@@ -83,6 +87,10 @@ export interface ScoreSummaryRecord {
   appealResolvedBy?: string;
   appealResolutionNote?: string;
   appealScoreAdjusted?: boolean;
+  // DB-14: Appeal choice workflow (NO_APPEAL auto-completes topic)
+  appealChoice?: 'NO_APPEAL' | 'ACCEPT';  // Student choice after seeing published score
+  appealChoiceAt?: string;                // Timestamp when choice made
+  rubricDriveLink?: string;               // Auto-uploaded rubric link (populated when NO_APPEAL)
 }
 
 
@@ -97,6 +105,8 @@ export class ScoresService {
     private readonly topicsRepository: TopicsRepository,
     private readonly assignmentsRepository: AssignmentsRepository,
     private readonly usersRepository: UsersRepository,
+    @Optional()
+    private readonly exportsService?: ExportsService,
     @Optional()
     private readonly exportFilesRepository?: ExportFilesRepository,
     @Optional()
@@ -176,10 +186,15 @@ export class ScoresService {
       return base;
     }
 
+    const rubricDocxLink =
+      summaryRecord?.rubricDriveLink ?? (await this.getRubricDocxLink(topic.id));
+
     return {
       ...base,
-      rubricDocxLink: await this.getRubricDocxLink(topic.id),
+      rubricDocxLink,
       appeal: this.toAppealInfo(summaryRecord),
+      appealChoice: summaryRecord?.appealChoice,
+      appealChoiceAt: summaryRecord?.appealChoiceAt,
     };
   }
 
@@ -436,6 +451,28 @@ export class ScoresService {
     };
 
     await this.topicsRepository.update(topic.id, nextTopic);
+
+    // Keep user profile in sync so KLTN eligibility checks can read the completed BCTT score.
+    const summary = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topic.id,
+    );
+    if (!summary?.published) {
+      return;
+    }
+
+    try {
+      const student = await this.usersRepository.findById(topic.studentUserId);
+      if (!student) {
+        return;
+      }
+      student.completedBcttScore = summary.finalScore;
+      await this.usersRepository.update(student.id, student);
+    } catch (error) {
+      this.logger.warn(
+        `[completeTopicIfNeeded] Failed to sync completedBcttScore for topic=${topic.id}`,
+        error,
+      );
+    }
   }
 
   async requestAppeal(
@@ -461,6 +498,12 @@ export class ScoresService {
       throw new ConflictException('Score must be published before requesting appeal');
     }
 
+    if (summary.appealChoice === 'NO_APPEAL') {
+      throw new ConflictException(
+        'Bạn đã xác nhận không phúc khảo, không thể gửi yêu cầu phúc khảo nữa',
+      );
+    }
+
     if (summary.appealRequestedAt) {
       throw new ConflictException('Appeal can only be requested once');
     }
@@ -481,6 +524,8 @@ export class ScoresService {
       appealResolvedBy: undefined,
       appealResolutionNote: undefined,
       appealScoreAdjusted: undefined,
+      appealChoice: undefined,
+      appealChoiceAt: undefined,
     };
 
     await this.scoreSummariesRepository.update(summary.id, nextSummary);
@@ -554,6 +599,127 @@ export class ScoresService {
       status: 'RESOLVED',
       resolvedAt,
       scoreAdjusted: false,
+    };
+  }
+
+  private async autoExportBcttRubricForStudent(
+    topic: TopicRecord,
+    studentUser: AuthUser,
+  ): Promise<string | undefined> {
+    if (!this.exportsService) {
+      return undefined;
+    }
+
+    const gvhdScores = await this.scoresRepository.findWhere(
+      (score) =>
+        score.topicId === topic.id &&
+        score.scorerRole === 'GVHD' &&
+        score.status === 'SUBMITTED',
+    );
+    if (gvhdScores.length === 0) {
+      return undefined;
+    }
+
+    const latestScore = gvhdScores.sort((left, right) => {
+      const leftTime = new Date(left.submittedAt ?? left.updatedAt).getTime();
+      const rightTime = new Date(right.submittedAt ?? right.updatedAt).getTime();
+      return rightTime - leftTime;
+    })[0];
+
+    const exported = await this.exportsService.exportRubricBctt(
+      topic.id,
+      latestScore.id,
+      studentUser,
+    );
+
+    return exported.driveLink ?? undefined;
+  }
+
+  async submitAppealChoice(
+    topicId: string,
+    dto: SubmitAppealChoiceDto,
+    user: AuthUser,
+  ): Promise<AppealChoiceResponseDto> {
+    const topic = await this.getTopicOrThrow(topicId);
+
+    if (topic.type !== 'BCTT') {
+      throw new ConflictException('Appeal choice is only available for BCTT topics');
+    }
+
+    if (user.role !== 'STUDENT' || topic.studentUserId !== user.userId) {
+      throw new ForbiddenException('Only the owning student can submit appeal choice');
+    }
+
+    const summary = await this.scoreSummariesRepository.findFirst(
+      (record) => record.topicId === topic.id,
+    );
+    if (!summary?.published) {
+      throw new ConflictException('Score must be published before selecting appeal choice');
+    }
+
+    if (summary.appealRequestedAt) {
+      throw new ConflictException(
+        'Bạn đã gửi yêu cầu phúc khảo, không thể chọn "Không phúc khảo"',
+      );
+    }
+
+    if (summary.appealChoice) {
+      if (summary.appealChoice === dto.choice) {
+        return {
+          choice: summary.appealChoice,
+          message: 'Lựa chọn của bạn đã được ghi nhận trước đó.',
+          topicState: summary.appealChoice === 'NO_APPEAL' ? 'COMPLETED' : undefined,
+          rubricLink: summary.rubricDriveLink,
+        };
+      }
+      throw new ConflictException('Lựa chọn phúc khảo đã được chốt và không thể thay đổi');
+    }
+
+    const choiceAt = new Date().toISOString();
+    const nextSummary: ScoreSummaryRecord = {
+      ...summary,
+      appealChoice: dto.choice,
+      appealChoiceAt: choiceAt,
+    };
+
+    let message = 'Đã ghi nhận lựa chọn của bạn.';
+    let rubricLink = nextSummary.rubricDriveLink;
+    let topicState: string | undefined;
+
+    if (dto.choice === 'NO_APPEAL') {
+      try {
+        const exportedRubricLink = await this.autoExportBcttRubricForStudent(
+          topic,
+          user,
+        );
+        if (exportedRubricLink) {
+          nextSummary.rubricDriveLink = exportedRubricLink;
+          rubricLink = exportedRubricLink;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `[submitAppealChoice] Auto-export rubric failed for topic=${topic.id}`,
+          error,
+        );
+      }
+
+      await this.scoreSummariesRepository.update(summary.id, nextSummary);
+      await this.completeTopicIfNeeded(topic);
+      topicState = 'COMPLETED';
+
+      message = rubricLink
+        ? 'Bạn đã xác nhận không phúc khảo. Đề tài đã được hoàn tất và phiếu chấm đã được lưu trên Drive.'
+        : 'Bạn đã xác nhận không phúc khảo. Đề tài đã được hoàn tất.';
+    } else {
+      await this.scoreSummariesRepository.update(summary.id, nextSummary);
+      message = 'Bạn đã xác nhận kết quả điểm.';
+    }
+
+    return {
+      choice: dto.choice,
+      message,
+      topicState,
+      rubricLink,
     };
   }
 
@@ -777,6 +943,15 @@ export class ScoresService {
         (s) => s.topicId === topicId,
       );
       if (!existing?.published) {
+        // DB-12 improvement: Provide more specific error message
+        if (!existing) {
+          throw new ForbiddenException('Điểm chưa được nhập hoặc chưa được tổng hợp.');
+        }
+        if (!existing.confirmedByGvhd || !existing.confirmedByCtHd) {
+          throw new ForbiddenException(
+            'Điểm đang chờ xác nhận từ Giảng viên hướng dẫn và Chủ tịch hội đồng.',
+          );
+        }
         throw new ForbiddenException('Score summary not yet published');
       }
 
@@ -1176,7 +1351,28 @@ export class ScoresService {
         rubricData,
         questions,
         updatedAt: new Date().toISOString(),
+        // Populate teacher-visible reference columns
+        _tenDetai: topic.title,
+        _gvName: user.email, // fallback; overwritten below after DB lookup
       };
+
+      try {
+        const [student, scorer] = await Promise.all([
+          this.usersRepository.findById(topic.studentUserId),
+          this.usersRepository.findById(user.userId),
+        ]);
+        if (student) {
+          scoreRecord._email = student.email;
+          scoreRecord._tenSV = student.name;
+          scoreRecord._mssv = student.studentId ?? student.lecturerId ?? '';
+        }
+        if (scorer?.name) {
+          scoreRecord._gvName = scorer.name;
+        }
+      } catch {
+        // Non-blocking: teacher columns are optional references
+      }
+
       await this.scoresRepository.create(scoreRecord);
     }
 

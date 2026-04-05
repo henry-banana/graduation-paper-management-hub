@@ -66,6 +66,8 @@ interface ScoreSummaryDto {
   result: "PASS" | "FAIL";
   published: boolean;
   rubricDocxLink?: string;
+  appealChoice?: "NO_APPEAL" | "ACCEPT";
+  appealChoiceAt?: string;
   appeal?: {
     requestedAt?: string;
     requestedBy?: string;
@@ -477,6 +479,7 @@ export default function StudentTopicDetailPage() {
   const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
   const [appealReason, setAppealReason] = useState("");
   const [isSubmittingAppeal, setIsSubmittingAppeal] = useState(false);
+  const [isSubmittingNoAppeal, setIsSubmittingNoAppeal] = useState(false);
   const [appealFeedback, setAppealFeedback] = useState<string | null>(null);
   const [schedule, setSchedule] = useState<ScheduleDto | null>(null);
   const [notifications, setNotifications] = useState<NotificationDto[]>([]);
@@ -692,6 +695,7 @@ export default function StudentTopicDetailPage() {
   const canRequestAppeal =
     topic?.type === "BCTT" &&
     Boolean(summary?.published) &&
+    !summary?.appealChoice &&
     !summary?.appeal?.requestedAt;
 
   const handleSubmitAppeal = async () => {
@@ -728,6 +732,50 @@ export default function StudentTopicDetailPage() {
       setAppealFeedback(message);
     } finally {
       setIsSubmittingAppeal(false);
+    }
+  };
+
+  const handleSubmitNoAppeal = async () => {
+    if (!topic || topic.type !== "BCTT" || !summary?.published) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Bạn xác nhận KHÔNG phúc khảo? Sau khi xác nhận, hệ thống sẽ hoàn tất đề tài BCTT.",
+      )
+    ) {
+      return;
+    }
+
+    setAppealFeedback(null);
+    setIsSubmittingNoAppeal(true);
+
+    try {
+      const response = await api.post<
+        ApiResponse<{
+          choice: "NO_APPEAL" | "ACCEPT";
+          message: string;
+          topicState?: string;
+          rubricLink?: string;
+        }>
+      >(`/topics/${topic.id}/scores/appeal-choice`, {
+        choice: "NO_APPEAL",
+      });
+
+      const refreshed = await api.get<ApiResponse<ScoreSummaryDto>>(
+        `/topics/${topic.id}/scores/summary`,
+      );
+      setSummary(refreshed.data);
+      setAppealFeedback(response.data.message);
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : "Không thể ghi nhận lựa chọn không phúc khảo.";
+      setAppealFeedback(message);
+    } finally {
+      setIsSubmittingNoAppeal(false);
     }
   };
 
@@ -1032,6 +1080,25 @@ export default function StudentTopicDetailPage() {
                         <p>Phản hồi: {summary.appeal.resolutionNote}</p>
                       )}
                     </div>
+                  ) : summary.appealChoice ? (
+                    <div className="text-xs text-on-surface-variant space-y-1">
+                      <p>
+                        Đã ghi nhận lựa chọn:{" "}
+                        <strong>
+                          {summary.appealChoice === "NO_APPEAL"
+                            ? "Không phúc khảo"
+                            : "Chấp nhận điểm"}
+                        </strong>
+                      </p>
+                      {summary.appealChoiceAt && (
+                        <p>
+                          Thời điểm:{" "}
+                          {new Date(summary.appealChoiceAt).toLocaleString("vi-VN", {
+                            hour12: false,
+                          })}
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     <div className="space-y-2">
                       <textarea
@@ -1044,10 +1111,18 @@ export default function StudentTopicDetailPage() {
                       <button
                         type="button"
                         onClick={() => void handleSubmitAppeal()}
-                        disabled={isSubmittingAppeal}
+                        disabled={isSubmittingAppeal || isSubmittingNoAppeal}
                         className="w-full px-3 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                       >
                         {isSubmittingAppeal ? "Đang gửi..." : "Gửi phúc khảo"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleSubmitNoAppeal()}
+                        disabled={isSubmittingAppeal || isSubmittingNoAppeal}
+                        className="w-full px-3 py-2 rounded-xl border border-outline-variant/30 text-xs font-semibold text-on-surface hover:bg-surface-container-lowest transition-colors disabled:opacity-60"
+                      >
+                        {isSubmittingNoAppeal ? "Đang xử lý..." : "Không phúc khảo"}
                       </button>
                     </div>
                   )}

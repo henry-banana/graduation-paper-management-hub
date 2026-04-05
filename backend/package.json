@@ -18,6 +18,7 @@
     "cleanup:sheets": "ts-node --transpile-only src/scripts/cleanup-old-sheets.ts",
     "inspect:sheets": "ts-node --transpile-only src/scripts/inspect-sheets.ts",
     "preview:sheets": "ts-node --transpile-only src/scripts/fetch-sheet-preview.ts",
+    "backfill:sheets:v34": "ts-node --transpile-only src/tools/backfill-sheets-v34.ts",
     "sweep:api": "ts-node src/scripts/full-curl-sweep.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",

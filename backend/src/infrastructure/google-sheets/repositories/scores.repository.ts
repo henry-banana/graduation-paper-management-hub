@@ -181,6 +181,7 @@ export class ScoresRepository extends SheetsBaseRepository<ScoreRecord> {
  * [11]=councilComments (góp ý bổ sung của hội đồng - do Thư ký nhập)
  * [12]=appealRequestedAt [13]=appealRequestedBy [14]=appealReason [15]=appealStatus
  * [16]=appealResolvedAt [17]=appealResolvedBy [18]=appealResolutionNote [19]=appealScoreAdjusted
+ * [20]=appealChoice [21]=appealChoiceAt [22]=rubricDriveLink
  */
 @Injectable()
 export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryRecord> {
@@ -190,6 +191,7 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
 
   protected fromRow(row: SheetRow): ScoreSummaryRecord {
     const v = row.values;
+    const appealChoiceRaw = this.optionalStr(v[20]);
     return {
       id: this.str(v[0]),
       topicId: this.str(v[1]),
@@ -212,6 +214,12 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       appealResolutionNote: this.optionalStr(v[18]),
       appealScoreAdjusted:
         this.optionalStr(v[19]) === undefined ? undefined : this.bool(v[19]),
+      appealChoice:
+        appealChoiceRaw === 'NO_APPEAL' || appealChoiceRaw === 'ACCEPT'
+          ? (appealChoiceRaw as 'NO_APPEAL' | 'ACCEPT')
+          : undefined,
+      appealChoiceAt: this.optionalStr(v[21]),
+      rubricDriveLink: this.optionalStr(v[22]),
     };
   }
 
@@ -237,6 +245,9 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       this.str(entity.appealResolvedBy ?? ''), // [17] appealResolvedBy
       this.str(entity.appealResolutionNote ?? ''), // [18] appealResolutionNote
       entity.appealScoreAdjusted ?? '', // [19] appealScoreAdjusted
+      this.str(entity.appealChoice ?? ''), // [20] appealChoice
+      this.str(entity.appealChoiceAt ?? ''), // [21] appealChoiceAt
+      this.str(entity.rubricDriveLink ?? ''), // [22] rubricDriveLink
     ];
   }
 

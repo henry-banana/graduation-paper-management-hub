@@ -37,9 +37,9 @@ export default function GVHDFinalConfirmPage() {
     setIsLoading(true);
     setError(null);
     try {
-      // GVHD sees their supervised topics that have summarized scores
-      const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=gvhd&page=1&size=100&state=GRADING");
-      setTopics((res.data ?? []).filter(t => t.scores?.isSummarized));
+      // GVHD sees supervised topics with summarized scores that are not published yet.
+      const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=gvhd&page=1&size=100");
+      setTopics((res.data ?? []).filter((t) => t.scores?.isSummarized && !t.isPublished));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải danh sách xác nhận điểm.");
     } finally {

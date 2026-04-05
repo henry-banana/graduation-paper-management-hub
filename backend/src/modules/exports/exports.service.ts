@@ -253,7 +253,14 @@ export class ExportsService {
       throw new BadRequestException('Chỉ hỗ trợ xuất phiếu BCTT cho đề tài loại BCTT');
     }
 
-    const score = await this.getScoreOrThrow(scoreId, topic.id, 'GVHD', user);
+    await this.assertTopicAccess(topic, user);
+    const score = await this.getScoreOrThrow(
+      scoreId,
+      topic.id,
+      'GVHD',
+      user,
+      topic,
+    );
     const generatedDoc = await this.buildBcttRubricDocument(topic, score);
 
     return this.createExport(topicId, 'RUBRIC_BCTT', user, { scoreId }, generatedDoc);
@@ -291,7 +298,8 @@ export class ExportsService {
       );
     }
 
-    const score = await this.getScoreOrThrow(scoreId, topic.id, role, user);
+    await this.assertTopicAccess(topic, user);
+    const score = await this.getScoreOrThrow(scoreId, topic.id, role, user, topic);
     const generatedDoc = await this.buildKltnRubricDocument(topic, role, score);
 
     return this.createExport(
@@ -610,6 +618,10 @@ export class ExportsService {
   private async assertTopicAccess(topic: TopicRecord, user: AuthUser): Promise<void> {
     if (user.role === 'TBM') return;
 
+    if (user.role === 'STUDENT' && topic.studentUserId === user.userId) {
+      return;
+    }
+
     // Supervisor always allowed
     if (user.role === 'LECTURER' && topic.supervisorUserId === user.userId) {
       return;
@@ -632,6 +644,7 @@ export class ExportsService {
     topicId: string,
     expectedRole: KltnRubricExportRole | 'GVHD',
     requester: AuthUser,
+    topic?: TopicRecord,
   ): Promise<ScoreRecord> {
     const score = await this.scoresRepository.findById(scoreId);
     if (!score) {
@@ -648,11 +661,16 @@ export class ExportsService {
       );
     }
 
-    // Authorization: requester must be the scorer or TBM.
-    if (requester.role !== 'TBM') {
-      if (score.scorerUserId !== requester.userId) {
-        throw new ForbiddenException('Bạn không có quyền xuất phiếu cho bảng điểm này');
-      }
+    // Authorization: requester must be scorer, TBM, or owning student (for post-publish BCTT flow).
+    const isStudentOwner =
+      requester.role === 'STUDENT' &&
+      topic?.studentUserId === requester.userId;
+    if (
+      requester.role !== 'TBM' &&
+      score.scorerUserId !== requester.userId &&
+      !isStudentOwner
+    ) {
+      throw new ForbiddenException('Bạn không có quyền xuất phiếu cho bảng điểm này');
     }
 
     if (score.status !== 'SUBMITTED') {

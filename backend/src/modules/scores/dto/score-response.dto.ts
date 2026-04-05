@@ -130,6 +130,19 @@ export class ScoreSummaryDto {
     type: ScoreAppealInfoDto,
   })
   appeal?: ScoreAppealInfoDto;
+
+  @ApiPropertyOptional({
+    description: 'Lựa chọn phúc khảo của sinh viên sau khi điểm được công bố',
+    enum: ['NO_APPEAL', 'ACCEPT'],
+    example: 'NO_APPEAL',
+  })
+  appealChoice?: 'NO_APPEAL' | 'ACCEPT';
+
+  @ApiPropertyOptional({
+    description: 'Thời điểm sinh viên chọn phúc khảo/không phúc khảo',
+    example: '2026-04-05T08:15:00.000Z',
+  })
+  appealChoiceAt?: string;
 }
 
 export class DraftScoreResponseDto {

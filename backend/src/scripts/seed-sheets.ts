@@ -172,6 +172,10 @@ const SHEET_HEADERS: Record<string, string[]> = {
   'ScoreSummaries': [
     'id', 'topicId', 'gvhdScore', 'gvpbScore', 'councilAvgScore',
     'finalScore', 'result', 'confirmedByGvhd', 'confirmedByCtHd', 'published', 'updatedAt',
+    'councilComments',
+    'appealRequestedAt', 'appealRequestedBy', 'appealReason', 'appealStatus',
+    'appealResolvedAt', 'appealResolvedBy', 'appealResolutionNote', 'appealScoreAdjusted',
+    'appealChoice', 'appealChoiceAt', 'rubricDriveLink',
   ],
   'Notifications': [
     'id', 'receiverUserId', 'topicId', 'type', 'title', 'body',
@@ -566,7 +570,7 @@ const CHAM_DIEM_HDONG_ROWS: Row[] = [
 
 // ── ScoreSummaries ────────────────────────────────────────────
 // id, topicId, gvhdScore, gvpbScore, councilAvgScore,
-// finalScore, result, confirmedByGvhd, confirmedByCtHd, published, updatedAt
+// finalScore, result, confirmedByGvhd, confirmedByCtHd, published, updatedAt, ...
 // Weights: GVHD=50%, GVPB=25%, Council=25%
 const gvhdScoreBctt = TOTAL_GVHD_BCTT / 5;   // avg = 8.0
 const finalBctt = gvhdScoreBctt;              // BCTT chỉ có GVHD
@@ -578,6 +582,10 @@ const SCORE_SUMMARIES_ROWS: Row[] = [
     gvhdScoreBctt, '', '',
     finalBctt, 'PASS',
     'TRUE', 'FALSE', 'TRUE', T,
+    '', // councilComments
+    '', '', '', '', // appealRequestedAt..appealStatus
+    '', '', '', '', // appealResolvedAt..appealScoreAdjusted
+    '', '', '', // appealChoice..rubricDriveLink
   ],
 ];
 

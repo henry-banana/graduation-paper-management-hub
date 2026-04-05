@@ -479,14 +479,36 @@ export class TopicsService {
 
     // Tự động tạo assignment GVHD cho supervisor
     if (this.assignmentsRepository) {
-      const gvhdAssignment = {
+      const gvhdAssignment: {
+        id: string;
+        topicId: string;
+        userId: string;
+        topicRole: TopicRole;
+        status: 'ACTIVE';
+        assignedAt: string;
+        _emailSV?: string;
+        _emailGV?: string;
+      } = {
         id: `as_${crypto.randomBytes(6).toString('hex')}`,
         topicId: newTopic.id,
         userId: newTopic.supervisorUserId,
         topicRole: 'GVHD' as TopicRole,
         status: 'ACTIVE' as const,
         assignedAt: now,
+        _emailSV: currentUser.email,
       };
+
+      try {
+        const supervisor = await this.usersRepository.findById(
+          newTopic.supervisorUserId,
+        );
+        if (supervisor?.email) {
+          gvhdAssignment._emailGV = supervisor.email;
+        }
+      } catch {
+        // Non-blocking: teacher columns are advisory references only
+      }
+
       await this.assignmentsRepository.create(gvhdAssignment);
     }
 

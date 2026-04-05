@@ -4,3 +4,4 @@ export * from './submit-score.dto';
 export * from './direct-score.dto';
 export * from './council-comments.dto';
 export * from './score-appeal.dto';
+export * from './appeal-choice.dto';

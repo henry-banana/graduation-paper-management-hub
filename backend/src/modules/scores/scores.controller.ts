@@ -31,6 +31,8 @@ import {
   RequestScoreAppealResponseDto,
   ResolveScoreAppealDto,
   ResolveScoreAppealResponseDto,
+  SubmitAppealChoiceDto,
+  AppealChoiceResponseDto,
 } from './dto';
 import { CreateDraftScoreDto } from './dto/create-score.dto';
 import { SubmitScoreDto, ConfirmScoreDto, RequestSummaryDto, ConfirmScoreRole } from './dto/submit-score.dto';
@@ -231,6 +233,32 @@ export class ScoresController {
     @CurrentUser() user: AuthUser,
   ) {
     const result = await this.scoresService.requestAppeal(topicId, dto.reason, user);
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Post('topics/:topicId/scores/appeal-choice')
+  @Roles('STUDENT')
+  @ApiOperation({ summary: 'Student confirms appeal choice after published BCTT score' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Appeal choice submitted',
+    type: AppealChoiceResponseDto,
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({
+    status: 409,
+    description: 'Choice already set, topic not eligible, or appeal already requested',
+  })
+  async submitAppealChoice(
+    @Param('topicId') topicId: string,
+    @Body() dto: SubmitAppealChoiceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const result = await this.scoresService.submitAppealChoice(topicId, dto, user);
     return {
       data: result,
       meta: { requestId: generateRequestId() },
