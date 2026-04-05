@@ -200,9 +200,10 @@ export class ScoresService {
     }
 
     // Filter by role via fileName pattern (role is embedded in filename)
-    // Example: rubric_kltn_GVHD_tp001.docx
+    // Example: rubric_kltn_GVHD_tp001.docx OR rubric_kltn_gvhd_tp001.docx
+    // Use case-insensitive search to handle both uppercase and lowercase role names
     const roleExports = exports.filter((exp) =>
-      exp.fileName?.includes(`_${role}_`),
+      exp.fileName?.toLowerCase().includes(`_${role.toLowerCase()}_`),
     );
 
     if (roleExports.length === 0) {
@@ -1248,6 +1249,109 @@ export class ScoresService {
         topic.state = 'COMPLETED';
         topic.updatedAt = new Date().toISOString();
         await this.topicsRepository.update(topicId, topic);
+      }
+
+      // Auto-generate KLTN documents (rubrics + minutes) when score is published
+      if (this.exportsService && topic.type === 'KLTN') {
+        try {
+          this.logger.log(
+            `[confirm:autoExport] Triggering auto-export for topicId=${topicId}`,
+          );
+
+          // Get all submitted scores to export rubrics
+          const allScores = await this.scoresRepository.findWhere(
+            (s) => s.topicId === topicId && s.status === 'SUBMITTED',
+          );
+
+          // Export rubrics for GVHD, GVPB, and council members
+          const gvhdScore = allScores.find((s) => s.scorerRole === 'GVHD');
+          const gvpbScore = allScores.find((s) => s.scorerRole === 'GVPB');
+          const councilScores = allScores.filter((s) =>
+            ['CT_HD', 'TK_HD', 'TV_HD'].includes(s.scorerRole),
+          );
+
+          const exportPromises: Promise<any>[] = [];
+
+          if (gvhdScore) {
+            exportPromises.push(
+              this.exportsService.exportRubricKltn(
+                topicId,
+                'GVHD',
+                gvhdScore.id,
+                { userId: gvhdScore.scorerUserId, role: 'LECTURER' } as AuthUser,
+              ).catch((err) => {
+                this.logger.warn(
+                  `[confirm:autoExport] Failed to export GVHD rubric: ${err.message}`,
+                );
+              }),
+            );
+          }
+
+          if (gvpbScore) {
+            exportPromises.push(
+              this.exportsService.exportRubricKltn(
+                topicId,
+                'GVPB',
+                gvpbScore.id,
+                { userId: gvpbScore.scorerUserId, role: 'LECTURER' } as AuthUser,
+              ).catch((err) => {
+                this.logger.warn(
+                  `[confirm:autoExport] Failed to export GVPB rubric: ${err.message}`,
+                );
+              }),
+            );
+          }
+
+          // Export council rubrics (CT_HD, TK_HD, TV_HD)
+          for (const councilScore of councilScores) {
+            exportPromises.push(
+              this.exportsService.exportRubricKltn(
+                topicId,
+                councilScore.scorerRole as 'CT_HD' | 'TK_HD' | 'TV_HD',
+                councilScore.id,
+                { userId: councilScore.scorerUserId, role: 'LECTURER' } as AuthUser,
+              ).catch((err) => {
+                this.logger.warn(
+                  `[confirm:autoExport] Failed to export ${councilScore.scorerRole} rubric: ${err.message}`,
+                );
+              }),
+            );
+          }
+
+          // Export minutes (biên bản hội đồng)
+          // Note: Minutes require dto with council comments, revision requirements, etc.
+          // For now, we generate with minimal data. TK_HD can regenerate later with full details.
+          exportPromises.push(
+            this.exportsService.exportMinutes(
+              topicId,
+              {
+                councilComments: summary.councilComments || '',
+                revisionRequirements: 'Xem biên bản chi tiết',
+                revisionDeadline: new Date(
+                  Date.now() + 30 * 24 * 60 * 60 * 1000,
+                ).toISOString(), // 30 days from now
+              },
+              { userId: user.userId, role: user.role } as AuthUser,
+            ).catch((err) => {
+              this.logger.warn(
+                `[confirm:autoExport] Failed to export minutes: ${err.message}`,
+              );
+            }),
+          );
+
+          // Execute all exports in parallel (non-blocking)
+          await Promise.all(exportPromises);
+
+          this.logger.log(
+            `[confirm:autoExport:success] Completed auto-export for topicId=${topicId}`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `[confirm:autoExport:error] topicId=${topicId} error=${error}`,
+          );
+          // Non-blocking: Score confirmation succeeded, export failed
+          // Documents can be manually exported later
+        }
       }
 
       await this.notifyIfAvailable({

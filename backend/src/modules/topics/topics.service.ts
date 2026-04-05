@@ -702,6 +702,50 @@ export class TopicsService {
     return { updated: true };
   }
 
+  /**
+   * Update topic title (GVHD or TBM only)
+   */
+  async updateTitle(
+    topicId: string,
+    newTitle: string,
+    currentUser: AuthUser,
+  ): Promise<{ id: string; title: string; updatedAt: string }> {
+    const topic = await this.topicsRepository.findById(topicId);
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    // Authorization: GVHD of this topic OR TBM
+    const isSupervisor = topic.supervisorUserId === currentUser.userId;
+    const isTbm = currentUser.role === 'TBM';
+
+    if (!isSupervisor && !isTbm) {
+      throw new ForbiddenException(
+        'Only the assigned GVHD or TBM can edit topic title',
+      );
+    }
+
+    // Update title
+    topic.title = newTitle.trim();
+    topic.updatedAt = new Date().toISOString();
+
+    await this.topicsRepository.update(topicId, topic);
+
+    await this.auditIfAvailable({
+      action: 'TOPIC_TITLE_UPDATED',
+      actorId: currentUser.userId,
+      actorRole: currentUser.role,
+      topicId,
+      detail: { newTitle },
+    });
+
+    return {
+      id: topic.id,
+      title: topic.title,
+      updatedAt: topic.updatedAt,
+    };
+  }
+
   async approve(
     id: string,
     note: string | undefined,

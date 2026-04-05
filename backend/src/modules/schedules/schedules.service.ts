@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import {
   CreateScheduleDto,
@@ -38,6 +39,7 @@ export class SchedulesService {
     private readonly schedulesRepository: SchedulesRepository,
     private readonly topicsRepository: TopicsRepository,
     private readonly assignmentsRepository: AssignmentsRepository,
+    private readonly configService: ConfigService,
   ) {}
 
   async findByTopicId(topicId: string): Promise<ScheduleResponseDto | null> {
@@ -52,6 +54,14 @@ export class SchedulesService {
 
     this.logger.log(`[findByTopicId:success] topicId=${topicId} scheduleId=${schedule.id}`);
     return this.mapToDto(schedule);
+  }
+
+  /**
+   * Check if DEMO_MODE is enabled
+   * @returns true if DEMO_MODE env var is 'true', false otherwise
+   */
+  private generateId(): string {
+    return `sch_${crypto.randomBytes(6).toString('hex')}`;
   }
 
   async create(
@@ -96,14 +106,13 @@ export class SchedulesService {
       );
     }
 
-    // DEMO MODE: Skip future-time validation for easy demo
-    // TODO(DEMO): Restore this validation before production deployment
-    // if (new Date(dto.defenseAt) <= new Date()) {
-    //   this.logger.warn(
-    //     `[create:conflict] topicId=${topicId} reason=PAST_DEFENSE_DATE defenseAt=${dto.defenseAt}`,
-    //   );
-    //   throw new ConflictException('Defense date must be in the future');
-    // }
+    // Validate defense date must be in the future
+    if (new Date(dto.defenseAt) <= new Date()) {
+      this.logger.warn(
+        `[create:conflict] topicId=${topicId} reason=PAST_DEFENSE_DATE defenseAt=${dto.defenseAt}`,
+      );
+      throw new ConflictException('Defense date must be in the future');
+    }
 
     const now = new Date().toISOString();
     const schedule: ScheduleRecord = {
@@ -205,14 +214,13 @@ export class SchedulesService {
     const topic = await this.topicsRepository.findById(topicId);
 
     if (dto.defenseAt) {
-      // DEMO MODE: Skip future-time validation for easy demo
-      // TODO(DEMO): Restore this validation before production deployment
-      // if (new Date(dto.defenseAt) <= new Date()) {
-      //   this.logger.warn(
-      //     `[update:conflict] topicId=${topicId} scheduleId=${schedule.id} reason=PAST_DEFENSE_DATE defenseAt=${dto.defenseAt}`,
-      //   );
-      //   throw new ConflictException('Defense date must be in the future');
-      // }
+      // Validate defense date must be in the future
+      if (new Date(dto.defenseAt) <= new Date()) {
+        this.logger.warn(
+          `[update:conflict] topicId=${topicId} scheduleId=${schedule.id} reason=PAST_DEFENSE_DATE defenseAt=${dto.defenseAt}`,
+        );
+        throw new ConflictException('Defense date must be in the future');
+      }
       schedule.defenseAt = dto.defenseAt;
     }
     if (dto.locationType) schedule.locationType = dto.locationType;

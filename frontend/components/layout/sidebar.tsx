@@ -37,6 +37,7 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
     { name: "Tiến độ hướng dẫn", path: "/gvhd/topics", icon: BookOpen },
     { name: "Chấm điểm (Rubric)", path: "/gvhd/scoring", icon: CheckSquare },
     { name: "Đề xuất đề tài", path: "/gvhd/suggested-topics", icon: Lightbulb },
+    { name: "Gửi thông báo", path: "/gvhd/notifications", icon: Bell },
     { name: "Thông báo", path: "/notifications", icon: Bell },
   ],
   GVPB: [
@@ -48,13 +49,14 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
     { name: "Phân công hội đồng", path: "/tbm/assignments", icon: Users },
     { name: "Lịch trình bảo vệ", path: "/tbm/schedules", icon: FileText },
     { name: "Đề xuất đề tài GV", path: "/tbm/suggested-topics", icon: Lightbulb },
+    { name: "Gửi thông báo", path: "/tbm/notifications", icon: Bell },
     { name: "Lịch sử xuất file", path: "/exports", icon: ClipboardList },
   ],
   TV_HD: [
     { name: "Chấm điểm HĐ", path: "/council/scoring", icon: CheckSquare },
   ],
   TK_HD: [
-    { name: "Tổng hợp điểm", path: "/council/summary", icon: FileText },
+    { name: "Quản lý biên bản", path: "/council/secretary", icon: FileText },
   ],
   CT_HD: [
     { name: "Xác nhận công bố", path: "/council/final-confirm", icon: CheckSquare },

@@ -13,6 +13,9 @@ import {
   User,
   AlertCircle,
   Loader2,
+  Edit2,
+  X,
+  Save,
 } from "lucide-react";
 import Link from "next/link";
 import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
@@ -98,6 +101,12 @@ export default function GVHDTopicDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [transitionSuccess, setTransitionSuccess] = useState<string | null>(null);
+
+  // Edit title modal
+  const [isEditTitleOpen, setIsEditTitleOpen] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!topicId) return;
@@ -199,6 +208,37 @@ export default function GVHDTopicDetailPage() {
   // Legacy support: handle topics stuck at CONFIRMED state
   const canStartProgress = topic.state === "CONFIRMED";
 
+  const handleOpenEditTitle = () => {
+    setEditedTitle(topic.title);
+    setTitleError(null);
+    setIsEditTitleOpen(true);
+  };
+
+  const handleSaveTitle = async () => {
+    if (!editedTitle.trim()) {
+      setTitleError("Tên đề tài không được để trống");
+      return;
+    }
+    if (editedTitle.length > 255) {
+      setTitleError("Tên đề tài không được vượt quá 255 ký tự");
+      return;
+    }
+
+    setIsSavingTitle(true);
+    setTitleError(null);
+    try {
+      await api.patch(`/topics/${topicId}/title`, { title: editedTitle });
+      setTopic((prev) => (prev ? { ...prev, title: editedTitle } : prev));
+      setIsEditTitleOpen(false);
+      setTransitionSuccess("Đã cập nhật tên đề tài thành công!");
+      setTimeout(() => setTransitionSuccess(null), 3000);
+    } catch (e) {
+      setTitleError(e instanceof Error ? e.message : "Không thể lưu tên đề tài");
+    } finally {
+      setIsSavingTitle(false);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-24">
       <button
@@ -229,7 +269,16 @@ export default function GVHDTopicDetailPage() {
             <span className="inline-block px-3 py-1 bg-primary/10 text-primary text-[10px] font-bold tracking-widest uppercase rounded-full mb-2">
               {topic.type}
             </span>
-            <h1 className="text-xl font-bold font-headline text-on-surface leading-snug">{topic.title}</h1>
+            <div className="flex items-start gap-3">
+              <h1 className="text-xl font-bold font-headline text-on-surface leading-snug flex-1">{topic.title}</h1>
+              <button
+                onClick={handleOpenEditTitle}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant/20 text-xs font-semibold text-outline hover:text-primary hover:bg-primary/5 transition-colors"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                Sửa tên
+              </button>
+            </div>
             {topic.domain && <p className="text-sm text-outline mt-1">{topic.domain}</p>}
           </div>
           <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0 ${stateLabel.bg ?? "bg-surface-container"} ${stateLabel.color ?? "text-outline"}`}>
@@ -491,6 +540,62 @@ export default function GVHDTopicDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Edit Title Modal */}
+      {isEditTitleOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setIsEditTitleOpen(false)}>
+          <div className="bg-surface-container-lowest rounded-3xl shadow-2xl max-w-2xl w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold text-on-surface font-headline">Chỉnh sửa tên đề tài</h2>
+              <button
+                onClick={() => setIsEditTitleOpen(false)}
+                className="text-outline hover:text-on-surface transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-outline mb-2">Tên đề tài</label>
+                <textarea
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  rows={3}
+                  className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
+                  placeholder="Nhập tên đề tài..."
+                />
+                <p className="text-xs text-outline mt-1">{editedTitle.length}/255 ký tự</p>
+              </div>
+
+              {titleError && (
+                <div className="bg-error-container/20 border border-error/20 rounded-xl px-3 py-2 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-error mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-error">{titleError}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setIsEditTitleOpen(false)}
+                disabled={isSavingTitle}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-outline-variant/20 text-sm font-semibold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => void handleSaveTitle()}
+                disabled={isSavingTitle}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isSavingTitle ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isSavingTitle ? "Đang lưu..." : "Lưu thay đổi"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

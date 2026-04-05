@@ -610,7 +610,8 @@ export class SubmissionsService {
       `Submission upload requested topicId=${topicId} userId=${userId} fileType=${fileType}`,
     );
 
-    const uploadFolderId = await this.resolveUploadFolderForUser(userId);
+    // Bug fix: Organize submission files by topicId for better structure
+    const uploadFolderId = await this.resolveUploadFolderForUser(userId, topicId);
     const fallbackDriveId = `drv_${crypto.randomBytes(6).toString('hex')}`;
 
     if (this.googleDriveClient.isReady()) {
@@ -915,17 +916,28 @@ export class SubmissionsService {
 
   private async resolveUploadFolderForUser(
     userId: string,
+    topicId?: string,
   ): Promise<string | undefined> {
     if (!this.googleDriveClient.isReady()) {
       return undefined;
     }
 
     try {
-      return await this.googleDriveClient.getOrCreateUserUploadFolderId(userId);
+      const userFolderId = await this.googleDriveClient.getOrCreateUserUploadFolderId(userId);
+      
+      // If topicId provided, create subfolder for better organization
+      if (topicId && userFolderId) {
+        return await this.googleDriveClient.getOrCreateSubfolder(
+          userFolderId,
+          topicId,
+        );
+      }
+      
+      return userFolderId;
     } catch (error) {
       const stack = error instanceof Error ? error.stack : String(error);
       this.logger.error(
-        `Failed to resolve Google Drive upload folder for userId=${userId}`,
+        `Failed to resolve Google Drive upload folder for userId=${userId} topicId=${topicId}`,
         stack,
       );
       throw error;

@@ -7,6 +7,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import {
   AssignmentResponseDto,
@@ -44,6 +45,7 @@ export class AssignmentsService {
     private readonly schedulesRepository: SchedulesRepository,
     private readonly topicsRepository: TopicsRepository,
     private readonly usersRepository: UsersRepository,
+    private readonly configService: ConfigService,
     @Optional()
     private readonly notificationsService?: NotificationsService,
   ) {}
@@ -77,6 +79,14 @@ export class AssignmentsService {
       return value;
     }
     return date.toLocaleString('vi-VN', { hour12: false });
+  }
+
+  /**
+   * Check if DEMO_MODE is enabled
+   * @returns true if DEMO_MODE env var is 'true', false otherwise
+   */
+  private isDemoMode(): boolean {
+    return this.configService.get<string>('DEMO_MODE', 'false') === 'true';
   }
 
   private async getLecturerQuota(userId: string): Promise<{
@@ -572,64 +582,11 @@ export class AssignmentsService {
       await this.assignmentsRepository.create(item);
     }
 
-    // DEMO MODE: Auto state transition PENDING_CONFIRM -> DEFENSE
-    // After council is assigned, automatically transition topic to DEFENSE state
-    if (topic.state === 'PENDING_CONFIRM') {
-      this.logger.log(
-        `[assignCouncil:autoStateTransition] topicId=${topicId} fromState=PENDING_CONFIRM toState=DEFENSE reason=COUNCIL_ASSIGNED`,
-      );
-      
-      try {
-        await this.topicsRepository.patch(topicId, { state: 'DEFENSE' });
-        this.logger.log(
-          `[assignCouncil:autoStateTransition:success] topicId=${topicId} newState=DEFENSE`,
-        );
-        
-        // Notify about state change
-        const stateChangeReceivers = new Set<string>([
-          topic.studentUserId,
-          topic.supervisorUserId,
-        ]);
-        
-        // Add GVPB if exists
-        const activeGvpb = assignments.find(
-          (a) =>
-            a.topicId === topicId &&
-            a.topicRole === 'GVPB' &&
-            a.status === 'ACTIVE',
-        );
-        if (activeGvpb) {
-          stateChangeReceivers.add(activeGvpb.userId);
-        }
-        
-        // Add all council members
-        for (const item of newAssignments) {
-          stateChangeReceivers.add(item.userId);
-        }
-        
-        for (const receiverUserId of stateChangeReceivers) {
-          await this.notifyIfAvailable({
-            receiverUserId,
-            type: 'GENERAL',
-            topicId,
-            context: {
-              message: `De tai "${topic.title}" da chuyen sang trang thai BAO VE. ${scheduleDetails}`,
-            },
-          });
-        }
-        
-        this.logger.log(
-          `[assignCouncil:autoStateTransition:notified] topicId=${topicId} receivers=${stateChangeReceivers.size}`,
-        );
-      } catch (error) {
-        this.logger.error(
-          `[assignCouncil:autoStateTransition:error] topicId=${topicId} error=${error}`,
-        );
-        // Non-blocking: Council assignment succeeded, state transition failed
-        // Topic stays in PENDING_CONFIRM, can be manually transitioned later
-      }
-    }
+    // Production mode: State transition is manual
+    // TBM must explicitly update topic state after council assignment
+    // This ensures proper workflow control and audit trail
 
+    // Notify all council members about their assignment
     for (const item of newAssignments) {
       await this.notifyIfAvailable({
         receiverUserId: item.userId,
@@ -652,6 +609,32 @@ export class AssignmentsService {
     if (activeGvpbForNotify) {
       receivers.add(activeGvpbForNotify.userId);
     }
+    for (const item of newAssignments) {
+      receivers.add(item.userId);
+    }
+
+    // Enhanced notification with council member names
+    const chairUser = await this.usersRepository.findById(dto.chairUserId);
+    const secretaryUser = await this.usersRepository.findById(dto.secretaryUserId);
+    const memberUsers = await Promise.all(
+      dto.memberUserIds.map(id => this.usersRepository.findById(id))
+    );
+
+    const chairName = chairUser?.name || chairUser?.email || 'Chưa xác định';
+    const secretaryName = secretaryUser?.name || secretaryUser?.email || 'Chưa xác định';
+    const memberNames = memberUsers
+      .filter(u => u)
+      .map(u => u?.name || u?.email || 'Chưa xác định')
+      .join(', ');
+
+    const detailedMessage = `Hội đồng bảo vệ đã được phân công cho đề tài "${topic.title}".
+
+Thành phần hội đồng:
+- Chủ tịch: ${chairName}
+- Thư ký: ${secretaryName}
+- Thành viên: ${memberNames}
+
+${scheduleDetails}`;
 
     for (const receiverUserId of receivers) {
       await this.notifyIfAvailable({
@@ -659,7 +642,7 @@ export class AssignmentsService {
         type: 'GENERAL',
         topicId,
         context: {
-          message: scheduleMessage,
+          message: detailedMessage,
         },
       });
     }

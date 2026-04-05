@@ -40,6 +40,8 @@ import {
   TopicTransitionResponseDto,
   CreateTopicDto,
   UpdateTopicDto,
+  UpdateTitleDto,
+  UpdateTitleResponseDto,
   GetTopicsQueryDto,
   ApproveTopicDto,
   RejectTopicDto,
@@ -213,6 +215,27 @@ export class TopicsController {
 
     return {
       data: this.topicsService.mapToDto(topic),
+      meta: { requestId: `req_${Date.now()}` },
+    };
+  }
+
+  @Patch(':topicId/title')
+  @Roles('LECTURER', 'TBM')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update topic title (GVHD or TBM only)' })
+  @ApiOkResponse({ description: 'Title updated', type: UpdateTitleResponseDto })
+  @ApiBadRequestResponse({ description: 'Bad request' })
+  @ApiUnauthorizedResponse({ description: 'Unauthorized' })
+  @ApiForbiddenResponse({ description: 'Forbidden - only GVHD or TBM can edit title' })
+  @ApiNotFoundResponse({ description: 'Topic not found' })
+  async updateTitle(
+    @Param('topicId') topicId: string,
+    @Body() dto: UpdateTitleDto,
+    @CurrentUser() currentUser: AuthUser,
+  ) {
+    const result = await this.topicsService.updateTitle(topicId, dto.title, currentUser);
+    return {
+      data: result,
       meta: { requestId: `req_${Date.now()}` },
     };
   }

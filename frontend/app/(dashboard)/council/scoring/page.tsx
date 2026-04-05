@@ -18,6 +18,8 @@ interface ScoreDto {
   comments?: string;
   isSubmitted?: boolean;
   role?: string;
+  isLocked?: boolean;
+  lockReason?: string;
 }
 
 /* ---------- Rubrics by role ---------- */
@@ -50,6 +52,25 @@ function CouncilScoringContent() {
   const totalScore = useMemo(() => RUBRIC_COUNCIL.reduce((s, c) => s + (scores[c.id] ?? 0), 0), [scores]);
   const maxScore = RUBRIC_COUNCIL.reduce((s, c) => s + c.max, 0);
   const isPassed = totalScore >= 5.0;
+  
+  // Lock mechanism consistent with GVHD page
+  const isSubmitted = existingScore?.isSubmitted ?? false;
+  const isScoreLocked = isSubmitted && (existingScore?.isLocked ?? true);
+  const isSubmittedEditable = isSubmitted && !isScoreLocked;
+
+  const submittedLockMessage = useMemo(() => {
+    if (!isSubmitted) return "";
+    if (!isScoreLocked) {
+      return "Phiếu điểm đã được nộp chính thức nhưng vẫn có thể chỉnh sửa trước xác nhận cuối. Hãy dùng nút 'Cập nhật điểm đã nộp' để lưu thay đổi.";
+    }
+    if (existingScore?.lockReason?.includes("published")) {
+      return "Phiếu điểm đã bị khóa vì điểm đã được công bố.";
+    }
+    if (existingScore?.lockReason?.includes("confirmed")) {
+      return "Phiếu điểm đã bị khóa vì đã có xác nhận cuối.";
+    }
+    return "Phiếu điểm đã được nộp chính thức và hiện không thể chỉnh sửa.";
+  }, [existingScore?.lockReason, isScoreLocked, isSubmitted]);
 
   const selectedTopic = useMemo(() => topics.find(t => t.id === selectedId) ?? null, [topics, selectedId]);
 
@@ -263,7 +284,7 @@ function CouncilScoringContent() {
                         </label>
                         <div className="flex items-center gap-2">
                           <input type="number" max={c.max} min={0} step={0.25} value={current}
-                            disabled={existingScore?.isSubmitted}
+                            disabled={isScoreLocked}
                             onChange={e => setScores(prev => ({ ...prev, [c.id]: Math.min(c.max, Math.max(0, parseFloat(e.target.value) || 0)) }))}
                             className="w-20 text-right rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm font-bold px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
                           />
@@ -282,7 +303,7 @@ function CouncilScoringContent() {
             {/* Comments */}
             <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/10 p-5">
               <label className="block text-xs font-semibold uppercase text-outline mb-2">Nhận xét của Hội đồng</label>
-              <textarea rows={4} value={comments} disabled={existingScore?.isSubmitted}
+              <textarea rows={4} value={comments} disabled={existingScore?.isSubmitted || existingScore?.isLocked}
                 onChange={e => setComments(e.target.value)}
                 placeholder="Nhận xét về chất lượng đề tài, ưu & hạn chế..."
                 className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-60"
@@ -353,11 +374,17 @@ function CouncilScoringContent() {
                 ))}
               </div>
               <div className="p-5 flex flex-col gap-3">
-                <button onClick={() => void handleSaveDraft()} disabled={isSaving || existingScore?.isSubmitted}
+                {submittedLockMessage && (
+                  <div className={`text-xs ${isScoreLocked ? "text-error" : "text-amber-600"} bg-surface-container p-3 rounded-xl border ${isScoreLocked ? "border-error/20" : "border-amber-600/20"}`}>
+                    <AlertCircle className="w-4 h-4 inline mr-1" />
+                    {submittedLockMessage}
+                  </div>
+                )}
+                <button onClick={() => void handleSaveDraft()} disabled={isSaving || isScoreLocked}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-outline-variant/20 text-sm font-semibold text-on-surface hover:bg-surface-container transition-all disabled:opacity-60">
-                  <Save className="w-4 h-4" />{isSaving ? "Đang lưu..." : "Lưu nháp"}
+                  <Save className="w-4 h-4" />{isSaving ? "Đang lưu..." : isSubmittedEditable ? "Cập nhật điểm đã nộp" : "Lưu nháp"}
                 </button>
-                <button onClick={() => void handleSubmit()} disabled={isSubmitting || existingScore?.isSubmitted}
+                <button onClick={() => void handleSubmit()} disabled={isSubmitting || isScoreLocked}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60">
                   <FileCheck className="w-4 h-4" />{isSubmitting ? "Đang nộp..." : existingScore?.isSubmitted ? "Đã nộp" : "Nộp điểm chính thức"}
                 </button>
