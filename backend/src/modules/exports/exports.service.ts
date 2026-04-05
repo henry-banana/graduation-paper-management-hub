@@ -470,9 +470,11 @@ export class ExportsService {
     let fileToUpload =
       generatedDoc ?? this.buildMetadataDocument(id, topicId, exportType, user, metadata, now);
 
+    // Determine whether this is a rubric export
+    const isRubricExport = exportType.includes('RUBRIC');
+
     // Convert rubric DOCX to PDF for better print quality
     // Minutes are already PDF, so skip conversion
-    const isRubricExport = exportType.includes('RUBRIC');
     if (isRubricExport && fileToUpload.mimeType === EXPORT_DOCX_MIME_TYPE) {
       this.logger.log(`Converting rubric ${fileToUpload.filename} to PDF`);
       try {
@@ -501,8 +503,6 @@ export class ExportsService {
     let driveLink: string;
     const warnings: string[] = [];
 
-    // Determine whether this is a rubric export
-    const isRubricExport = exportType.includes('RUBRIC');
     const rubricRootFolderId = isRubricExport
       ? (this.configService.get<string>('GOOGLE_DRIVE_RUBRIC_FOLDER_ID') ?? undefined)
       : undefined;

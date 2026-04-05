@@ -213,6 +213,7 @@ describe('ExportsService', () => {
       googleDriveClient as never,
       rubricGeneratorService as never,
       minutesGeneratorService as never,
+      { convertDocxToPdf: jest.fn() } as never, // pdfConverterService
       { get: jest.fn().mockReturnValue(undefined) } as never, // configService
     );
 
