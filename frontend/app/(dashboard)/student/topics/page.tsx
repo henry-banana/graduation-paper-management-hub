@@ -81,7 +81,7 @@ function StudentTopicsContent() {
     }
 
     return topics.filter((topic) => {
-      const values = [topic.name, topic.company, topic.gvhdEmail, topic.periodCode, topic.type]
+      const values = [topic.name, topic.company, topic.gvhdName, topic.gvhdEmail, topic.periodCode, topic.type]
         .filter(Boolean)
         .map((value) => value!.toLowerCase());
 
@@ -185,7 +185,10 @@ function StudentTopicsContent() {
                         </span>
                       </td>
                       <td className="px-5 py-4">
-                        <p className="text-on-surface-variant text-xs">{topic.gvhdEmail}</p>
+                        <p className="text-on-surface text-xs font-semibold">{topic.gvhdName || "GVHD chưa cập nhật"}</p>
+                        {topic.gvhdEmail && topic.gvhdEmail !== "—" && (
+                          <p className="text-on-surface-variant text-xs">{topic.gvhdEmail}</p>
+                        )}
                       </td>
                       <td className="px-5 py-4 text-on-surface-variant text-xs whitespace-nowrap">{topic.periodCode}</td>
                       <td className="px-5 py-4">

@@ -5,16 +5,17 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { X, BookOpen, Clock, CheckSquare, Users, Bell, ClipboardList, ChevronRight, LogOut, FileText, ExternalLink } from "lucide-react";
 import { clearAuthSession, getCurrentUiRole } from "@/lib/auth/session";
+import { TOPIC_STATE_LABELS } from "@/lib/constants/vi-labels";
 
-const ROLE_LABELS: Record<string, { label: string; color: string; abbr: string }> = {
-  STUDENT: { label: "Sinh viên", color: "bg-blue-500", abbr: "SV" },
-  LECTURER: { label: "Giảng viên", color: "bg-green-600", abbr: "GV" },
-  GVHD: { label: "GV Hướng dẫn", color: "bg-green-600", abbr: "HD" },
-  GVPB: { label: "GV Phản biện", color: "bg-purple-600", abbr: "PB" },
-  TBM: { label: "Trưởng bộ môn", color: "bg-orange-500", abbr: "TBM" },
-  TV_HD: { label: "Thành viên HĐ", color: "bg-indigo-600", abbr: "TV" },
-  TK_HD: { label: "Thư ký HĐ", color: "bg-teal-600", abbr: "TK" },
-  CT_HD: { label: "Chủ tịch HĐ", color: "bg-red-600", abbr: "CT" },
+const ROLE_LABELS: Record<string, { label: string; color: string; abbr: string; textClass?: string }> = {
+  STUDENT: { label: "Sinh viên", color: "bg-blue-500", abbr: "SV", textClass: "text-white" },
+  LECTURER: { label: "Giảng viên", color: "bg-green-600", abbr: "GV", textClass: "text-white" },
+  GVHD: { label: "GV Hướng dẫn", color: "bg-green-600", abbr: "HD", textClass: "text-white" },
+  GVPB: { label: "GV Phản biện", color: "bg-purple-600", abbr: "PB", textClass: "text-white" },
+  TBM: { label: "Trưởng bộ môn", color: "bg-orange-500", abbr: "TBM", textClass: "text-slate-900" },
+  TV_HD: { label: "Thành viên HĐ", color: "bg-indigo-600", abbr: "TV", textClass: "text-white" },
+  TK_HD: { label: "Thư ký HĐ", color: "bg-teal-600", abbr: "TK", textClass: "text-white" },
+  CT_HD: { label: "Chủ tịch HĐ", color: "bg-red-600", abbr: "CT", textClass: "text-white" },
 };
 
 const routes: Record<string, { name: string; path: string; icon: any }[]> = {
@@ -57,7 +58,7 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
   ],
 };
 
-const TERMINAL_STATES = new Set(["COMPLETED", "CANCELLED", "REJECTED"]);
+const TERMINAL_STATES = new Set(["COMPLETED", "CANCELLED"]);
 
 interface ActiveTopicQuick {
   id: string;
@@ -146,8 +147,11 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
       { name: "Hồ sơ phản biện", path: "/gvpb/reviews", icon: FileText },
     ];
   })();
-  const roleInfo = ROLE_LABELS[role] || { label: role, color: "bg-primary", abbr: role.substring(0, 2) };
-  
+  const roleInfo = ROLE_LABELS[role] || { label: role, color: "bg-primary", abbr: role.substring(0, 2), textClass: "text-white" };
+  const activeTopicStateLabel = activeTopic
+    ? (TOPIC_STATE_LABELS[activeTopic.state]?.label ?? activeTopic.state)
+    : "";
+
   // Find the longest matching route to prevent parent routes from highlighting when on a child route
   const activeRoute = mounted ? [...currentRoutes].sort((a, b) => b.path.length - a.path.length).find(r => pathname === r.path || pathname?.startsWith(r.path + "/")) : null;
 
@@ -173,7 +177,7 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
             </div>
             <div>
               <h1 className="text-white font-headline font-bold text-sm leading-tight">Công Nghệ KT TP.HCM</h1>
-              <p className="text-white/50 text-[10px] mt-0.5 font-label uppercase tracking-wider">KLTN Hub</p>
+              <p className="text-white/70 text-[10px] mt-0.5 font-label uppercase tracking-wider">KLTN Hub</p>
             </div>
           </div>
           <button className="md:hidden text-white/60 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors" onClick={() => setIsOpen(false)}>
@@ -184,19 +188,19 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
         {/* Role badge */}
         <div className="px-4 py-3 mx-4 mt-4 bg-white/5 border border-white/10 rounded-2xl">
           <div className="flex items-center gap-3">
-            <div className={`w-9 h-9 rounded-xl ${roleInfo.color} flex items-center justify-center text-white font-bold text-xs flex-shrink-0 shadow-inner`}>
+            <div className={`w-9 h-9 rounded-xl ${roleInfo.color} ${roleInfo.textClass ?? "text-white"} flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-inner`}>
               {roleInfo.abbr}
             </div>
             <div>
               <p className="text-white text-sm font-semibold leading-tight">{roleInfo.label}</p>
-              <p className="text-white/40 text-[10px] mt-0.5">Vai trò hiện tại</p>
+              <p className="text-white/65 text-[10px] mt-0.5">Vai trò hiện tại</p>
             </div>
           </div>
         </div>
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
-          <p className="text-white/30 text-[10px] uppercase tracking-widest font-label px-3 mb-3">Điều hướng</p>
+          <p className="text-white/55 text-[10px] uppercase tracking-widest font-label px-3 mb-3">Điều hướng</p>
           {currentRoutes.map((route) => {
             const Icon = route.icon;
             const isActive = activeRoute?.path === route.path;
@@ -205,11 +209,10 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
               <Link
                 key={route.path}
                 href={route.path}
-                className={`group flex items-center justify-between px-4 py-3 rounded-2xl transition-all duration-200 ${
-                  isActive
+                className={`group flex items-center justify-between px-4 py-3 rounded-2xl transition-all duration-200 ${isActive
                     ? "bg-white text-[#00335b] shadow-lg"
                     : "text-white/70 hover:bg-white/10 hover:text-white"
-                }`}
+                  }`}
                 onClick={() => setIsOpen(false)}
               >
                 <div className="flex items-center gap-3">
@@ -224,7 +227,7 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
           {/* F4B: Active topic quick-link (STUDENT only) */}
           {role === "STUDENT" && activeTopic && (
             <div className="mt-4 mx-1">
-              <p className="text-white/30 text-[10px] uppercase tracking-widest font-label px-2 mb-2">Đề tài hiện tại</p>
+              <p className="text-white/55 text-[10px] uppercase tracking-widest font-label px-2 mb-2">Đề tài hiện tại</p>
               <Link
                 href={`/student/submissions?topicId=${activeTopic.id}`}
                 onClick={() => setIsOpen(false)}
@@ -235,10 +238,10 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
                     <p className="text-white text-xs font-semibold leading-snug truncate">{activeTopic.title}</p>
                     <div className="flex items-center gap-1.5 mt-1.5">
                       <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/30 text-white">{activeTopic.type}</span>
-                      <span className="text-[9px] text-white/50">{activeTopic.state}</span>
+                      <span className="text-[9px] text-white/70">{activeTopicStateLabel}</span>
                     </div>
                   </div>
-                  <ExternalLink className="w-3.5 h-3.5 text-white/40 group-hover:text-white/70 flex-shrink-0 mt-0.5 transition-colors" />
+                  <ExternalLink className="w-3.5 h-3.5 text-white/60 group-hover:text-white/80 flex-shrink-0 mt-0.5 transition-colors" />
                 </div>
               </Link>
             </div>
@@ -250,7 +253,7 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
           <button
             type="button"
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-white/50 hover:text-white hover:bg-white/10 transition-all text-sm"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-white/70 hover:text-white hover:bg-white/10 transition-all text-sm"
           >
             <LogOut className="w-4 h-4" />
             <span>Đăng xuất</span>

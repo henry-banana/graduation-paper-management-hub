@@ -111,8 +111,6 @@ export function resolveCanonicalUiRole(
   accountRole: AccountRole,
   uiRole: string | null,
 ): UiRole {
-  const isProductionRuntime = process.env.NODE_ENV === "production";
-
   if (accountRole === "STUDENT") {
     return "STUDENT";
   }
@@ -121,16 +119,12 @@ export function resolveCanonicalUiRole(
     return "TBM";
   }
 
-  if (isProductionRuntime) {
-    return "LECTURER";
-  }
-
   // accountRole === 'LECTURER': accept only lecturer family UI roles.
   if (isLecturerUiRole(uiRole)) {
     return uiRole;
   }
 
-  return "GVHD";
+  return "LECTURER";
 }
 
 export function setCurrentRoles(accountRole: AccountRole, uiRole?: UiRole) {

@@ -68,10 +68,21 @@ sample data. Current reset flow preserves teacher reference tabs (`Quota`, `Majo
 2. Runs `seed:sheets:validate`
 3. Retries validate automatically when Google Sheets quota returns `429/rateLimitExceeded`
 
+`npm run seed:sheets:rollback -- --file <snapshot.json>` restores app tabs from a previously exported
+preview snapshot file (for example `.tmp/sheet-preview-pre-reseed-YYYYMMDD-HHMMSS.json`).
+
 `npm run seed` remains an alias for checklist compatibility.
 
 Use `npm run inspect:sheets` to print row counts and sample IDs from each tab after seeding.
 Use `npm run preview:sheets` to export live Google Sheets data into `.tmp/sheet-preview.json` with impact checks for backend logic (topic/score/export readiness, reference integrity).
+
+Recommended reseed/rollback safety flow:
+
+1. Export pre-change snapshot: `npm run preview:sheets`
+2. Run reseed: `npm run seed:sheets:reseed`
+3. Validate app smoke checks
+4. If rollback needed: `npm run seed:sheets:rollback -- --file <pre-change-snapshot.json>`
+5. Export snapshot again and compare key row counts pre/post rollback
 
 Sample seeded score IDs for rubric export smoke tests:
 

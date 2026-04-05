@@ -54,7 +54,7 @@ interface TopicSuggestionDto {
   domain?: string;
 }
 
-const TERMINAL_STATES = new Set(["COMPLETED", "CANCELLED", "REJECTED"]);
+const TERMINAL_STATES = new Set(["COMPLETED", "CANCELLED"]);
 
 function getCurrentLocalDate(): string {
   const now = new Date();
@@ -468,20 +468,20 @@ export default function StudentTopicRegisterPage() {
                   <label htmlFor="topic-domain" className="block text-sm font-semibold text-on-surface mb-2">Ngành/Chuyên ngành <span className="text-error">*</span></label>
                   <div className="relative">
                     <select
-                    id="topic-domain"
-                    value={form.domain}
-                    onChange={e => setForm({ ...form, domain: e.target.value })}
-                    disabled={isSubmitting || isLoading}
-                    className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary appearance-none pr-9"
-                  >
-                    <option value="">Chọn ngành/chuyên ngành</option>
-                    {TOPIC_DOMAIN_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline pointer-events-none" />
+                      id="topic-domain"
+                      value={form.domain}
+                      onChange={e => setForm({ ...form, domain: e.target.value })}
+                      disabled={isSubmitting || isLoading}
+                      className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary appearance-none pr-9"
+                    >
+                      <option value="">Chọn ngành/chuyên ngành</option>
+                      {TOPIC_DOMAIN_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline pointer-events-none" />
                   </div>
                 </div>
                 <div>
@@ -547,7 +547,7 @@ export default function StudentTopicRegisterPage() {
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline pointer-events-none" />
                   </div>
                   {!canRegisterKLTN && (
-                    <p className="text-[10px] text-error mt-1 flex items-center gap-1"><Lock className="w-3 h-3"/> Chưa hoàn thành BCTT</p>
+                    <p className="text-[10px] text-error mt-1 flex items-center gap-1"><Lock className="w-3 h-3" /> Chưa hoàn thành BCTT</p>
                   )}
                 </div>
               </div>
@@ -600,7 +600,7 @@ export default function StudentTopicRegisterPage() {
               )}
             </div>
           </div>
-          
+
           {/* Rule Card */}
           <div className="bg-blue-50/50 border border-blue-200 rounded-2xl p-4">
             <div className="flex items-start gap-2.5">

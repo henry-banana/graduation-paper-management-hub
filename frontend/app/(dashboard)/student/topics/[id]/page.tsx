@@ -693,7 +693,7 @@ export default function StudentTopicDetailPage() {
                   <div>
                     <span className="block text-xs text-on-surface-variant mb-1">GV Hướng dẫn</span>
                     <span className="font-semibold text-on-surface text-[15px]">
-                      {selectedSupervisor?.fullName ?? topic.supervisorUserId}
+                      {selectedSupervisor?.fullName ?? "GVHD chưa cập nhật"}
                     </span>
                     {selectedSupervisor?.department && (
                       <p className="text-xs text-outline mt-1">{selectedSupervisor.department}</p>

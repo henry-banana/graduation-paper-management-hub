@@ -10,7 +10,28 @@ interface TopicDto {
   periodId: string;
   companyName?: string;
   updatedAt?: string;
+  supervisor?: {
+    fullName?: string;
+    lecturerId?: string;
+    email?: string;
+  };
 }
+
+interface TeacherDto {
+  id: string;
+  fullName: string;
+  email?: string;
+  staffId?: string;
+}
+
+const EMPTY_TEACHERS_RESPONSE: ApiListResponse<TeacherDto> = {
+  data: [],
+  pagination: {
+    page: 1,
+    size: 0,
+    total: 0,
+  },
+};
 
 interface PeriodDto {
   id: string;
@@ -34,27 +55,48 @@ function formatDateTime(value?: string): string {
 
 export class ApiTopicRepository implements TopicRepository {
   async getMyTopics(): Promise<Topic[]> {
-    const [topicsRes, periodsRes] = await Promise.all([
+    const [topicsRes, periodsRes, teachersRes] = await Promise.all([
       api.get<ApiListResponse<TopicDto>>("/topics?role=student&page=1&size=100"),
       api.get<ApiListResponse<PeriodDto>>("/periods?page=1&size=100"),
+      api
+        .get<ApiListResponse<TeacherDto>>("/users?role=LECTURER&page=1&size=200")
+        .catch(() => EMPTY_TEACHERS_RESPONSE),
     ]);
 
     const periodMap = new Map(
       periodsRes.data.map((period) => [period.id, period.code]),
     );
 
-    return topicsRes.data.map((topic) => ({
-      id: topic.id,
-      name: topic.title,
-      type: topic.type,
-      gvhdEmail: topic.supervisorUserId,
-      gvhdName: topic.supervisorUserId,
-      period: periodMap.get(topic.periodId) ?? topic.periodId,
-      periodCode: periodMap.get(topic.periodId) ?? topic.periodId,
-      state: topic.state,
-      updatedAt: formatDateTime(topic.updatedAt),
-      score: null,
-      company: topic.companyName ?? null,
-    }));
+    const teacherMap = new Map(
+      (teachersRes.data ?? []).map((teacher) => [teacher.id, teacher]),
+    );
+
+    return topicsRes.data.map((topic) => {
+      const teacher = teacherMap.get(topic.supervisorUserId);
+      const gvhdName =
+        teacher?.fullName?.trim() ||
+        topic.supervisor?.fullName?.trim() ||
+        "GVHD chưa cập nhật";
+      const gvhdCodeOrEmail =
+        teacher?.staffId?.trim() ||
+        topic.supervisor?.lecturerId?.trim() ||
+        teacher?.email?.trim() ||
+        topic.supervisor?.email?.trim() ||
+        "—";
+
+      return {
+        id: topic.id,
+        name: topic.title,
+        type: topic.type,
+        gvhdEmail: gvhdCodeOrEmail,
+        gvhdName,
+        period: periodMap.get(topic.periodId) ?? topic.periodId,
+        periodCode: periodMap.get(topic.periodId) ?? topic.periodId,
+        state: topic.state,
+        updatedAt: formatDateTime(topic.updatedAt),
+        score: null,
+        company: topic.companyName ?? null,
+      };
+    });
   }
 }

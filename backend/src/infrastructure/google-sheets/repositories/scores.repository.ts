@@ -60,6 +60,12 @@ export class ScoresRepository extends SheetsBaseRepository<ScoreRecord> {
       questions: this.parseQuestions(v[24]),
       submittedAt: this.optionalStr(v[25]),
       updatedAt: this.str(v[26]),
+      // Preserve teacher reference columns for round-trips
+      _email: this.optionalStr(v[0]),
+      _tenSV: this.optionalStr(v[1]),
+      _mssv: this.optionalStr(v[2]),
+      _tenDetai: this.optionalStr(v[3]),
+      _gvName: this.optionalStr(v[4]),
     };
   }
 
@@ -71,11 +77,11 @@ export class ScoresRepository extends SheetsBaseRepository<ScoreRecord> {
     });
 
     return [
-      '',                            // A: Email (ref, kept blank)
-      '',                            // B: Tên SV
-      '',                            // C: MSSV
-      '',                            // D: Tên Đề tài
-      '',                            // E: GV
+      this.str((entity as ScoreRecord & { _email?: string })._email ?? ''),    // A: Email
+      this.str((entity as ScoreRecord & { _tenSV?: string })._tenSV ?? ''),    // B: Tên SV
+      this.str((entity as ScoreRecord & { _mssv?: string })._mssv ?? ''),      // C: MSSV
+      this.str((entity as ScoreRecord & { _tenDetai?: string })._tenDetai ?? ''), // D: Tên Đề tài
+      this.str((entity as ScoreRecord & { _gvName?: string })._gvName ?? ''), // E: GV
       this.str(entity.scorerRole),   // F: Role
       tcScores[0],                   // G: TC1
       tcScores[1],                   // H: TC2

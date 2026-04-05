@@ -5,11 +5,35 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { TopicsService } from './topics.service';
+import { TopicsService, TopicRecord } from './topics.service';
 import { AuthUser } from '../../common/types';
+import {
+  AssignmentsRepository,
+  PeriodsRepository,
+  RevisionRoundRecord,
+  RevisionRoundsRepository,
+  TopicsRepository,
+  UsersRepository,
+} from '../../infrastructure/google-sheets';
+import { NotificationsService } from '../notifications/notifications.service';
+import { UserRecord } from '../users/users.service';
+import { PeriodRecord } from '../periods/periods.service';
 
 describe('TopicsService', () => {
   let service: TopicsService;
+  let topicsData: TopicRecord[];
+  let usersData: UserRecord[];
+  let periodsData: PeriodRecord[];
+  let revisionRoundsData: RevisionRoundRecord[];
+  let assignmentsData: Array<{
+    id: string;
+    topicId: string;
+    userId: string;
+    topicRole: 'GVHD' | 'GVPB' | 'CT_HD' | 'TK_HD' | 'TV_HD';
+    status: 'ACTIVE' | 'INACTIVE';
+    assignedAt?: string;
+    revokedAt?: string;
+  }>;
 
   const studentUser: AuthUser = {
     userId: 'USR001',
@@ -29,9 +53,404 @@ describe('TopicsService', () => {
     role: 'TBM',
   };
 
+  const gvpbUser: AuthUser = {
+    userId: 'USR010',
+    email: 'gvpb@hcmute.edu.vn',
+    role: 'LECTURER',
+  };
+
+  const tkHdUser: AuthUser = {
+    userId: 'USR011',
+    email: 'tkhd@hcmute.edu.vn',
+    role: 'LECTURER',
+  };
+
+  const ctHdUser: AuthUser = {
+    userId: 'USR012',
+    email: 'cthd@hcmute.edu.vn',
+    role: 'LECTURER',
+  };
+
+  const unassignedLecturerUser: AuthUser = {
+    userId: 'USR014',
+    email: 'unassigned@hcmute.edu.vn',
+    role: 'LECTURER',
+  };
+
+  const student5User: AuthUser = {
+    userId: 'USR005',
+    email: 'student5@hcmute.edu.vn',
+    role: 'STUDENT',
+  };
+
   beforeEach(async () => {
+    const now = new Date().toISOString();
+
+    topicsData = [
+      {
+        id: 'tp_001',
+        type: 'BCTT',
+        title: 'Xây dựng hệ thống quản lý thực tập',
+        domain: 'Software Engineering',
+        companyName: 'HCMUTE',
+        state: 'IN_PROGRESS',
+        studentUserId: 'USR001',
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_bctt',
+        submitStartAt: '2026-06-01T00:00:00Z',
+        submitEndAt: '2026-06-15T23:59:59Z',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'tp_002',
+        type: 'BCTT',
+        title: 'Nghiên cứu giải pháp theo dõi tiến độ',
+        domain: 'Information Systems',
+        companyName: 'ABC Co',
+        state: 'PENDING_GV',
+        studentUserId: 'USR001',
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_bctt',
+        approvalDeadlineAt: '2026-01-20T00:00:00Z',
+        createdAt: '2026-01-10T00:00:00Z',
+        updatedAt: '2026-01-10T00:00:00Z',
+      },
+      {
+        id: 'tp_003',
+        type: 'KLTN',
+        title: 'Đề tài KLTN đang chờ xác nhận bảo vệ',
+        domain: 'Artificial Intelligence',
+        state: 'PENDING_CONFIRM',
+        studentUserId: 'USR005',
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_kltn',
+        createdAt: '2026-02-01T00:00:00Z',
+        updatedAt: '2026-02-01T00:00:00Z',
+      },
+      {
+        id: 'tp_004',
+        type: 'KLTN',
+        title: 'Đề tài KLTN đã xác nhận và sẵn sàng thực hiện',
+        domain: 'Software Architecture',
+        state: 'CONFIRMED',
+        studentUserId: 'USR005',
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_kltn',
+        createdAt: '2026-02-05T00:00:00Z',
+        updatedAt: '2026-02-05T00:00:00Z',
+      },
+      {
+        id: 'tp_005',
+        type: 'KLTN',
+        title: 'Đề tài KLTN song song để test lock theo topic',
+        domain: 'Data Engineering',
+        state: 'CONFIRMED',
+        studentUserId: 'USR006',
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_kltn',
+        createdAt: '2026-02-06T00:00:00Z',
+        updatedAt: '2026-02-06T00:00:00Z',
+      },
+    ];
+
+    usersData = [
+      {
+        id: 'USR001',
+        email: 'student@hcmute.edu.vn',
+        name: 'Student 1',
+        role: 'STUDENT',
+        earnedCredits: 120,
+        requiredCredits: 120,
+        completedBcttScore: 8,
+        isActive: true,
+      },
+      {
+        id: 'USR002',
+        email: 'lecturer@hcmute.edu.vn',
+        name: 'Lecturer 1',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 1,
+        isActive: true,
+      },
+      {
+        id: 'USR003',
+        email: 'tbm@hcmute.edu.vn',
+        name: 'TBM 1',
+        role: 'TBM',
+        isActive: true,
+      },
+      {
+        id: 'USR004',
+        email: 'low-eligibility@hcmute.edu.vn',
+        name: 'Student 4',
+        role: 'STUDENT',
+        earnedCredits: 150,
+        requiredCredits: 120,
+        completedBcttScore: 5,
+        isActive: true,
+      },
+      {
+        id: 'USR005',
+        email: 'student5@hcmute.edu.vn',
+        name: 'Student 5',
+        role: 'STUDENT',
+        earnedCredits: 130,
+        requiredCredits: 120,
+        completedBcttScore: 8,
+        isActive: true,
+      },
+      {
+        id: 'USR006',
+        email: 'student6@hcmute.edu.vn',
+        name: 'Student 6',
+        role: 'STUDENT',
+        earnedCredits: 130,
+        requiredCredits: 120,
+        completedBcttScore: 8,
+        isActive: true,
+      },
+      {
+        id: 'USR010',
+        email: 'gvpb@hcmute.edu.vn',
+        name: 'Lecturer GVPB',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+        isActive: true,
+      },
+      {
+        id: 'USR011',
+        email: 'tkhd@hcmute.edu.vn',
+        name: 'Lecturer TK_HD',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+        isActive: true,
+      },
+      {
+        id: 'USR012',
+        email: 'cthd@hcmute.edu.vn',
+        name: 'Lecturer CT_HD',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+        isActive: true,
+      },
+      {
+        id: 'USR013',
+        email: 'tvhd@hcmute.edu.vn',
+        name: 'Lecturer TV_HD',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+        isActive: true,
+      },
+      {
+        id: 'USR014',
+        email: 'unassigned@hcmute.edu.vn',
+        name: 'Lecturer Unassigned',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+        isActive: true,
+      },
+    ];
+
+    assignmentsData = [
+      {
+        id: 'as_gvhd_001',
+        topicId: 'tp_001',
+        userId: 'USR002',
+        topicRole: 'GVHD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_gvhd_002',
+        topicId: 'tp_002',
+        userId: 'USR002',
+        topicRole: 'GVHD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_gvhd_003',
+        topicId: 'tp_003',
+        userId: 'USR002',
+        topicRole: 'GVHD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_gvhd_004',
+        topicId: 'tp_004',
+        userId: 'USR002',
+        topicRole: 'GVHD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_gvhd_005',
+        topicId: 'tp_005',
+        userId: 'USR002',
+        topicRole: 'GVHD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_001',
+        topicId: 'tp_003',
+        userId: 'USR010',
+        topicRole: 'GVPB',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_002',
+        topicId: 'tp_003',
+        userId: 'USR011',
+        topicRole: 'TK_HD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_003',
+        topicId: 'tp_003',
+        userId: 'USR012',
+        topicRole: 'CT_HD',
+        status: 'ACTIVE',
+      },
+      {
+        id: 'as_004',
+        topicId: 'tp_003',
+        userId: 'USR013',
+        topicRole: 'TV_HD',
+        status: 'ACTIVE',
+      },
+    ];
+
+    periodsData = [
+      {
+        id: 'prd_2026_hk1_bctt',
+        code: 'HK261_BCTT',
+        type: 'BCTT',
+        openDate: '2000-01-01',
+        closeDate: '2099-12-31',
+        status: 'OPEN',
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'prd_2026_hk1_kltn',
+        code: 'HK261_KLTN',
+        type: 'KLTN',
+        openDate: '2000-01-01',
+        closeDate: '2099-12-31',
+        status: 'OPEN',
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'prd_2026_hk2_bctt',
+        code: 'HK262_BCTT',
+        type: 'BCTT',
+        openDate: '2000-01-01',
+        closeDate: '2099-12-31',
+        status: 'CLOSED',
+        isActive: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    revisionRoundsData = [];
+
+    const topicsRepositoryMock = {
+      findAll: jest.fn(async () => topicsData),
+      findById: jest.fn(
+        async (id: string) => topicsData.find((topic) => topic.id === id) ?? null,
+      ),
+      findFirst: jest.fn(
+        async (predicate: (topic: TopicRecord) => boolean) =>
+          topicsData.find(predicate) ?? null,
+      ),
+      create: jest.fn(async (entity: TopicRecord) => {
+        topicsData.push(entity);
+        return entity;
+      }),
+      update: jest.fn(async (id: string, entity: TopicRecord) => {
+        const index = topicsData.findIndex((topic) => topic.id === id);
+        if (index < 0) {
+          throw new Error(`Topic ${id} not found`);
+        }
+        topicsData[index] = entity;
+        return entity;
+      }),
+    };
+
+    const revisionRoundsRepositoryMock = {
+      findWhere: jest.fn(
+        async (predicate: (round: RevisionRoundRecord) => boolean) =>
+          revisionRoundsData.filter(predicate),
+      ),
+      findById: jest.fn(
+        async (id: string) =>
+          revisionRoundsData.find((round) => round.id === id) ?? null,
+      ),
+      create: jest.fn(async (entity: RevisionRoundRecord) => {
+        revisionRoundsData.push(entity);
+        return entity;
+      }),
+      update: jest.fn(async (id: string, entity: RevisionRoundRecord) => {
+        const index = revisionRoundsData.findIndex((round) => round.id === id);
+        if (index < 0) {
+          throw new Error(`Revision round ${id} not found`);
+        }
+        revisionRoundsData[index] = entity;
+        return entity;
+      }),
+    };
+
+    const periodsRepositoryMock = {
+      findById: jest.fn(
+        async (id: string) => periodsData.find((period) => period.id === id) ?? null,
+      ),
+      findAll: jest.fn(async () => periodsData),
+    };
+
+    const usersRepositoryMock = {
+      findById: jest.fn(
+        async (id: string) => usersData.find((user) => user.id === id) ?? null,
+      ),
+      findAll: jest.fn(async () => usersData),
+      update: jest.fn(async (id: string, entity: UserRecord) => {
+        const index = usersData.findIndex((user) => user.id === id);
+        if (index < 0) {
+          throw new Error(`User ${id} not found`);
+        }
+        usersData[index] = entity;
+        return entity;
+      }),
+    };
+
+    const assignmentsRepositoryMock = {
+      findAll: jest.fn(async () => assignmentsData),
+    };
+
+    const notificationsServiceMock = {
+      create: jest.fn(async () => ({ id: 'nt_mock' })),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [TopicsService],
+      providers: [
+        TopicsService,
+        { provide: TopicsRepository, useValue: topicsRepositoryMock },
+        {
+          provide: RevisionRoundsRepository,
+          useValue: revisionRoundsRepositoryMock,
+        },
+        { provide: PeriodsRepository, useValue: periodsRepositoryMock },
+        { provide: UsersRepository, useValue: usersRepositoryMock },
+        { provide: AssignmentsRepository, useValue: assignmentsRepositoryMock },
+        { provide: NotificationsService, useValue: notificationsServiceMock },
+      ],
     }).compile();
 
     service = module.get<TopicsService>(TopicsService);
@@ -76,6 +495,45 @@ describe('TopicsService', () => {
       const result = await service.findById('nonexistent');
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('findByIdForUser', () => {
+    it('should allow assigned reviewer to read topic details', async () => {
+      const topic = await service.findByIdForUser('tp_003', gvpbUser);
+
+      expect(topic.id).toBe('tp_003');
+    });
+
+    it('should allow assigned supervisor to read topic details', async () => {
+      const topic = await service.findByIdForUser('tp_004', lecturerUser);
+
+      expect(topic.id).toBe('tp_004');
+    });
+
+    it('should reject unassigned lecturer from reading topic details', async () => {
+      await expect(
+        service.findByIdForUser('tp_003', unassignedLecturerUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should reject lecturer listed as supervisor when no ACTIVE assignment exists', async () => {
+      topicsData.push({
+        id: 'tp_unassigned_supervisor',
+        type: 'BCTT',
+        title: 'Supervisor set but assignment missing',
+        domain: 'Software Engineering',
+        state: 'PENDING_GV',
+        studentUserId: 'USR005',
+        supervisorUserId: 'USR014',
+        periodId: 'prd_2026_hk1_bctt',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      await expect(
+        service.findByIdForUser('tp_unassigned_supervisor', unassignedLecturerUser),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -216,13 +674,7 @@ describe('TopicsService', () => {
         role: 'STUDENT',
       };
 
-      const topics = (service as any).mockTopics as Array<{
-        id: string;
-        studentUserId: string;
-        type: string;
-        state: string;
-      }>;
-      const activeTopic = topics.find(
+      const activeTopic = topicsData.find(
         (topic) =>
           topic.studentUserId === lowEligibilityStudent.userId &&
           topic.state !== 'COMPLETED' &&
@@ -232,12 +684,18 @@ describe('TopicsService', () => {
         activeTopic.state = 'COMPLETED';
       }
 
-      topics.push({
+      topicsData.push({
         id: 'tp_low_eligibility_bctt',
+        periodId: 'prd_2026_hk1_bctt',
         studentUserId: lowEligibilityStudent.userId,
-        type: 'BCTT',
-        state: 'COMPLETED',
-      } as any);
+        supervisorUserId: 'USR002',
+        type: 'BCTT' as const,
+        title: 'Completed BCTT for eligibility check',
+        domain: 'Software Engineering',
+        state: 'COMPLETED' as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
 
       await expect(
         service.create(
@@ -314,7 +772,7 @@ describe('TopicsService', () => {
       // First reset the topic state
       const topic = await service.findById('tp_002');
       if (topic) {
-        (topic as any).state = 'PENDING_GV';
+        topic.state = 'PENDING_GV';
       }
 
       await expect(
@@ -328,7 +786,7 @@ describe('TopicsService', () => {
       // Reset state for test
       const topic = await service.findById('tp_002');
       if (topic) {
-        (topic as any).state = 'PENDING_GV';
+        topic.state = 'PENDING_GV';
       }
 
       const result = await service.reject(
@@ -337,13 +795,45 @@ describe('TopicsService', () => {
         lecturerUser,
       );
 
-      expect(result.state).toBe('CANCELLED');
+      expect(result.state).toBe('DRAFT');
     });
 
     it('should throw ConflictException when rejecting non-PENDING_GV topic', async () => {
       await expect(
         service.reject('tp_001', 'Reason', lecturerUser),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('should forbid TBM from early-phase reject endpoint', async () => {
+      await expect(service.reject('tp_002', 'TBM reject', tbmUser)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('should keep KLTN IN_PROGRESS topic in deterministic IN_PROGRESS reject branch', async () => {
+      const topic = await service.findById('tp_004');
+      if (topic) {
+        topic.state = 'IN_PROGRESS';
+      }
+
+      const result = await service.reject(
+        'tp_004',
+        'Need to revise proposal before confirmation',
+        lecturerUser,
+      );
+
+      expect(result.state).toBe('IN_PROGRESS');
+    });
+
+    it('should forbid TBM from rejecting KLTN IN_PROGRESS in early phase', async () => {
+      const topic = await service.findById('tp_004');
+      if (topic) {
+        topic.state = 'IN_PROGRESS';
+      }
+
+      await expect(
+        service.reject('tp_004', 'TBM cannot reject early phase', tbmUser),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -419,6 +909,111 @@ describe('TopicsService', () => {
       expect(result.toState).toBe('GRADING');
     });
 
+    it('should allow KLTN assigned supervisor to request confirmation', async () => {
+      const topic = await service.findById('tp_004');
+      if (topic) {
+        topic.state = 'IN_PROGRESS';
+      }
+
+      const result = await service.transition(
+        'tp_004',
+        'REQUEST_CONFIRM',
+        lecturerUser,
+      );
+
+      expect(result.fromState).toBe('IN_PROGRESS');
+      expect(result.toState).toBe('PENDING_CONFIRM');
+    });
+
+    it('should reject KLTN student owner requesting confirmation directly', async () => {
+      const topic = await service.findById('tp_004');
+      if (topic) {
+        topic.state = 'IN_PROGRESS';
+      }
+
+      await expect(
+        service.transition('tp_004', 'REQUEST_CONFIRM', student5User),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow assigned GVPB to confirm KLTN defense schedule', async () => {
+      const result = await service.transition('tp_003', 'CONFIRM_DEFENSE', gvpbUser);
+
+      expect(result.fromState).toBe('PENDING_CONFIRM');
+      expect(result.toState).toBe('DEFENSE');
+    });
+
+    it('should still allow TBM to confirm KLTN defense schedule as override', async () => {
+      const result = await service.transition('tp_003', 'CONFIRM_DEFENSE', tbmUser);
+
+      expect(result.fromState).toBe('PENDING_CONFIRM');
+      expect(result.toState).toBe('DEFENSE');
+    });
+
+    it('should allow assigned reviewer/council member to start KLTN scoring', async () => {
+      const topic = await service.findById('tp_003');
+      if (topic) {
+        topic.state = 'DEFENSE';
+      }
+
+      const result = await service.transition('tp_003', 'START_SCORING', gvpbUser);
+
+      expect(result.fromState).toBe('DEFENSE');
+      expect(result.toState).toBe('SCORING');
+    });
+
+    it('should reject TBM starting KLTN scoring without topic assignment role', async () => {
+      const topic = await service.findById('tp_003');
+      if (topic) {
+        topic.state = 'DEFENSE';
+      }
+
+      await expect(
+        service.transition('tp_003', 'START_SCORING', tbmUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow assigned CT_HD to complete KLTN after scoring', async () => {
+      const topic = await service.findById('tp_003');
+      if (topic) {
+        topic.state = 'SCORING';
+      }
+
+      const result = await service.transition('tp_003', 'COMPLETE', ctHdUser);
+
+      expect(result.fromState).toBe('SCORING');
+      expect(result.toState).toBe('COMPLETED');
+    });
+
+    it('should allow assigned supervisor to complete BCTT after grading', async () => {
+      const topic = await service.findById('tp_001');
+      if (topic) {
+        topic.state = 'GRADING';
+      }
+
+      const result = await service.transition('tp_001', 'COMPLETE', lecturerUser);
+
+      expect(result.fromState).toBe('GRADING');
+      expect(result.toState).toBe('COMPLETED');
+    });
+
+    it('should reject TBM completing KLTN without CT_HD assignment role', async () => {
+      const topic = await service.findById('tp_003');
+      if (topic) {
+        topic.state = 'SCORING';
+      }
+
+      await expect(
+        service.transition('tp_003', 'COMPLETE', tbmUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should reject unassigned lecturer confirming KLTN defense', async () => {
+      await expect(
+        service.transition('tp_003', 'CONFIRM_DEFENSE', unassignedLecturerUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
     it('should throw ConflictException for invalid transition', async () => {
       await expect(
         service.transition('tp_001', 'APPROVE', lecturerUser),
@@ -429,6 +1024,103 @@ describe('TopicsService', () => {
       await expect(
         service.transition('nonexistent', 'APPROVE', lecturerUser),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should reject transition REJECT alias in early phase with POLICY_CONFLICT', async () => {
+      await expect(service.transition('tp_002', 'REJECT', lecturerUser)).rejects.toMatchObject(
+        {
+          response: expect.objectContaining({
+            error: 'POLICY_CONFLICT',
+          }),
+        },
+      );
+    });
+
+    it('should allow assigned GVPB to reject pending-confirm back to IN_PROGRESS via canonical reject endpoint', async () => {
+      const result = await service.reject('tp_003', 'Need revisions', gvpbUser);
+
+      expect(result.state).toBe('IN_PROGRESS');
+    });
+
+    it('should allow assigned TK_HD to reject pending-confirm back to IN_PROGRESS via canonical reject endpoint', async () => {
+      const result = await service.reject('tp_003', 'Need more evidence', tkHdUser);
+
+      expect(result.state).toBe('IN_PROGRESS');
+    });
+
+    it('should allow TBM to reject pending-confirm back to IN_PROGRESS in later phase', async () => {
+      const result = await service.reject('tp_003', 'TBM review loopback', tbmUser);
+
+      expect(result.state).toBe('IN_PROGRESS');
+    });
+
+    it('should reject pending-confirm reject when lecturer has no active assignment role', async () => {
+      await expect(
+        service.reject('tp_003', 'No assignment', unassignedLecturerUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should return STALE_WRITE on same-topic concurrent transitions with same expectedState', async () => {
+      const [first, second] = await Promise.allSettled([
+        service.transition('tp_004', 'START_PROGRESS', lecturerUser, {
+          expectedState: 'CONFIRMED',
+        }),
+        service.transition('tp_004', 'CANCEL', lecturerUser, {
+          expectedState: 'CONFIRMED',
+        }),
+      ]);
+
+      const fulfilled = [first, second].filter((result) => result.status === 'fulfilled');
+      const rejected = [first, second].filter((result) => result.status === 'rejected') as Array<PromiseRejectedResult>;
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason).toMatchObject({
+        response: expect.objectContaining({
+          error: 'STALE_WRITE',
+          topicId: 'tp_004',
+          expectedState: 'CONFIRMED',
+          actualState: expect.any(String),
+          retryable: true,
+        }),
+      });
+    });
+
+    it('should allow different-topic transitions to run in parallel', async () => {
+      const serviceInternals = service as unknown as {
+        topicsRepository: { update: jest.Mock };
+      };
+      const updateMock = serviceInternals.topicsRepository.update;
+      const originalImplementation = updateMock.getMockImplementation();
+
+      let inFlight = 0;
+      let maxInFlight = 0;
+
+      updateMock.mockImplementation(async (id: string, entity: TopicRecord) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+
+        await new Promise((resolve) => setTimeout(resolve, 25));
+
+        const index = topicsData.findIndex((topic) => topic.id === id);
+        topicsData[index] = entity;
+
+        inFlight -= 1;
+        return entity;
+      });
+
+      await Promise.all([
+        service.transition('tp_004', 'START_PROGRESS', lecturerUser, {
+          expectedState: 'CONFIRMED',
+        }),
+        service.transition('tp_005', 'START_PROGRESS', lecturerUser, {
+          expectedState: 'CONFIRMED',
+        }),
+      ]);
+
+      updateMock.mockImplementation(originalImplementation);
+
+      expect(maxInFlight).toBeGreaterThan(1);
     });
   });
 

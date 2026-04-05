@@ -4,6 +4,7 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { ProblemDetails, ProblemDetailsError } from '../types';
@@ -16,6 +17,8 @@ interface MulterLikeError {
 
 @Catch()
 export class ProblemDetailsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(ProblemDetailsFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const request = ctx.getRequest<Request>();
@@ -54,14 +57,31 @@ export class ProblemDetailsFilter implements ExceptionFilter {
           },
         ];
       }
+    } else {
+      const trace = exception instanceof Error ? exception.stack : String(exception);
+      this.logger.error(
+        `Unhandled exception at ${request.method} ${request.url}`,
+        trace,
+      );
     }
 
-    const body: ProblemDetails = {
+    // Extract errorCode from exception payload (allows frontend to handle specific errors)
+    let errorCode: string | undefined;
+    if (exception instanceof HttpException) {
+      const payload = exception.getResponse() as Record<string, unknown>;
+      const code = payload.errorCode ?? payload.code;
+      if (typeof code === 'string' && code.trim()) {
+        errorCode = code.trim();
+      }
+    }
+
+    const body: ProblemDetails & { errorCode?: string } = {
       type: `https://kltn.hcmute.edu.vn/errors/${status}`,
       title,
       status,
       detail,
       instance: request.url,
+      ...(errorCode ? { errorCode } : {}),
       ...(errors ? { errors } : {}),
     };
 

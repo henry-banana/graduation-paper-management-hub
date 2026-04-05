@@ -30,7 +30,7 @@ export type TopicState = BcttState | KltnState;
 export type TopicAction =
   | 'SUBMIT_TO_GV'        // DRAFT -> PENDING_GV
   | 'APPROVE'             // PENDING_GV -> CONFIRMED
-  | 'REJECT'              // PENDING_GV -> CANCELLED
+  | 'REJECT'              // Canonical reject endpoint handles state-specific outcomes
   | 'START_PROGRESS'      // CONFIRMED -> IN_PROGRESS
   | 'MOVE_TO_GRADING'     // IN_PROGRESS -> GRADING (BCTT)
   | 'REQUEST_CONFIRM'     // IN_PROGRESS -> PENDING_CONFIRM (KLTN)
@@ -57,7 +57,7 @@ export const KLTN_STATE_TRANSITIONS: Record<KltnState, KltnState[]> = {
   PENDING_GV: ['CONFIRMED', 'CANCELLED'],
   CONFIRMED: ['IN_PROGRESS', 'CANCELLED'],
   IN_PROGRESS: ['PENDING_CONFIRM', 'CANCELLED'],
-  PENDING_CONFIRM: ['DEFENSE', 'CANCELLED'],
+  PENDING_CONFIRM: ['DEFENSE', 'IN_PROGRESS', 'CANCELLED'],
   DEFENSE: ['SCORING', 'CANCELLED'],
   SCORING: ['COMPLETED', 'CANCELLED'],
   COMPLETED: [],

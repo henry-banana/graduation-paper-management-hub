@@ -211,10 +211,13 @@ export class ExportsService {
       throw new BadRequestException('Chỉ hỗ trợ xuất phiếu KLTN cho đề tài loại KLTN');
     }
 
-    // KLTN rubric available for topics in scoring/defense/completed states
-    if (!['SCORING', 'GRADING', 'DEFENSE', 'COMPLETED'].includes(topic.state)) {
+    // KLTN rubric available from IN_PROGRESS onwards (GV/GVPB can export once score is submitted)
+    const KLTN_EXPORT_ELIGIBLE_STATES = [
+      'IN_PROGRESS', 'PENDING_CONFIRM', 'GRADING', 'SCORING', 'DEFENSE', 'COMPLETED',
+    ];
+    if (!KLTN_EXPORT_ELIGIBLE_STATES.includes(topic.state)) {
       throw new BadRequestException(
-        'Phiếu chấm KLTN chỉ khả dụng cho đề tài đang chấm điểm, đã bảo vệ hoặc đã công bố',
+        `Phiếu chấm KLTN chỉ khả dụng khi đề tài đang thực hiện trở đi (hiện tại: ${topic.state})`,
       );
     }
 

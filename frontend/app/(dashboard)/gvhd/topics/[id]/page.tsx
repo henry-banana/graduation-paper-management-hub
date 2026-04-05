@@ -15,7 +15,7 @@ import {
   Loader2,
 } from "lucide-react";
 import Link from "next/link";
-import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 import { TOPIC_STATE_LABELS } from "@/lib/constants/vi-labels";
 
 interface TopicDetailDto {
@@ -110,8 +110,12 @@ export default function GVHDTopicDetailPage() {
       try {
         const draftRes = await api.get<ApiResponse<ScoreDto>>(`/topics/${topicId}/scores/my-draft`);
         setMyScore(draftRes.data);
-      } catch {
-        setMyScore(null);
+      } catch (e) {
+        if (e instanceof ApiRequestError && e.status === 404) {
+          setMyScore(null);
+        } else {
+          throw e;
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải thông tin đề tài.");
@@ -397,7 +401,7 @@ export default function GVHDTopicDetailPage() {
             <div className="space-y-3">
               {canTransitionToGrading && (
                 <button
-                  onClick={() => void handleTransition("BEGIN_GRADING", "Chấm điểm")}
+                  onClick={() => void handleTransition("MOVE_TO_GRADING", "Chấm điểm")}
                   disabled={isTransitioning}
                   className="w-full px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
@@ -407,7 +411,7 @@ export default function GVHDTopicDetailPage() {
               )}
               {canTransitionToPendingConfirm && (
                 <button
-                  onClick={() => void handleTransition("MARK_PENDING_CONFIRM", "Chờ phản biện")}
+                  onClick={() => void handleTransition("REQUEST_CONFIRM", "Chờ phản biện")}
                   disabled={isTransitioning}
                   className="w-full px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >

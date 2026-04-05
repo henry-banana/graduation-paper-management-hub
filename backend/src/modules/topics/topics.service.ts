@@ -70,10 +70,22 @@ interface PaginatedResult<T> {
   };
 }
 
+interface TransitionOptions {
+  expectedState?: TopicState;
+}
+
+interface TransitionAuthorizationContext {
+  isStudentOwner: boolean;
+  isSupervisor: boolean;
+  isTbm: boolean;
+  assignmentRoles: Set<TopicRole>;
+}
+
 @Injectable()
 export class TopicsService {
   private readonly logger = new Logger(TopicsService.name);
   private readonly terminalStates: TopicState[] = ['COMPLETED', 'CANCELLED'];
+  private readonly topicTransitionQueue = new Map<string, Promise<void>>();
 
   constructor(
     private readonly topicsRepository: TopicsRepository,
@@ -92,7 +104,7 @@ export class TopicsService {
     private readonly notificationsService?: NotificationsService,
     @Optional()
     private readonly auditService?: AuditService,
-  ) {}
+  ) { }
 
   async findAll(
     query: GetTopicsQueryDto,
@@ -108,6 +120,16 @@ export class TopicsService {
     // Filter by state
     if (query.state) {
       topics = topics.filter((t) => t.state === query.state);
+    }
+
+    // Filter by period
+    if (query.periodId) {
+      topics = topics.filter((t) => t.periodId === query.periodId);
+    }
+
+    // Filter by supervisor
+    if (query.supervisorUserId) {
+      topics = topics.filter((t) => t.supervisorUserId === query.supervisorUserId);
     }
 
     // Filter by role context
@@ -176,6 +198,16 @@ export class TopicsService {
     return this.topicsRepository.findById(id);
   }
 
+  async findByIdForUser(id: string, user: AuthUser): Promise<TopicRecord> {
+    const topic = await this.topicsRepository.findById(id);
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    await this.ensureCanReadTopic(topic, user);
+    return topic;
+  }
+
   async listRevisionRounds(
     topicId: string,
     currentUser: AuthUser,
@@ -185,7 +217,7 @@ export class TopicsService {
       throw new NotFoundException('Topic not found');
     }
 
-    this.ensureCanReadTopic(topic, currentUser);
+    await this.ensureCanReadTopic(topic, currentUser);
 
     const rounds = await this.revisionRoundsRepository.findWhere(
       (round) => round.topicId === topicId,
@@ -394,20 +426,8 @@ export class TopicsService {
       );
     }
 
-    // KLTN eligibility: BCTT must be completed, score > 5, and credits threshold reached.
+    // KLTN eligibility: check completedBcttScore from user profile (consistent with /users/me)
     if (dto.type === 'KLTN') {
-      const completedBctt = await this.topicsRepository.findFirst(
-        (t) =>
-          t.studentUserId === currentUser.userId &&
-          t.type === 'BCTT' &&
-          t.state === 'COMPLETED',
-      );
-      if (!completedBctt) {
-        throw new BadRequestException(
-          'You must complete BCTT before starting KLTN',
-        );
-      }
-
       const studentProgress = await this.usersRepository.findById(
         currentUser.userId,
       );
@@ -423,13 +443,6 @@ export class TopicsService {
         );
       }
 
-      const earnedCredits = studentProgress.earnedCredits ?? 0;
-      const requiredCredits = studentProgress.requiredCredits ?? 0;
-      if (earnedCredits < requiredCredits) {
-        throw new BadRequestException(
-          'KLTN eligibility requires minimum earned credits threshold',
-        );
-      }
     }
 
     const now = new Date().toISOString();
@@ -441,7 +454,7 @@ export class TopicsService {
       title: dto.title,
       domain: dto.domain,
       companyName: dto.companyName,
-      state: 'PENDING_GV',
+      state: 'DRAFT',
       studentUserId: currentUser.userId,
       supervisorUserId: dto.supervisorUserId,
       periodId: dto.periodId,
@@ -550,57 +563,70 @@ export class TopicsService {
     note: string | undefined,
     currentUser: AuthUser,
   ): Promise<{ state: TopicState }> {
-    const topic = await this.topicsRepository.findById(id);
-    if (!topic) {
+    const topicSnapshot = await this.topicsRepository.findById(id);
+    if (!topicSnapshot) {
       throw new NotFoundException('Topic not found');
     }
 
-    // Only supervisor (GVHD) can approve
-    if (
-      currentUser.role !== 'TBM' &&
-      topic.supervisorUserId !== currentUser.userId
-    ) {
-      throw new ForbiddenException('Only the supervisor can approve this topic');
-    }
+    return this.runInTopicTransitionQueue(id, async () => {
+      const topic = await this.topicsRepository.findById(id);
+      if (!topic) {
+        throw new NotFoundException('Topic not found');
+      }
 
-    // Check state
-    if (topic.state !== 'PENDING_GV') {
-      throw new ConflictException(
-        `Cannot approve topic in state: ${topic.state}`,
+      if (topic.state !== topicSnapshot.state) {
+        throw this.buildStaleWriteConflict(
+          id,
+          topicSnapshot.state,
+          topic.state,
+        );
+      }
+
+      const authContext = await this.getTransitionAuthorizationContext(
+        topic,
+        currentUser,
       );
-    }
 
-    await this.consumeSupervisorQuota(topic.supervisorUserId);
+      if (!authContext.isSupervisor) {
+        throw new ForbiddenException('Only the supervisor can approve this topic');
+      }
 
-    topic.state = 'CONFIRMED';
-    topic.updatedAt = new Date().toISOString();
-    try {
-      await this.topicsRepository.update(topic.id, topic);
-    } catch (error) {
-      await this.releaseSupervisorQuota(topic.supervisorUserId);
-      throw error;
-    }
+      if (topic.state !== 'PENDING_GV') {
+        throw new ConflictException(`Cannot approve topic in state: ${topic.state}`);
+      }
 
-    await this.notifyIfAvailable({
-      receiverUserId: topic.studentUserId,
-      type: 'TOPIC_APPROVED',
-      topicId: topic.id,
-      context: {
-        topicTitle: topic.title,
-      },
+      await this.consumeSupervisorQuota(topic.supervisorUserId);
+
+      topic.state = 'CONFIRMED';
+      topic.updatedAt = new Date().toISOString();
+      try {
+        await this.topicsRepository.update(topic.id, topic);
+      } catch (error) {
+        await this.releaseSupervisorQuota(topic.supervisorUserId);
+        throw error;
+      }
+
+      await this.notifyIfAvailable({
+        receiverUserId: topic.studentUserId,
+        type: 'TOPIC_APPROVED',
+        topicId: topic.id,
+        context: {
+          topicTitle: topic.title,
+        },
+      });
+
+      await this.auditIfAvailable({
+        action: 'TOPIC_APPROVED',
+        actorId: currentUser.userId,
+        actorRole: currentUser.role,
+        topicId: topic.id,
+        detail: {
+          note,
+        },
+      });
+
+      return { state: topic.state };
     });
-
-    await this.auditIfAvailable({
-      action: 'TOPIC_APPROVED',
-      actorId: currentUser.userId,
-      actorRole: currentUser.role,
-      topicId: topic.id,
-      detail: {
-        note,
-      },
-    });
-
-    return { state: topic.state };
   }
 
   async reject(
@@ -608,52 +634,89 @@ export class TopicsService {
     reason: string | undefined,
     currentUser: AuthUser,
   ): Promise<{ state: TopicState }> {
-    const topic = await this.topicsRepository.findById(id);
-    if (!topic) {
+    const topicSnapshot = await this.topicsRepository.findById(id);
+    if (!topicSnapshot) {
       throw new NotFoundException('Topic not found');
     }
 
-    // Only supervisor (GVHD) can reject
-    if (
-      currentUser.role !== 'TBM' &&
-      topic.supervisorUserId !== currentUser.userId
-    ) {
-      throw new ForbiddenException('Only the supervisor can reject this topic');
-    }
+    return this.runInTopicTransitionQueue(id, async () => {
+      const topic = await this.topicsRepository.findById(id);
+      if (!topic) {
+        throw new NotFoundException('Topic not found');
+      }
 
-    // Check state
-    if (topic.state !== 'PENDING_GV') {
-      throw new ConflictException(
-        `Cannot reject topic in state: ${topic.state}`,
+      if (topic.state !== topicSnapshot.state) {
+        throw this.buildStaleWriteConflict(
+          id,
+          topicSnapshot.state,
+          topic.state,
+        );
+      }
+
+      const authContext = await this.getTransitionAuthorizationContext(
+        topic,
+        currentUser,
       );
-    }
 
-    topic.state = 'CANCELLED';
-    topic.reasonRejected = reason?.trim() || undefined;
-    topic.updatedAt = new Date().toISOString();
-    await this.topicsRepository.update(topic.id, topic);
+      if (topic.state === 'PENDING_GV') {
+        if (authContext.isTbm) {
+          throw new ForbiddenException(
+            'TBM cannot force reject/approve/cancel in early phase',
+          );
+        }
+        if (!authContext.isSupervisor) {
+          throw new ForbiddenException('Only the supervisor can reject this topic');
+        }
+        topic.state = 'DRAFT';
+      } else if (topic.state === 'IN_PROGRESS' && topic.type === 'KLTN') {
+        if (authContext.isTbm) {
+          throw new ForbiddenException(
+            'TBM cannot force reject/approve/cancel in early phase',
+          );
+        }
+        if (!authContext.isSupervisor) {
+          throw new ForbiddenException('Only the supervisor can reject this topic');
+        }
+        // Canonical early-phase reject branch: remain IN_PROGRESS and require revisions.
+        topic.state = 'IN_PROGRESS';
+      } else if (topic.state === 'PENDING_CONFIRM' && topic.type === 'KLTN') {
+        if (!this.canRejectPendingConfirm(authContext)) {
+          throw new ForbiddenException(
+            'Only assigned reviewer/council roles or TBM can reject in pending-confirm',
+          );
+        }
+        topic.state = 'IN_PROGRESS';
+      } else {
+        throw new ConflictException(`Cannot reject topic in state: ${topic.state}`);
+      }
 
-    await this.notifyIfAvailable({
-      receiverUserId: topic.studentUserId,
-      type: 'TOPIC_REJECTED',
-      topicId: topic.id,
-      context: {
-        topicTitle: topic.title,
-        reason: reason || 'Khong ro',
-      },
+      topic.reasonRejected = reason?.trim() || undefined;
+      topic.updatedAt = new Date().toISOString();
+      await this.topicsRepository.update(topic.id, topic);
+
+      await this.notifyIfAvailable({
+        receiverUserId: topic.studentUserId,
+        type: 'TOPIC_REJECTED',
+        topicId: topic.id,
+        context: {
+          topicTitle: topic.title,
+          reason: reason || 'Khong ro',
+        },
+      });
+
+      await this.auditIfAvailable({
+        action: 'TOPIC_REJECTED',
+        actorId: currentUser.userId,
+        actorRole: currentUser.role,
+        topicId: topic.id,
+        detail: {
+          reason,
+          nextState: topic.state,
+        },
+      });
+
+      return { state: topic.state };
     });
-
-    await this.auditIfAvailable({
-      action: 'TOPIC_REJECTED',
-      actorId: currentUser.userId,
-      actorRole: currentUser.role,
-      topicId: topic.id,
-      detail: {
-        reason,
-      },
-    });
-
-    return { state: topic.state };
   }
 
   async setDeadline(
@@ -729,53 +792,75 @@ export class TopicsService {
     id: string,
     action: TopicAction,
     currentUser: AuthUser,
+    options?: TransitionOptions,
   ): Promise<{ fromState: TopicState; toState: TopicState }> {
-    const topic = await this.topicsRepository.findById(id);
-    if (!topic) {
+    if (action === 'REJECT') {
+      throw new ConflictException({
+        error: 'POLICY_CONFLICT',
+        canonicalEndpoint: '/topics/:id/reject',
+        message:
+          'Reject action on transition endpoint is disabled. Use POST /topics/:id/reject.',
+      });
+    }
+
+    const topicSnapshot = await this.topicsRepository.findById(id);
+    if (!topicSnapshot) {
       throw new NotFoundException('Topic not found');
     }
-    const fromState = topic.state;
-    const toState = ACTION_TO_STATE[action];
 
-    // Check if transition is valid
-    if (!isValidTransition(topic.type, fromState, toState)) {
-      throw new ConflictException(
-        `Invalid transition from ${fromState} to ${toState} for ${topic.type}`,
-      );
-    }
+    const expectedState = options?.expectedState ?? topicSnapshot.state;
 
-    // Check authorization based on action
-    const canTransition = this.canUserTransition(topic, action, currentUser);
-    if (!canTransition) {
-      throw new ForbiddenException(
-        `You are not authorized to perform action: ${action}`,
-      );
-    }
+    return this.runInTopicTransitionQueue(id, async () => {
+      const topic = await this.topicsRepository.findById(id);
+      if (!topic) {
+        throw new NotFoundException('Topic not found');
+      }
 
-    topic.state = toState;
-    topic.updatedAt = new Date().toISOString();
-    await this.topicsRepository.update(topic.id, topic);
+      if (topic.state !== expectedState) {
+        throw this.buildStaleWriteConflict(id, expectedState, topic.state);
+      }
 
-    if (
-      (toState === 'COMPLETED' && fromState !== 'COMPLETED') ||
-      (toState === 'CANCELLED' && this.shouldReleaseQuotaOnCancel(fromState))
-    ) {
-      await this.releaseSupervisorQuota(topic.supervisorUserId);
-    }
+      const fromState = topic.state;
+      const toState = ACTION_TO_STATE[action];
 
-    await this.auditIfAvailable({
-      action: 'TOPIC_TRANSITION',
-      actorId: currentUser.userId,
-      actorRole: currentUser.role,
-      topicId: topic.id,
-      detail: {
-        action,
-        fromState,
-        toState,
-      },
+      if (!isValidTransition(topic.type, fromState, toState)) {
+        throw new ConflictException(
+          `Invalid transition from ${fromState} to ${toState} for ${topic.type}`,
+        );
+      }
+
+      const canTransition = await this.canUserTransition(topic, action, currentUser);
+      if (!canTransition) {
+        throw new ForbiddenException(
+          `You are not authorized to perform action: ${action}`,
+        );
+      }
+
+      topic.state = toState;
+      topic.updatedAt = new Date().toISOString();
+      await this.topicsRepository.update(topic.id, topic);
+
+      if (
+        (toState === 'COMPLETED' && fromState !== 'COMPLETED') ||
+        (toState === 'CANCELLED' && this.shouldReleaseQuotaOnCancel(fromState))
+      ) {
+        await this.releaseSupervisorQuota(topic.supervisorUserId);
+      }
+
+      await this.auditIfAvailable({
+        action: 'TOPIC_TRANSITION',
+        actorId: currentUser.userId,
+        actorRole: currentUser.role,
+        topicId: topic.id,
+        detail: {
+          action,
+          fromState,
+          toState,
+        },
+      });
+
+      return { fromState, toState };
     });
-
-    return { fromState, toState };
   }
 
   private shouldEnrichTopicList(role?: GetTopicsQueryDto['role']): boolean {
@@ -957,9 +1042,9 @@ export class TopicsService {
       const councilAvgFromScores =
         councilScores.length > 0
           ? roundTo2(
-              councilScores.reduce((sum, score) => sum + score.totalScore, 0) /
-                councilScores.length,
-            )
+            councilScores.reduce((sum, score) => sum + score.totalScore, 0) /
+            councilScores.length,
+          )
           : undefined;
       const hasAllCouncilScores =
         activeCouncilAssignments.length > 0 &&
@@ -1115,7 +1200,7 @@ export class TopicsService {
     };
   }
 
-  private ensureCanReadTopic(topic: TopicRecord, user: AuthUser): void {
+  private async ensureCanReadTopic(topic: TopicRecord, user: AuthUser): Promise<void> {
     if (user.role === 'TBM') {
       return;
     }
@@ -1124,61 +1209,203 @@ export class TopicsService {
       return;
     }
 
-    if (user.role === 'LECTURER' && topic.supervisorUserId === user.userId) {
-      return;
+    if (user.role === 'LECTURER') {
+      const assignmentRoles = await this.getActiveAssignmentRoles(
+        topic.id,
+        user.userId,
+      );
+
+      if (
+        assignmentRoles.has('GVHD') ||
+        assignmentRoles.has('GVPB') ||
+        assignmentRoles.has('CT_HD') ||
+        assignmentRoles.has('TK_HD') ||
+        assignmentRoles.has('TV_HD')
+      ) {
+        return;
+      }
     }
 
     throw new ForbiddenException('Cannot access this topic');
   }
 
-  private canUserTransition(
+  private async canUserTransition(
     topic: TopicRecord,
     action: TopicAction,
     user: AuthUser,
-  ): boolean {
-    // TBM can do all transitions
-    if (user.role === 'TBM') return true;
+  ): Promise<boolean> {
+    const authContext = await this.getTransitionAuthorizationContext(topic, user);
 
     switch (action) {
       case 'SUBMIT_TO_GV':
-        // Only student owner
-        return topic.studentUserId === user.userId;
+        return authContext.isStudentOwner;
 
       case 'APPROVE':
-      case 'REJECT':
-        // Only supervisor
-        return topic.supervisorUserId === user.userId;
-
       case 'START_PROGRESS':
       case 'MOVE_TO_GRADING':
+        return authContext.isSupervisor;
+
+      case 'REJECT':
+        if (topic.state === 'PENDING_CONFIRM') {
+          return this.canRejectPendingConfirm(authContext);
+        }
+        return authContext.isSupervisor;
+
       case 'REQUEST_CONFIRM':
+        // Pre-defense request must be confirmed by assigned supervisor.
+        return authContext.isSupervisor;
+
       case 'CONFIRM_DEFENSE':
+        // Assigned reviewer can confirm defense readiness; TBM can override.
+        return authContext.assignmentRoles.has('GVPB') || authContext.isTbm;
+
       case 'START_SCORING':
+        return (
+          authContext.assignmentRoles.has('GVHD') ||
+          authContext.assignmentRoles.has('GVPB') ||
+          authContext.assignmentRoles.has('CT_HD') ||
+          authContext.assignmentRoles.has('TK_HD') ||
+          authContext.assignmentRoles.has('TV_HD')
+        );
+
       case 'COMPLETE':
-        // Only supervisor
-        return topic.supervisorUserId === user.userId;
+        // BCTT completes by assigned supervisor; KLTN completes by assigned CT_HD.
+        if (topic.type === 'BCTT') {
+          return authContext.isSupervisor;
+        }
+        return authContext.assignmentRoles.has('CT_HD');
 
       case 'CANCEL':
-        // Student owner, supervisor, or TBM
-        return (
-          topic.studentUserId === user.userId ||
-          topic.supervisorUserId === user.userId
-        );
+        if (authContext.isStudentOwner || authContext.isSupervisor) {
+          return true;
+        }
+
+        if (!authContext.isTbm) {
+          return false;
+        }
+
+        if (topic.state === 'PENDING_GV') {
+          return false;
+        }
+
+        if (topic.type === 'KLTN' && topic.state === 'IN_PROGRESS') {
+          return false;
+        }
+
+        return true;
 
       default:
         return false;
     }
   }
 
+  private async getTransitionAuthorizationContext(
+    topic: TopicRecord,
+    user: AuthUser,
+  ): Promise<TransitionAuthorizationContext> {
+    const assignmentRoles = await this.getActiveAssignmentRoles(
+      topic.id,
+      user.userId,
+    );
+
+    return {
+      isStudentOwner: user.role === 'STUDENT' && topic.studentUserId === user.userId,
+      isSupervisor: assignmentRoles.has('GVHD'),
+      isTbm: user.role === 'TBM',
+      assignmentRoles,
+    };
+  }
+
+  private async getActiveAssignmentRoles(
+    topicId: string,
+    userId: string,
+  ): Promise<Set<TopicRole>> {
+    const roles = new Set<TopicRole>();
+    if (!this.assignmentsRepository) {
+      return roles;
+    }
+
+    const assignments = await this.assignmentsRepository.findAll();
+    for (const assignment of assignments) {
+      if (
+        assignment.topicId === topicId &&
+        assignment.userId === userId &&
+        assignment.status === 'ACTIVE'
+      ) {
+        roles.add(assignment.topicRole);
+      }
+    }
+
+    return roles;
+  }
+
+  private canRejectPendingConfirm(
+    context: TransitionAuthorizationContext,
+  ): boolean {
+    if (context.isTbm) {
+      return true;
+    }
+
+    return (
+      context.assignmentRoles.has('GVPB') ||
+      context.assignmentRoles.has('CT_HD') ||
+      context.assignmentRoles.has('TK_HD') ||
+      context.assignmentRoles.has('TV_HD')
+    );
+  }
+
+  private async runInTopicTransitionQueue<T>(
+    topicId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.topicTransitionQueue.get(topicId) ?? Promise.resolve();
+    let releaseCurrent: () => void = () => undefined;
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+
+    const queueTail = previous
+      .catch(() => undefined)
+      .then(() => current);
+
+    this.topicTransitionQueue.set(topicId, queueTail);
+
+    await previous.catch(() => undefined);
+
+    try {
+      return await operation();
+    } finally {
+      releaseCurrent();
+      if (this.topicTransitionQueue.get(topicId) === queueTail) {
+        this.topicTransitionQueue.delete(topicId);
+      }
+    }
+  }
+
+  private buildStaleWriteConflict(
+    topicId: string,
+    expectedState: TopicState,
+    actualState: TopicState,
+  ): ConflictException {
+    return new ConflictException({
+      error: 'STALE_WRITE',
+      message: 'Topic state changed. Refresh topic state and retry.',
+      topicId,
+      expectedState,
+      actualState,
+      retryable: true,
+    });
+  }
+
   private async notifyIfAvailable(params: {
     receiverUserId: string;
     type:
-      | 'TOPIC_PENDING'
-      | 'TOPIC_APPROVED'
-      | 'TOPIC_REJECTED'
-      | 'DEADLINE_SET'
-      | 'REVISION_ROUND_OPENED'
-      | 'REVISION_ROUND_CLOSED';
+    | 'TOPIC_PENDING'
+    | 'TOPIC_APPROVED'
+    | 'TOPIC_REJECTED'
+    | 'DEADLINE_SET'
+    | 'REVISION_ROUND_OPENED'
+    | 'REVISION_ROUND_CLOSED';
     context: Record<string, string>;
     topicId?: string;
   }): Promise<void> {
@@ -1191,14 +1418,14 @@ export class TopicsService {
 
   private async auditIfAvailable(params: {
     action:
-      | 'TOPIC_CREATED'
-      | 'TOPIC_APPROVED'
-      | 'TOPIC_REJECTED'
-      | 'TOPIC_TRANSITION'
-      | 'DEADLINE_SET'
-      | 'DEADLINE_EXTENDED'
-      | 'REVISION_ROUND_OPENED'
-      | 'REVISION_ROUND_CLOSED';
+    | 'TOPIC_CREATED'
+    | 'TOPIC_APPROVED'
+    | 'TOPIC_REJECTED'
+    | 'TOPIC_TRANSITION'
+    | 'DEADLINE_SET'
+    | 'DEADLINE_EXTENDED'
+    | 'REVISION_ROUND_OPENED'
+    | 'REVISION_ROUND_CLOSED';
     actorId: string;
     actorRole: string;
     topicId?: string;

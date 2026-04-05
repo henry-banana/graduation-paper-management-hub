@@ -64,8 +64,6 @@ function isLecturerUiRole(value: string | undefined): boolean {
 }
 
 function getCanonicalRole(accountRole: AccountRole, uiRole: string | undefined): string {
-  const isProductionRuntime = process.env.NODE_ENV === "production";
-
   if (accountRole === "STUDENT") {
     return "STUDENT";
   }
@@ -74,16 +72,12 @@ function getCanonicalRole(accountRole: AccountRole, uiRole: string | undefined):
     return "TBM";
   }
 
-  if (isProductionRuntime) {
-    return "LECTURER";
-  }
-
   // accountRole === 'LECTURER': only accept lecturer-family UI roles.
   if (isLecturerUiRole(uiRole)) {
     return uiRole as string;
   }
 
-  return "GVHD";
+  return "LECTURER";
 }
 
 function getRoleHome(role: string): string {
@@ -128,6 +122,8 @@ function isStaticPath(pathname: string): boolean {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const isAuthCallbackPath = pathname.startsWith("/auth/callback");
+  const isLoginPath = pathname === "/login";
 
   if (isStaticPath(pathname)) {
     return NextResponse.next();
@@ -138,7 +134,8 @@ export function middleware(request: NextRequest) {
   const accountRoleCookie = request.cookies.get("account_role")?.value;
   const accountRole = isAccountRole(accountRoleCookie) ? accountRoleCookie : undefined;
 
-  if (isAuthenticated && !accountRole && pathname !== "/login") {
+  // Never short-circuit callback flow; callback page needs to bootstrap session.
+  if (isAuthenticated && !accountRole && pathname !== "/login" && !isAuthCallbackPath) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
@@ -150,7 +147,16 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  if (isAuthenticated && accountRole && isPublicPath(pathname)) {
+  if (isAuthCallbackPath) {
+    return NextResponse.next();
+  }
+
+  // Keep login reachable to avoid stale-cookie redirect loops.
+  if (isLoginPath) {
+    return NextResponse.next();
+  }
+
+  if (isAuthenticated && accountRole && pathname.startsWith("/auth/error")) {
     return NextResponse.redirect(new URL(getRoleHome(resolvedRole), request.url));
   }
 

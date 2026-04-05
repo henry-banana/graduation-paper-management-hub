@@ -8,7 +8,6 @@ import {
   Body,
   HttpCode,
   HttpStatus,
-  NotFoundException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -32,7 +31,6 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuthUser } from '../../common/types';
 import { SuggestedTopicsRepository } from '../../infrastructure/google-sheets/repositories';
 import {
-  TopicResponseDto,
   TopicListResponseDto,
   TopicDetailResponseDto,
   TopicCreateResponseDto,
@@ -57,7 +55,7 @@ export class TopicsController {
   constructor(
     private readonly topicsService: TopicsService,
     private readonly suggestedTopicsRepository: SuggestedTopicsRepository,
-  ) {}
+  ) { }
 
   @Get()
   @Roles('STUDENT', 'LECTURER', 'TBM')
@@ -115,18 +113,7 @@ export class TopicsController {
     @Param('topicId') topicId: string,
     @CurrentUser() currentUser: AuthUser,
   ) {
-    const topic = await this.topicsService.findById(topicId);
-    if (!topic) {
-      throw new NotFoundException('Topic not found');
-    }
-
-    // Students can only view their own topics
-    if (
-      currentUser.role === 'STUDENT' &&
-      topic.studentUserId !== currentUser.userId
-    ) {
-      throw new NotFoundException('Topic not found');
-    }
+    const topic = await this.topicsService.findByIdForUser(topicId, currentUser);
 
     return {
       data: this.topicsService.mapToDto(topic),
@@ -275,10 +262,12 @@ export class TopicsController {
     @Body() dto: TransitionTopicDto,
     @CurrentUser() currentUser: AuthUser,
   ) {
+    const expectedState = dto.expectedState ?? dto.expected_state;
     const result = await this.topicsService.transition(
       topicId,
       dto.action,
       currentUser,
+      { expectedState },
     );
     return {
       data: result,

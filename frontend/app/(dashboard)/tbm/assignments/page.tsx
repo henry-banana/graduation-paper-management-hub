@@ -104,6 +104,24 @@ export default function TBMAssignmentsPage() {
   const findTeacherById = (teacherId: string) =>
     teachers.find((teacher) => teacher.id === teacherId);
 
+  const getSupervisorDisplay = (topic: TopicDto): { name: string; codeOrEmail?: string } => {
+    const mappedTeacher = topic.supervisorUserId
+      ? findTeacherById(topic.supervisorUserId)
+      : undefined;
+
+    const name =
+      topic.supervisor?.fullName?.trim() ||
+      mappedTeacher?.fullName?.trim() ||
+      "Chưa cập nhật GVHD";
+    const codeOrEmail =
+      mappedTeacher?.staffId?.trim() ||
+      topic.supervisor?.email?.trim() ||
+      mappedTeacher?.email?.trim() ||
+      undefined;
+
+    return { name, codeOrEmail };
+  };
+
   const findActiveGvpbAssignment = async (topicId: string): Promise<AssignmentDto | null> => {
     const response = await api.get<ApiResponse<AssignmentDto[]>>(
       `/topics/${topicId}/assignments`,
@@ -125,12 +143,12 @@ export default function TBMAssignmentsPage() {
       prev.map((topic) =>
         topic.id === topicId
           ? {
-              ...topic,
-              reviewer: {
-                id: reviewer.id,
-                fullName: reviewer.fullName,
-              },
-            }
+            ...topic,
+            reviewer: {
+              id: reviewer.id,
+              fullName: reviewer.fullName,
+            },
+          }
           : topic,
       ),
     );
@@ -226,8 +244,8 @@ export default function TBMAssignmentsPage() {
     ).filter(
       (id) => id !== councilForm.chairUserId && id !== councilForm.secretaryUserId,
     );
-    if (memberUserIds.length < 3) {
-      setError("Hội đồng cần ít nhất 3 thành viên (không trùng Chủ tịch/Thư ký).");
+    if (memberUserIds.length < 1) {
+      setError("Hội đồng cần ít nhất 1 thành viên (không trùng Chủ tịch/Thư ký).");
       return;
     }
     setIsAssigningCouncil(true);
@@ -270,7 +288,12 @@ export default function TBMAssignmentsPage() {
           <h1 className="text-2xl font-bold tracking-tight font-headline text-on-surface">Phân công phản biện & Hội đồng</h1>
           <p className="text-sm text-outline mt-1">Gán GVPB và Hội đồng cho các đề tài.</p>
         </div>
-        <button onClick={() => void load()} className="p-2.5 rounded-xl border border-outline-variant/20 hover:bg-surface-container transition-colors self-start">
+        <button
+          onClick={() => void load()}
+          aria-label="Làm mới danh sách phân công"
+          title="Làm mới"
+          className="p-2.5 rounded-xl border border-outline-variant/20 hover:bg-surface-container transition-colors self-start"
+        >
           <RefreshCw className={`w-4 h-4 text-outline ${isLoading ? "animate-spin" : ""}`} />
         </button>
       </div>
@@ -338,11 +361,12 @@ export default function TBMAssignmentsPage() {
                     <tbody className="divide-y divide-outline-variant/10">
                       {gvpbTopics.map(t => {
                         const acting = isAssigningGvpb === t.id;
+                        const supervisorDisplay = getSupervisorDisplay(t);
                         return (
                           <tr key={t.id} className="hover:bg-surface-container-low/30 transition-colors">
                             <td className="px-4 py-4">
-                              <p className="text-sm font-semibold text-on-surface">{t.student?.fullName ?? "—"}</p>
-                              <p className="text-xs text-outline">{t.student?.studentId ?? t.studentUserId ?? ""}</p>
+                              <p className="text-sm font-semibold text-on-surface">{t.student?.fullName ?? "Chưa có thông tin sinh viên"}</p>
+                              <p className="text-xs text-outline">{t.student?.studentId ?? "Chưa có MSSV"}</p>
                             </td>
                             <td className="px-4 py-4 max-w-[200px]">
                               <p className="text-xs text-on-surface line-clamp-2" title={t.title}>{t.title}</p>
@@ -351,7 +375,12 @@ export default function TBMAssignmentsPage() {
                               <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${t.type === "KLTN" ? "bg-purple-100 text-purple-700" : "bg-primary/10 text-primary"}`}>{t.type}</span>
                             </td>
                             <td className="px-4 py-4 text-xs text-outline whitespace-nowrap">{t.period?.code ?? t.periodId ?? "—"}</td>
-                            <td className="px-4 py-4 text-xs text-on-surface-variant">{t.supervisor?.fullName ?? t.supervisorUserId ?? "—"}</td>
+                            <td className="px-4 py-4 text-xs text-on-surface-variant">
+                              <p className="text-on-surface-variant">{supervisorDisplay.name}</p>
+                              {supervisorDisplay.codeOrEmail && (
+                                <p className="text-outline">{supervisorDisplay.codeOrEmail}</p>
+                              )}
+                            </td>
                             <td className="px-4 py-4 text-xs">
                               {t.reviewer
                                 ? <span className="flex items-center gap-1 text-green-600"><Check className="w-3 h-3" />{t.reviewer.fullName}</span>

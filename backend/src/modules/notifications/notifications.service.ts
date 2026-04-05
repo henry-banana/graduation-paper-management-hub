@@ -278,6 +278,36 @@ export class NotificationsService {
   }
 
   /**
+   * Broadcast a notification to all users (GLOBAL scope).
+   * Used by TBM to send system-wide announcements.
+   */
+  async broadcast(params: {
+    type: NotificationType;
+    title?: string;
+    body?: string;
+    context?: Record<string, string>;
+  }): Promise<NotificationRecord> {
+    const template = NOTIFICATION_TEMPLATES[params.type];
+    const ctx = params.context ?? {};
+
+    const notification: NotificationRecord = {
+      id: this.generateId(),
+      receiverUserId: 'ALL',
+      scope: 'GLOBAL',
+      type: params.type,
+      title: params.title ?? template.title,
+      body: params.body ?? template.body(ctx),
+      deepLink: template.deepLinkPattern,
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    await this.notificationsRepository.create(notification);
+
+    return notification;
+  }
+
+  /**
    * Get unread count for user
    */
   async getUnreadCount(user: AuthUser): Promise<number> {

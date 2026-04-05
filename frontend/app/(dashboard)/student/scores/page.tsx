@@ -12,7 +12,28 @@ interface TopicDto {
   type: "BCTT" | "KLTN";
   state: string;
   supervisorUserId: string;
+  supervisor?: {
+    fullName?: string;
+    lecturerId?: string;
+    email?: string;
+  };
 }
+
+interface LecturerDto {
+  id: string;
+  fullName: string;
+  staffId?: string;
+  email?: string;
+}
+
+const EMPTY_LECTURERS_RESPONSE: ApiListResponse<LecturerDto> = {
+  data: [],
+  pagination: {
+    page: 1,
+    size: 0,
+    total: 0,
+  },
+};
 
 interface ScoreSummaryDto {
   gvhdScore?: number;
@@ -61,6 +82,7 @@ function StudentScoresContent() {
 
   const [topics, setTopics] = useState<TopicDto[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string>("");
+  const [lecturerMap, setLecturerMap] = useState<Record<string, LecturerDto>>({});
   const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -76,11 +98,24 @@ function StudentScoresContent() {
       setSummaryError(null);
 
       try {
-        const response = await api.get<ApiListResponse<TopicDto>>(
-          "/topics?role=student&page=1&size=100",
-        );
+        const [response, lecturersResponse] = await Promise.all([
+          api.get<ApiListResponse<TopicDto>>(
+            "/topics?role=student&page=1&size=100",
+          ),
+          api
+            .get<ApiListResponse<LecturerDto>>(
+              "/users?role=LECTURER&page=1&size=200",
+            )
+            .catch(() => EMPTY_LECTURERS_RESPONSE),
+        ]);
 
         setTopics(response.data);
+        setLecturerMap(
+          Object.fromEntries(
+            (lecturersResponse.data ?? []).map((lecturer) => [lecturer.id, lecturer]),
+          ),
+        );
+
         if (response.data.length > 0) {
           const requestedTopic = response.data.find(
             (topic) => topic.id === requestedTopicId,
@@ -147,6 +182,36 @@ function StudentScoresContent() {
   const totalScore = summary?.finalScore ?? 0;
   const progress = (totalScore / 10) * 100;
 
+  const supervisorDisplay = useMemo(() => {
+    if (!selectedTopic) {
+      return "Chưa cập nhật";
+    }
+
+    const lecturer = lecturerMap[selectedTopic.supervisorUserId];
+    const supervisorName =
+      lecturer?.fullName?.trim() || selectedTopic.supervisor?.fullName?.trim() || "";
+    const supervisorCodeOrEmail =
+      lecturer?.staffId?.trim() ||
+      selectedTopic.supervisor?.lecturerId?.trim() ||
+      lecturer?.email?.trim() ||
+      selectedTopic.supervisor?.email?.trim() ||
+      "";
+
+    if (!supervisorName && !supervisorCodeOrEmail) {
+      return "Chưa cập nhật";
+    }
+
+    if (!supervisorName) {
+      return supervisorCodeOrEmail;
+    }
+
+    if (!supervisorCodeOrEmail) {
+      return supervisorName;
+    }
+
+    return `${supervisorName} · ${supervisorCodeOrEmail}`;
+  }, [lecturerMap, selectedTopic]);
+
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
       {/* Page Header */}
@@ -201,7 +266,7 @@ function StudentScoresContent() {
                   {selectedTopic?.id ?? "-"}
                 </span>
                 <h2 className="text-xl font-bold text-on-surface font-headline">{selectedTopic?.title ?? "Chưa chọn đề tài"}</h2>
-                <p className="text-sm text-outline mt-1">GVHD: {selectedTopic?.supervisorUserId ?? "-"}</p>
+                <p className="text-sm text-outline mt-1">GVHD: {supervisorDisplay}</p>
               </div>
             </div>
 

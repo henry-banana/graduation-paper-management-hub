@@ -211,17 +211,39 @@ export class RubricGeneratorService {
       const injectedXml = this.injectPlaceholders(documentXml, rubricType);
 
       if (this.hasPlaceholder(injectedXml)) {
-        zip.file('word/document.xml', injectedXml);
-        const doc = new Docxtemplater(zip, {
-          paragraphLoop: true,
-          linebreaks: true,
-        });
-        doc.render(templatePayload);
-        const rendered = doc
-          .getZip()
-          .generate({ type: 'nodebuffer', compression: 'DEFLATE' }) as Buffer;
-        this.logger.log(`Template rendered (injected mode) for ${rubricType}`);
-        return Buffer.from(rendered);
+        // Wrap in inner try/catch so that Path C still gets a chance if
+        // docxtemplater fails (e.g. BCTT template has inline ellipsis that
+        // causes duplicate-tag errors in OOXML after injection).
+        try {
+          zip.file('word/document.xml', injectedXml);
+          const doc = new Docxtemplater(zip, {
+            paragraphLoop: true,
+            linebreaks: true,
+          });
+          doc.render(templatePayload);
+          const rendered = doc
+            .getZip()
+            .generate({ type: 'nodebuffer', compression: 'DEFLATE' }) as Buffer;
+          this.logger.log(`Template rendered (injected mode) for ${rubricType}`);
+          return Buffer.from(rendered);
+        } catch (pathBError) {
+          const msg = pathBError instanceof Error ? pathBError.message : 'unknown';
+          this.logger.warn(
+            `Path B (injected docxtemplater) failed for ${rubricType}: ${msg}. Trying Path C.`,
+          );
+          // Re-open fresh zip (the one above was modified in-place)
+          const freshZip = new PizZip(fs.readFileSync(
+            path.join(this.templateDir, RUBRIC_TEMPLATE_FILE_MAP[rubricType]),
+            'binary',
+          ));
+          const legacyFallback = this.renderLegacyTemplateIfPossible(
+            freshZip,
+            rubricType,
+            documentXml,
+            templatePayload,
+          );
+          if (legacyFallback) return legacyFallback;
+        }
       }
 
       // ── Path C: legacy dotted replacement (last resort) ───────────────────
@@ -397,21 +419,36 @@ export class RubricGeneratorService {
   private injectHeaderFields(xml: string, rubricType: RubricType): string {
     let result = xml;
 
-    // "Sinh viên thực hiện: ....." → inject studentName + MSSV placeholder
+    // Unified: both ASCII dots (.....) and Unicode ellipsis (… U+2026)
+    const D = '[.\u2026]{2,}';
+
+    // "Sinh viên thực hiện: …" OR "SVTH: ……" (BCTT template) → studentName
     result = result.replace(
-      /(<w:t[^>]*>)([^<]*Sinh viên thực hiện:\s*)([.]{5,})([^<]*)(<\/w:t>)/gi,
-      '$1$2{{studentName}}  MSSV: {{studentId}}$4$5',
+      new RegExp(`(<w:t[^>]*>)([^<]*(?:Sinh vi\u00ean th\u1ef1c hi\u1ec7n|SVTH):\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
+      '$1$2{{studentName}}$4$5',
     );
 
-    // Standalone dotted sequences near MSSV label become studentId
+    // MSSV: …… → studentId
     result = result.replace(
-      /(<w:t[^>]*>)(MSSV:\s*)([.]{5,})([^<]*)(<\/w:t>)/gi,
+      new RegExp(`(<w:t[^>]*>)([^<]*MSSV:\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
       '$1$2{{studentId}}$4$5',
     );
 
-    // Topic title dotted: "Tên KLTN: ....."
+    // Lớp: …… → studentClass (BCTT specific)
     result = result.replace(
-      /(<w:t[^>]*>)([^<]*(?:Tên KLTN|Tên đề tài|Tên KL):\s*)([.]{5,})([^<]*)(<\/w:t>)/gi,
+      new RegExp(`(<w:t[^>]*>)([^<]*L\u1edbp:\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
+      '$1$2{{studentClass}}$4$5',
+    );
+
+    // NGÀNH: ……………… → major (BCTT specific)
+    result = result.replace(
+      new RegExp(`(<w:t[^>]*>)([^<]*(?:NG\u00c0NH|Ng\u00e0nh):\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
+      '$1$2{{major}}$4$5',
+    );
+
+    // Topic title: "Tên KLTN: …" / "Tên đề tài: …" / "Tên BCTT: …"
+    result = result.replace(
+      new RegExp(`(<w:t[^>]*>)([^<]*(?:T\u00ean KLTN|T\u00ean \u0111\u1ec1 t\u00e0i|T\u00ean KL|T\u00ean BCTT):\\s*)(${D})([^<]*)(<\/w:t>)`, 'gi'),
       '$1$2{{topicTitle}}$4$5',
     );
 
@@ -527,7 +564,8 @@ export class RubricGeneratorService {
     documentXml: string,
     payload: Record<string, unknown>,
   ): string | null {
-    if (!/\.{5,}/.test(documentXml)) {
+    // Match both ASCII dots (....) and Unicode ellipsis (… U+2026)
+    if (!/[.\u2026]{2,}/.test(documentXml)) {
       return null;
     }
 
@@ -618,6 +656,30 @@ export class RubricGeneratorService {
       return commonSpecs;
     }
 
+
+    if (rubricType === 'BCTT') {
+      return [
+        {
+          // BCTT template uses "SVTH:" label, not "Sinh viên thực hiện:"
+          startLabelPattern: /SVTH/iu,
+          endLabelPattern: /MSSV/iu,
+          maxSpanChars: 1200,
+          value: studentName,
+        },
+        {
+          startLabelPattern: /MSSV/iu,
+          endLabelPattern: /(Lớp|NGÀNH|Nganh)/iu,
+          maxSpanChars: 1000,
+          value: studentId,
+        },
+        {
+          startLabelPattern: /(Tên đề tài|BCTT)/iu,
+          endLabelPattern: /(Tiêu chí|STT|Ngày)/iu,
+          maxSpanChars: 2400,
+          value: topicTitle,
+        },
+      ];
+    }
     return [];
   }
 
@@ -649,13 +711,13 @@ export class RubricGeneratorService {
 
     const segmentEndIndex = afterStartIndex + segmentEndRelative;
     const segment = documentXml.slice(startIndex, segmentEndIndex);
-    if (!/\.{5,}/.test(segment)) {
+    if (!/[.\u2026]{2,}/.test(segment)) {
       return { xml: documentXml, replaced: false };
     }
 
     const escapedValue = this.escapeXmlText(fieldSpec.value);
     let inserted = false;
-    const replacedSegment = segment.replace(/\.{5,}/g, () => {
+    const replacedSegment = segment.replace(/[.\u2026]{2,}/g, () => {
       if (!inserted) {
         inserted = true;
         return escapedValue;

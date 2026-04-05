@@ -136,13 +136,18 @@ export default function CouncilFinalConfirmPage() {
           <h1 className="text-2xl font-bold tracking-tight font-headline text-on-surface">Tổng hợp & Công bố điểm</h1>
           <p className="text-sm text-outline mt-1">Xem điểm tổng hợp từ GVHD, GVPB, Hội đồng và công bố điểm chính thức.</p>
         </div>
-        <button onClick={() => void load()} className="p-2.5 rounded-xl border border-outline-variant/20 hover:bg-surface-container transition-colors self-start">
+        <button
+          onClick={() => void load()}
+          aria-label="Làm mới danh sách tổng hợp điểm"
+          title="Làm mới"
+          className="p-2.5 rounded-xl border border-outline-variant/20 hover:bg-surface-container transition-colors self-start"
+        >
           <RefreshCw className={`w-4 h-4 text-outline ${isLoading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {[
           { label: "Tổng đề tài", value: stats.total, color: "text-on-surface" },
           { label: "Đã công bố", value: stats.published, color: "text-green-600" },
@@ -201,12 +206,13 @@ export default function CouncilFinalConfirmPage() {
                   {filtered.map(t => {
                     const publishing = isPublishing === t.id;
                     const canPublish = canPublishTopic(t);
+                    const isExpanded = expandedId === t.id;
+                    const detailsId = `topic-details-${t.id}`;
                     return (
                       <>
                         <tr
                           key={t.id}
-                          className="hover:bg-surface-container-low/30 transition-colors cursor-pointer"
-                          onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}
+                          className="hover:bg-surface-container-low/30 transition-colors"
                         >
                           <td className="px-4 py-4">
                             <p className="text-sm font-semibold text-on-surface">{t.student?.fullName ?? "—"}</p>
@@ -259,13 +265,23 @@ export default function CouncilFinalConfirmPage() {
                                   {publishing ? "..." : "Công bố"}
                                 </button>
                               )}
-                              {expandedId === t.id ? <ChevronDown className="w-4 h-4 text-outline" /> : <ChevronRight className="w-4 h-4 text-outline" />}
+                              <button
+                                type="button"
+                                aria-expanded={isExpanded}
+                                aria-controls={detailsId}
+                                aria-label={isExpanded ? "Thu gọn chi tiết đề tài" : "Mở rộng chi tiết đề tài"}
+                                title={isExpanded ? "Thu gọn chi tiết" : "Mở rộng chi tiết"}
+                                onClick={() => setExpandedId(isExpanded ? null : t.id)}
+                                className="p-2 rounded-xl border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container transition-colors"
+                              >
+                                {isExpanded ? <ChevronDown className="w-4 h-4 text-outline" /> : <ChevronRight className="w-4 h-4 text-outline" />}
+                              </button>
                             </div>
                           </td>
                         </tr>
                         {/* Expanded row */}
-                        {expandedId === t.id && (
-                          <tr className="bg-surface-container-low/20">
+                        {isExpanded && (
+                          <tr id={detailsId} className="bg-surface-container-low/20">
                             <td colSpan={8} className="px-6 py-5">
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-5 text-xs">
                                 <div>

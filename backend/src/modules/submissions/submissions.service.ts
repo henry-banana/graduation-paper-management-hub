@@ -55,6 +55,11 @@ export interface SubmissionRecord {
   uploadedAt: string;
   originalFileName?: string;
   fileSize?: number;
+  // Teacher-readable reference columns (written to TenDetai sheet cols A-D)
+  _emailSV?: string;
+  _tendetai?: string;
+  _dotHK?: string;
+  _loaidetai?: string;
 }
 
 @Injectable()
@@ -395,6 +400,11 @@ export class SubmissionsService {
       uploadedAt: new Date().toISOString(),
       originalFileName: validatedFile.originalFileName,
       fileSize: validatedFile.fileSize,
+      // Populate teacher-visible columns so sheets stay readable
+      _emailSV: user.email,
+      _tendetai: topic.title,
+      _dotHK: topic.periodId, // periodId maps to Dot code (e.g. HK1-2025-2026)
+      _loaidetai: topic.type, // BCTT | KLTN
     };
 
     await this.submissionsRepository.create(newSubmission);
@@ -715,6 +725,17 @@ export class SubmissionsService {
       return;
     }
 
+    // INTERNSHIP_CONFIRMATION: student upload for BCTT (phiếu xác nhận thực tập)
+    if (fileType === 'INTERNSHIP_CONFIRMATION') {
+      if (user.role !== 'STUDENT' || topic.studentUserId !== user.userId) {
+        throw new ForbiddenException(
+          'Only the topic owner student can upload INTERNSHIP_CONFIRMATION files',
+        );
+      }
+
+      return;
+    }
+
     if (topic.type !== 'KLTN') {
       throw new ConflictException(
         `${fileType} submissions are only supported for KLTN topics`,
@@ -767,8 +788,21 @@ export class SubmissionsService {
       return;
     }
 
-    if (fileType === 'TURNITIN') {
+    // INTERNSHIP_CONFIRMATION: allowed when topic is IN_PROGRESS (both BCTT and KLTN)
+    if (fileType === 'INTERNSHIP_CONFIRMATION') {
       if (topic.state !== 'IN_PROGRESS') {
+        throw new ConflictException(
+          `Cannot upload INTERNSHIP_CONFIRMATION in topic state: ${topic.state}`,
+        );
+      }
+
+      return;
+    }
+
+    if (fileType === 'TURNITIN') {
+      // KLTN: allow upload when IN_PROGRESS or PENDING_CONFIRM (GV uploads after SV submits)
+      const allowedTurnitinStates = ['IN_PROGRESS', 'PENDING_CONFIRM', 'GRADING'];
+      if (!allowedTurnitinStates.includes(topic.state)) {
         throw new ConflictException(
           `Cannot upload TURNITIN in topic state: ${topic.state}`,
         );

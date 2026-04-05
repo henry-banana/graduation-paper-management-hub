@@ -67,4 +67,14 @@ export class GetTopicsQueryDto {
   @IsOptional()
   @IsString()
   sort?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by period ID', example: 'period-bctt-now' })
+  @IsOptional()
+  @IsString()
+  periodId?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by supervisor user ID' })
+  @IsOptional()
+  @IsString()
+  supervisorUserId?: string;
 }

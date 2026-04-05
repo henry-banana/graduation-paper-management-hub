@@ -65,7 +65,7 @@ export default function GVHDPendingPage() {
     setIsActing(topicId);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/transition`, { action: "APPROVE" });
+      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/approve`, {});
       setTopics(prev => prev.filter(t => t.id !== topicId));
       setSelectedIds(prev => { const s = new Set(prev); s.delete(topicId); return s; });
       setSuccessMsg("Đã duyệt đề tài thành công.");
@@ -82,8 +82,7 @@ export default function GVHDPendingPage() {
     setIsActing(rejectModal.topicId);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>(`/topics/${rejectModal.topicId}/transition`, {
-        action: "REJECT",
+      await api.post<ApiResponse<unknown>>(`/topics/${rejectModal.topicId}/reject`, {
         reason: rejectReason || "Không đáp ứng yêu cầu.",
       });
       setTopics(prev => prev.filter(t => t.id !== rejectModal.topicId));

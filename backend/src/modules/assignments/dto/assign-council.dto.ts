@@ -31,7 +31,7 @@ export class AssignCouncilDto {
     minItems: 3,
   })
   @IsArray()
-  @ArrayMinSize(3, { message: 'Council must have at least 3 members (TV_HD)' })
+  @ArrayMinSize(1, { message: 'Council must have at least 1 member (TV_HD)' })
   @ArrayUnique({ message: 'Council members must be unique' })
   @IsNotEmpty({ each: true })
   @IsString({ each: true })

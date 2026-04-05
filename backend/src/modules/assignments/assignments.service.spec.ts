@@ -5,11 +5,22 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { AssignmentsService } from './assignments.service';
+import { AssignmentsService, AssignmentRecord } from './assignments.service';
 import { AuthUser } from '../../common/types';
+import {
+  AssignmentsRepository,
+  TopicsRepository,
+  UsersRepository,
+} from '../../infrastructure/google-sheets';
+import { NotificationsService } from '../notifications/notifications.service';
+import { TopicRecord } from '../topics/topics.service';
+import { UserRecord } from '../users/users.service';
 
 describe('AssignmentsService', () => {
   let service: AssignmentsService;
+  let assignmentsData: AssignmentRecord[];
+  let topicsData: TopicRecord[];
+  let usersData: UserRecord[];
 
   const tbmUser: AuthUser = {
     userId: 'USR_TBM',
@@ -30,8 +41,179 @@ describe('AssignmentsService', () => {
   };
 
   beforeEach(async () => {
+    assignmentsData = [
+      {
+        id: 'as_001',
+        topicId: 'tp_001',
+        userId: 'USR002',
+        topicRole: 'GVHD',
+        status: 'ACTIVE',
+        assignedAt: '2026-01-15T10:00:00Z',
+      },
+    ];
+
+    topicsData = [
+      {
+        id: 'tp_001',
+        periodId: 'pd_001',
+        type: 'KLTN',
+        title: 'KLTN Topic 1',
+        domain: 'AI',
+        studentUserId: 'USR001',
+        supervisorUserId: 'USR002',
+        state: 'CONFIRMED',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'tp_002',
+        periodId: 'pd_001',
+        type: 'BCTT',
+        title: 'BCTT Topic 2',
+        domain: 'Web',
+        studentUserId: 'USR001',
+        supervisorUserId: 'USR002',
+        state: 'CONFIRMED',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    usersData = [
+      {
+        id: 'USR001',
+        email: 'student@hcmute.edu.vn',
+        name: 'Student 1',
+        role: 'STUDENT',
+      },
+      {
+        id: 'USR002',
+        email: 'lecturer@hcmute.edu.vn',
+        name: 'Lecturer 1',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 1,
+      },
+      {
+        id: 'USR_TBM',
+        email: 'tbm@hcmute.edu.vn',
+        name: 'TBM',
+        role: 'TBM',
+      },
+      {
+        id: 'USR_GVPB_1',
+        email: 'gvpb1@hcmute.edu.vn',
+        name: 'GVPB 1',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+      },
+      {
+        id: 'USR_CT_1',
+        email: 'ct1@hcmute.edu.vn',
+        name: 'CT 1',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+      },
+      {
+        id: 'USR_TK_1',
+        email: 'tk1@hcmute.edu.vn',
+        name: 'TK 1',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+      },
+      {
+        id: 'USR_TV_1',
+        email: 'tv1@hcmute.edu.vn',
+        name: 'TV 1',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+      },
+      {
+        id: 'USR_TV_2',
+        email: 'tv2@hcmute.edu.vn',
+        name: 'TV 2',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+      },
+      {
+        id: 'USR_TV_3',
+        email: 'tv3@hcmute.edu.vn',
+        name: 'TV 3',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+      },
+      {
+        id: 'USR_NEW_1',
+        email: 'new1@hcmute.edu.vn',
+        name: 'New Lecturer 1',
+        role: 'LECTURER',
+        totalQuota: 10,
+        quotaUsed: 0,
+      },
+      {
+        id: 'USR_QUOTA_FULL',
+        email: 'full@hcmute.edu.vn',
+        name: 'Quota Full',
+        role: 'LECTURER',
+        totalQuota: 1,
+        quotaUsed: 1,
+      },
+    ];
+
+    const assignmentsRepositoryMock = {
+      findAll: jest.fn(async () => assignmentsData),
+      findById: jest.fn(
+        async (id: string) =>
+          assignmentsData.find((assignment) => assignment.id === id) ?? null,
+      ),
+      create: jest.fn(async (entity: AssignmentRecord) => {
+        assignmentsData.push(entity);
+        return entity;
+      }),
+      update: jest.fn(async (id: string, entity: AssignmentRecord) => {
+        const index = assignmentsData.findIndex((assignment) => assignment.id === id);
+        if (index < 0) {
+          throw new Error(`Assignment ${id} not found`);
+        }
+        assignmentsData[index] = entity;
+        return entity;
+      }),
+    };
+
+    const topicsRepositoryMock = {
+      findById: jest.fn(async (id: string) => topicsData.find((topic) => topic.id === id) ?? null),
+    };
+
+    const usersRepositoryMock = {
+      findById: jest.fn(async (id: string) => usersData.find((user) => user.id === id) ?? null),
+      update: jest.fn(async (id: string, entity: UserRecord) => {
+        const index = usersData.findIndex((user) => user.id === id);
+        if (index < 0) {
+          throw new Error(`User ${id} not found`);
+        }
+        usersData[index] = entity;
+        return entity;
+      }),
+    };
+
+    const notificationsServiceMock = {
+      create: jest.fn(async () => ({ id: 'nt_mock' })),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AssignmentsService],
+      providers: [
+        AssignmentsService,
+        { provide: AssignmentsRepository, useValue: assignmentsRepositoryMock },
+        { provide: TopicsRepository, useValue: topicsRepositoryMock },
+        { provide: UsersRepository, useValue: usersRepositoryMock },
+        { provide: NotificationsService, useValue: notificationsServiceMock },
+      ],
     }).compile();
 
     service = module.get<AssignmentsService>(AssignmentsService);
@@ -163,7 +345,8 @@ describe('AssignmentsService', () => {
     });
 
     it('should throw ConflictException for duplicate members', async () => {
-      const topic = (service as any).mockTopics.find((t: any) => t.id === 'tp_001');
+      const topic = topicsData.find((item) => item.id === 'tp_001');
+      if (!topic) throw new Error('tp_001 fixture missing');
       topic.state = 'DEFENSE';
 
       await expect(
@@ -180,7 +363,8 @@ describe('AssignmentsService', () => {
     });
 
     it('should throw ConflictException if GVHD is in council', async () => {
-      const topic = (service as any).mockTopics.find((t: any) => t.id === 'tp_001');
+      const topic = topicsData.find((item) => item.id === 'tp_001');
+      if (!topic) throw new Error('tp_001 fixture missing');
       topic.state = 'DEFENSE';
 
       await expect(
@@ -197,7 +381,8 @@ describe('AssignmentsService', () => {
     });
 
     it('should throw ConflictException if GVPB is in council', async () => {
-      const topic = (service as any).mockTopics.find((t: any) => t.id === 'tp_001');
+      const topic = topicsData.find((item) => item.id === 'tp_001');
+      if (!topic) throw new Error('tp_001 fixture missing');
       topic.state = 'DEFENSE';
 
       await service.assignGvpb('tp_001', { userId: 'USR_GVPB_1' }, tbmUser);
@@ -283,15 +468,11 @@ describe('AssignmentsService', () => {
       );
       expect(result.replaced).toBe(true);
 
-      const quotas = (service as any).mockLecturerQuotas as Array<{
-        userId: string;
-        usedQuota: number;
-      }>;
-      const oldQuota = quotas.find((q) => q.userId === 'USR002');
-      const newQuota = quotas.find((q) => q.userId === 'USR_NEW_1');
+      const oldQuota = usersData.find((user) => user.id === 'USR002');
+      const newQuota = usersData.find((user) => user.id === 'USR_NEW_1');
 
-      expect(oldQuota?.usedQuota).toBe(0);
-      expect(newQuota?.usedQuota).toBe(1);
+      expect(oldQuota?.quotaUsed).toBe(0);
+      expect(newQuota?.quotaUsed).toBe(1);
     });
   });
 

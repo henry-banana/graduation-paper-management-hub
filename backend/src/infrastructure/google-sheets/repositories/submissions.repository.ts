@@ -49,6 +49,10 @@ export class SubmissionsRepository extends SheetsBaseRepository<SubmissionRecord
         canReplace: true,
         driveLink: this.optionalStr(v[5]),
         uploadedAt: new Date().toISOString(),
+        _emailSV: this.optionalStr(v[0]),
+        _tendetai: this.optionalStr(v[1]),
+        _dotHK: this.optionalStr(v[2]),
+        _loaidetai: this.optionalStr(v[3]),
       };
     }
 
@@ -71,15 +75,20 @@ export class SubmissionsRepository extends SheetsBaseRepository<SubmissionRecord
       uploadedAt: this.str(v[20]),
       originalFileName: this.optionalStr(v[21]),
       fileSize: this.optionalNum(v[22]),
+      // Preserve teacher reference columns so they survive round-trips
+      _emailSV: this.optionalStr(v[0]),
+      _tendetai: this.optionalStr(v[1]),
+      _dotHK: this.optionalStr(v[2]),
+      _loaidetai: this.optionalStr(v[3]),
     };
   }
 
   protected toRow(entity: SubmissionRecord): (string | number | boolean | null)[] {
     return [
-      '',                                 // A: EmailSV (kept blank — ref only)
-      '',                                 // B: Tendetai (kept blank — ref only)
-      '',                                 // C: DotHK (kept blank — ref only)
-      '',                                 // D: Loaidetai (kept blank — ref only)
+      this.str(entity._emailSV ?? ''),    // A: EmailSV (teacher reference)
+      this.str(entity._tendetai ?? ''),   // B: Tendetai (teacher reference)
+      this.str(entity._dotHK ?? ''),      // C: DotHK (teacher reference)
+      this.str(entity._loaidetai ?? ''), // D: Loaidetai (teacher reference)
       Number.isFinite(entity.versionNumber) ? entity.versionNumber : 1, // E: Version
       this.str(entity.driveLink ?? ''),  // F: Linkbai (teacher field, kept in sync)
       entity.id,                          // G: id

@@ -6,7 +6,7 @@ import {
   IsNotEmpty,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TopicAction } from '../topic-state.enum';
+import { TopicAction, TopicState } from '../topic-state.enum';
 
 export class ApproveTopicDto {
   @ApiPropertyOptional({ example: 'Approved with minor revisions' })
@@ -56,6 +56,19 @@ export class TransitionTopicDto {
     'CANCEL',
   ] as const;
 
+  private static readonly TOPIC_STATES = [
+    'DRAFT',
+    'PENDING_GV',
+    'CONFIRMED',
+    'IN_PROGRESS',
+    'PENDING_CONFIRM',
+    'DEFENSE',
+    'GRADING',
+    'SCORING',
+    'COMPLETED',
+    'CANCELLED',
+  ] as const;
+
   @ApiProperty({
     enum: [
       'SUBMIT_TO_GV',
@@ -74,4 +87,24 @@ export class TransitionTopicDto {
   @IsNotEmpty()
   @IsIn(TransitionTopicDto.TRANSITION_ACTIONS)
   action!: TopicAction;
+
+  @ApiPropertyOptional({
+    enum: TransitionTopicDto.TOPIC_STATES,
+    example: 'CONFIRMED',
+    description:
+      'Optimistic concurrency precondition. Transition fails with STALE_WRITE when current state differs.',
+  })
+  @IsOptional()
+  @IsIn(TransitionTopicDto.TOPIC_STATES)
+  expectedState?: TopicState;
+
+  @ApiPropertyOptional({
+    enum: TransitionTopicDto.TOPIC_STATES,
+    example: 'CONFIRMED',
+    description:
+      'Snake-case alias for expectedState to support existing clients.',
+  })
+  @IsOptional()
+  @IsIn(TransitionTopicDto.TOPIC_STATES)
+  expected_state?: TopicState;
 }

@@ -7,7 +7,7 @@ import {
   ArrowLeft, BookOpen, CheckCircle2, FileCheck, RefreshCw,
   Save, Sliders, Upload, User, AlertCircle,
 } from "lucide-react";
-import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 
 /* ---------- Types ---------- */
 interface TopicDto {
@@ -79,7 +79,7 @@ function GVHDScoringContent() {
       setIsLoadingTopics(true);
       try {
         const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=gvhd&page=1&size=100");
-        const scoreable = res.data.filter(t => ["SUBMITTED", "GRADING", "COMPLETED"].includes(t.state));
+        const scoreable = res.data.filter(t => ["DEFENSE", "GRADING", "SCORING"].includes(t.state));
         setTopics(scoreable);
         setSelectedId((current) => current || scoreable[0]?.id || "");
       } catch {
@@ -104,15 +104,19 @@ function GVHDScoringContent() {
         setScores(s.criteria ?? {});
         setTurnitinLink(s.turnitinLink ?? "");
         setComments(s.comments ?? "");
-      } catch {
-        // No draft yet — init defaults
-        const defaults: Record<string, number> = {};
-        const r = topics.find(t => t.id === selectedId);
-        const rb = r?.type === "KLTN" ? RUBRIC_KLTN : RUBRIC_BCTT;
-        rb.forEach(c => { defaults[c.id] = 0; });
-        setScores(defaults);
-        setTurnitinLink("");
-        setComments("");
+      } catch (e) {
+        if (e instanceof ApiRequestError && e.status === 404) {
+          // No draft yet — init defaults
+          const defaults: Record<string, number> = {};
+          const r = topics.find(t => t.id === selectedId);
+          const rb = r?.type === "KLTN" ? RUBRIC_KLTN : RUBRIC_BCTT;
+          rb.forEach(c => { defaults[c.id] = 0; });
+          setScores(defaults);
+          setTurnitinLink("");
+          setComments("");
+        } else {
+          setError(e instanceof Error ? e.message : "Không thể tải bản nháp chấm điểm.");
+        }
       } finally {
         setIsLoadingScore(false);
       }
@@ -124,7 +128,7 @@ function GVHDScoringContent() {
     setIsSaving(true);
     setError(null);
     try {
-      const role = selectedTopic?.type === "KLTN" ? "GVHD" : "GVHD";
+      const role = "GVHD";
       await api.post<ApiResponse<unknown>>(`/topics/${selectedId}/scores/draft-direct`, {
         criteria: scores,
         turnitinLink,
@@ -146,7 +150,7 @@ function GVHDScoringContent() {
     setIsSubmitting(true);
     setError(null);
     try {
-      const role = selectedTopic?.type === "KLTN" ? "GVHD" : "GVHD";
+      const role = "GVHD";
       await api.post<ApiResponse<unknown>>(`/topics/${selectedId}/scores/submit-direct`, {
         criteria: scores,
         turnitinLink,
@@ -154,7 +158,7 @@ function GVHDScoringContent() {
         role,
       });
       setSuccess("Đã nộp phiếu điểm chính thức thành công!");
-      setExistingScore({ criteria: existingScore?.criteria ?? {}, ...existingScore, isSubmitted: true } as ScoreDto);
+      setExistingScore({ criteria: scores, ...existingScore, isSubmitted: true } as ScoreDto);
       setTimeout(() => setSuccess(null), 5000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Nộp điểm thất bại.");

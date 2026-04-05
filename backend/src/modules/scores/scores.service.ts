@@ -30,6 +30,7 @@ import {
   ScoreSummariesRepository,
   ScoresRepository,
   TopicsRepository,
+  UsersRepository,
 } from '../../infrastructure/google-sheets';
 import type { TopicRecord } from '../topics/topics.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -47,6 +48,12 @@ export interface ScoreRecord {
   questions?: string[];
   submittedAt?: string;
   updatedAt: string;
+  // Teacher-readable reference columns (written to Diểm sheet cols A-F)
+  _email?: string;    // A: Email (student email)
+  _tenSV?: string;    // B: Tên SV (student name)
+  _mssv?: string;     // C: MSSV (student ID)
+  _tenDetai?: string; // D: Tên Đề tài
+  _gvName?: string;   // E: GV (scorer display name)
 }
 
 export interface ScoreSummaryRecord {
@@ -71,6 +78,7 @@ export class ScoresService {
     private readonly scoreSummariesRepository: ScoreSummariesRepository,
     private readonly topicsRepository: TopicsRepository,
     private readonly assignmentsRepository: AssignmentsRepository,
+    private readonly usersRepository: UsersRepository,
     @Optional()
     private readonly notificationsService?: NotificationsService,
     @Optional()
@@ -112,12 +120,19 @@ export class ScoresService {
 
     // Check formal Assignments sheet (for GVPB, TV_HD, CT_HD, TK_HD)
     const assignments = await this.assignmentsRepository.findAll();
+
+    // Business rule: CT_HD and TK_HD are council members who also grade (like TV_HD).
+    // When checking for TV_HD scoring permission, also accept CT_HD and TK_HD assignments.
+    const effectiveRoles: TopicRole[] | undefined = topicRole === 'TV_HD'
+      ? ['TV_HD', 'CT_HD', 'TK_HD']
+      : topicRole ? [topicRole] : undefined;
+
     return assignments.some(
       (assignment) =>
         assignment.topicId === topicId &&
         assignment.userId === userId &&
         assignment.status === 'ACTIVE' &&
-        (topicRole === undefined || assignment.topicRole === topicRole),
+        (effectiveRoles === undefined || effectiveRoles.includes(assignment.topicRole)),
     );
   }
 
@@ -157,6 +172,12 @@ export class ScoresService {
 
   private assertBcttDeadlineElapsed(topic: TopicRecord): void {
     if (topic.type !== 'BCTT') {
+      return;
+    }
+
+    // When topic is in GRADING state, TBM has explicitly moved it to grading phase —
+    // deadline enforcement is no longer required (TBM assumes responsibility).
+    if (topic.state === 'GRADING') {
       return;
     }
 
@@ -328,7 +349,20 @@ export class ScoresService {
       totalScore,
       rubricData: dto.rubricData,
       updatedAt: new Date().toISOString(),
+      // Populate teacher-visible reference columns
+      _tenDetai: topic.title,
+      _gvName: user.email, // best we have from JWT; display name not in token
     };
+
+    // Lookup student info to populate Email, Tên SV, MSSV columns
+    try {
+      const student = await this.usersRepository.findById(topic.studentUserId);
+      if (student) {
+        newScore._email = student.email;
+        newScore._tenSV = student.name;
+        newScore._mssv = student.studentId ?? student.lecturerId ?? '';
+      }
+    } catch { /* non-blocking: sheet columns optional */ }
 
     await this.scoresRepository.create(newScore);
 

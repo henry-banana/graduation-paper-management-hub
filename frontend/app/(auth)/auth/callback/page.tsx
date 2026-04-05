@@ -22,13 +22,29 @@ interface AuthMeDto {
   uiRole?: UiRole;
 }
 
-function getRedirectPath(accountRole: AccountRole): string {
+function getRedirectPath(accountRole: AccountRole, uiRole?: UiRole): string {
   if (accountRole === "STUDENT") {
     return "/student/notifications";
   }
 
   if (accountRole === "TBM") {
     return "/tbm/periods";
+  }
+
+  if (uiRole === "GVPB") {
+    return "/gvpb/reviews";
+  }
+
+  if (uiRole === "TV_HD") {
+    return "/council/scoring";
+  }
+
+  if (uiRole === "TK_HD") {
+    return "/council/summary";
+  }
+
+  if (uiRole === "CT_HD") {
+    return "/council/final-confirm";
   }
 
   return "/gvhd/pending";
@@ -83,7 +99,7 @@ function AuthCallbackContent() {
           setCurrentRoles(response.data.accountRole, response.data.uiRole);
         }
 
-        router.replace(getRedirectPath(response.data.accountRole));
+        router.replace(getRedirectPath(response.data.accountRole, response.data.uiRole));
       } catch (callbackError) {
         clearAuthSession();
         const message =

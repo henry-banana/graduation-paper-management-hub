@@ -1,8 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { TopicsController } from './topics.controller';
 import { TopicsService, TopicRecord } from './topics.service';
 import { AuthUser } from '../../common/types';
+import { SuggestedTopicsRepository } from '../../infrastructure/google-sheets/repositories';
 
 describe('TopicsController', () => {
   let controller: TopicsController;
@@ -37,6 +38,7 @@ describe('TopicsController', () => {
     const mockTopicsService = {
       findAll: jest.fn(),
       findById: jest.fn(),
+      findByIdForUser: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       approve: jest.fn(),
@@ -58,9 +60,19 @@ describe('TopicsController', () => {
       })),
     };
 
+    const suggestedTopicsRepositoryMock = {
+      search: jest.fn().mockResolvedValue([]),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TopicsController],
-      providers: [{ provide: TopicsService, useValue: mockTopicsService }],
+      providers: [
+        { provide: TopicsService, useValue: mockTopicsService },
+        {
+          provide: SuggestedTopicsRepository,
+          useValue: suggestedTopicsRepositoryMock,
+        },
+      ],
     }).compile();
 
     controller = module.get<TopicsController>(TopicsController);
@@ -84,7 +96,7 @@ describe('TopicsController', () => {
 
   describe('findOne', () => {
     it('should return topic by ID', async () => {
-      topicsService.findById.mockResolvedValue(mockTopic);
+      topicsService.findByIdForUser.mockResolvedValue(mockTopic);
 
       const result = await controller.findOne('tp_001', studentUser);
 
@@ -92,21 +104,24 @@ describe('TopicsController', () => {
       expect(result.meta.requestId).toBeDefined();
     });
 
-    it('should throw NotFoundException when topic not found', async () => {
-      topicsService.findById.mockResolvedValue(null);
+    it('should propagate NotFoundException when topic not found', async () => {
+      topicsService.findByIdForUser.mockRejectedValue(
+        new NotFoundException('Topic not found'),
+      );
 
       await expect(
         controller.findOne('nonexistent', studentUser),
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('should throw NotFoundException when student views other topic', async () => {
-      const otherTopic = { ...mockTopic, studentUserId: 'USR_OTHER' };
-      topicsService.findById.mockResolvedValue(otherTopic);
+    it('should propagate ForbiddenException when user has no read access', async () => {
+      topicsService.findByIdForUser.mockRejectedValue(
+        new ForbiddenException('Cannot access this topic'),
+      );
 
       await expect(
-        controller.findOne('tp_001', studentUser),
-      ).rejects.toThrow(NotFoundException);
+        controller.findOne('tp_001', lecturerUser),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -163,7 +178,7 @@ describe('TopicsController', () => {
 
   describe('reject', () => {
     it('should reject topic', async () => {
-      topicsService.reject.mockResolvedValue({ state: 'CANCELLED' });
+      topicsService.reject.mockResolvedValue({ state: 'DRAFT' });
 
       const result = await controller.reject(
         'tp_001',
@@ -171,7 +186,7 @@ describe('TopicsController', () => {
         lecturerUser,
       );
 
-      expect(result.data.state).toBe('CANCELLED');
+      expect(result.data.state).toBe('DRAFT');
     });
   });
 
