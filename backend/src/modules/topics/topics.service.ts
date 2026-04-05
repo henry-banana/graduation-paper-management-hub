@@ -654,7 +654,10 @@ export class TopicsService {
 
       await this.consumeSupervisorQuota(topic.supervisorUserId);
 
-      topic.state = 'CONFIRMED';
+      // Bug fix: Auto-transition to IN_PROGRESS after approval
+      // Previously stopped at CONFIRMED, requiring another manual action
+      // Now: PENDING_GV -> IN_PROGRESS (skip CONFIRMED intermediate state)
+      topic.state = 'IN_PROGRESS';
       topic.updatedAt = new Date().toISOString();
       try {
         await this.topicsRepository.update(topic.id, topic);

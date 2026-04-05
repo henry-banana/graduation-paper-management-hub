@@ -44,7 +44,8 @@ export type TopicAction =
 export const BCTT_STATE_TRANSITIONS: Record<BcttState, BcttState[]> = {
   DRAFT: ['PENDING_GV', 'CANCELLED'],
   // DB-05 fix: REJECT from PENDING_GV goes back to DRAFT (not CANCELLED)
-  PENDING_GV: ['CONFIRMED', 'DRAFT', 'CANCELLED'],
+  // Bug fix: Allow direct transition to IN_PROGRESS on approve (skip CONFIRMED)
+  PENDING_GV: ['CONFIRMED', 'IN_PROGRESS', 'DRAFT', 'CANCELLED'],
   CONFIRMED: ['IN_PROGRESS', 'CANCELLED'],
   IN_PROGRESS: ['GRADING', 'CANCELLED'],
   GRADING: ['COMPLETED', 'CANCELLED'],
@@ -56,7 +57,8 @@ export const BCTT_STATE_TRANSITIONS: Record<BcttState, BcttState[]> = {
 export const KLTN_STATE_TRANSITIONS: Record<KltnState, KltnState[]> = {
   DRAFT: ['PENDING_GV', 'CANCELLED'],
   // DB-05 fix: REJECT from PENDING_GV goes back to DRAFT (not CANCELLED)
-  PENDING_GV: ['CONFIRMED', 'DRAFT', 'CANCELLED'],
+  // Bug fix: Allow direct transition to IN_PROGRESS on approve (skip CONFIRMED)
+  PENDING_GV: ['CONFIRMED', 'IN_PROGRESS', 'DRAFT', 'CANCELLED'],
   CONFIRMED: ['IN_PROGRESS', 'CANCELLED'],
   IN_PROGRESS: ['PENDING_CONFIRM', 'CANCELLED'],
   PENDING_CONFIRM: ['DEFENSE', 'IN_PROGRESS', 'CANCELLED'],

@@ -570,6 +570,14 @@ export class ScoresService {
     });
 
     if (published) {
+      // Bug fix: Auto-transition topic to COMPLETED when score is published
+      // Previously topic state remained at SCORING even after all confirmations
+      if (topic.state === 'SCORING') {
+        topic.state = 'COMPLETED';
+        topic.updatedAt = new Date().toISOString();
+        await this.topicsRepository.update(topicId, topic);
+      }
+
       await this.notifyIfAvailable({
         receiverUserId: topic.studentUserId,
         type: 'SCORE_PUBLISHED',
