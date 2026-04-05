@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -38,6 +38,25 @@ interface ScoreDto {
   lockReason?: string;
 }
 
+interface ScoreSummaryDto {
+  gvhdScore?: number;
+  gvpbScore?: number;
+  councilAvgScore?: number;
+  finalScore: number;
+  result: "PASS" | "FAIL";
+  published: boolean;
+  appeal?: {
+    requestedAt?: string;
+    requestedBy?: string;
+    reason?: string;
+    status?: "PENDING" | "RESOLVED";
+    resolvedAt?: string;
+    resolvedBy?: string;
+    resolutionNote?: string;
+    scoreAdjusted?: boolean;
+  };
+}
+
 /* ---------- Rubric definitions ---------- */
 const RUBRIC_BCTT = [
   { id: "attitude", label: "1. Thái độ & kỷ luật", max: 2.0, desc: "Chủ động, tuân thủ lịch, nội quy." },
@@ -63,12 +82,15 @@ function GVHDScoringContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [existingScore, setExistingScore] = useState<ScoreDto | null>(null);
+  const [scoreSummary, setScoreSummary] = useState<ScoreSummaryDto | null>(null);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [turnitinLink, setTurnitinLink] = useState("");
   const [turnitinUploadMode, setTurnitinUploadMode] = useState<"link" | "file">("link");
   const [isUploadingTurnitin, setIsUploadingTurnitin] = useState(false);
   const [turnitinFileUploaded, setTurnitinFileUploaded] = useState<{ name: string; link?: string } | null>(null);
   const [comments, setComments] = useState("");
+  const [appealResolutionNote, setAppealResolutionNote] = useState("");
+  const [isResolvingAppeal, setIsResolvingAppeal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const turnitinRef = useRef<HTMLInputElement>(null);
@@ -81,6 +103,9 @@ function GVHDScoringContent() {
   const isSubmitted = existingScore?.isSubmitted ?? false;
   const isScoreLocked = isSubmitted && (existingScore?.isLocked ?? true);
   const isSubmittedEditable = isSubmitted && !isScoreLocked;
+  const hasPendingAppeal =
+    selectedTopic?.type === "BCTT" &&
+    scoreSummary?.appeal?.status === "PENDING";
 
   const submittedLockMessage = useMemo(() => {
     if (!isSubmitted) return "";
@@ -96,27 +121,35 @@ function GVHDScoringContent() {
     return "Phiếu điểm đã được nộp chính thức và hiện không thể chỉnh sửa.";
   }, [existingScore?.lockReason, isScoreLocked, isSubmitted]);
 
+  const loadTopics = useCallback(async () => {
+    setIsLoadingTopics(true);
+    try {
+      const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=gvhd&page=1&size=100");
+      const scoreable = res.data.filter(t => ["DEFENSE", "GRADING", "SCORING"].includes(t.state));
+      setTopics(scoreable);
+      setSelectedId((current) => {
+        if (current && scoreable.some((topic) => topic.id === current)) {
+          return current;
+        }
+        return scoreable[0]?.id || "";
+      });
+    } catch {
+      setError("Không thể tải danh sách đề tài.");
+    } finally {
+      setIsLoadingTopics(false);
+    }
+  }, []);
+
   // Load supervised topics
   useEffect(() => {
-    void (async () => {
-      setIsLoadingTopics(true);
-      try {
-        const res = await api.get<ApiListResponse<TopicDto>>("/topics?role=gvhd&page=1&size=100");
-        const scoreable = res.data.filter(t => ["DEFENSE", "GRADING", "SCORING"].includes(t.state));
-        setTopics(scoreable);
-        setSelectedId((current) => current || scoreable[0]?.id || "");
-      } catch {
-        setError("Không thể tải danh sách đề tài.");
-      } finally {
-        setIsLoadingTopics(false);
-      }
-    })();
-  }, []);
+    void loadTopics();
+  }, [loadTopics]);
 
   // Load draft/score when topic changes
   useEffect(() => {
     if (!selectedId) return;
     setExistingScore(null);
+    setScoreSummary(null);
     setIsLoadingScore(true);
     setError(null);
     void (async () => {
@@ -140,6 +173,21 @@ function GVHDScoringContent() {
         } else {
           setError(e instanceof Error ? e.message : "Không thể tải bản nháp chấm điểm.");
         }
+      }
+
+      try {
+        const summaryRes = await api.get<ApiResponse<ScoreSummaryDto>>(
+          `/topics/${selectedId}/scores/summary`,
+        );
+        setScoreSummary(summaryRes.data);
+        if (summaryRes.data.appeal?.status === "PENDING") {
+          setAppealResolutionNote(summaryRes.data.appeal.resolutionNote ?? "");
+        } else {
+          setAppealResolutionNote("");
+        }
+      } catch {
+        setScoreSummary(null);
+        setAppealResolutionNote("");
       } finally {
         setIsLoadingScore(false);
       }
@@ -196,6 +244,10 @@ function GVHDScoringContent() {
         setScores(refreshed.data.criteria ?? {});
         setTurnitinLink(refreshed.data.turnitinLink ?? "");
         setComments(refreshed.data.comments ?? "");
+        const refreshedSummary = await api.get<ApiResponse<ScoreSummaryDto>>(
+          `/topics/${selectedId}/scores/summary`,
+        );
+        setScoreSummary(refreshedSummary.data);
       } catch {
         setExistingScore({ criteria: scores, ...existingScore, isSubmitted: true, isLocked: false } as ScoreDto);
       }
@@ -205,6 +257,36 @@ function GVHDScoringContent() {
       setError(e instanceof Error ? e.message : "Nộp điểm thất bại.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleResolveAppeal = async () => {
+    if (!selectedId || !hasPendingAppeal) {
+      return;
+    }
+
+    setIsResolvingAppeal(true);
+    setError(null);
+
+    try {
+      await api.post<ApiResponse<{ status: "RESOLVED"; resolvedAt: string; scoreAdjusted: boolean }>>(
+        `/topics/${selectedId}/scores/appeal/resolve`,
+        { resolutionNote: appealResolutionNote.trim() || undefined },
+      );
+
+      setSuccess("Đã xử lý phúc khảo và giữ nguyên điểm.");
+
+      const [summaryRes] = await Promise.all([
+        api.get<ApiResponse<ScoreSummaryDto>>(`/topics/${selectedId}/scores/summary`),
+        loadTopics(),
+      ]);
+      setScoreSummary(summaryRes.data);
+      setAppealResolutionNote("");
+      setTimeout(() => setSuccess(null), 4000);
+    } catch (resolveError) {
+      setError(resolveError instanceof Error ? resolveError.message : "Không thể xử lý phúc khảo.");
+    } finally {
+      setIsResolvingAppeal(false);
     }
   };
 
@@ -319,6 +401,37 @@ function GVHDScoringContent() {
         <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-2xl px-4 py-3">
           <FileCheck className="w-4 h-4 text-primary" />
           <p className="text-sm text-primary font-medium">{submittedLockMessage}</p>
+        </div>
+      )}
+
+      {hasPendingAppeal && (
+        <div className="space-y-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4">
+          <p className="text-sm font-semibold text-amber-800">
+            Có yêu cầu phúc khảo điểm từ sinh viên
+          </p>
+          {scoreSummary?.appeal?.reason && (
+            <p className="text-sm text-amber-700">
+              Lý do: {scoreSummary.appeal.reason}
+            </p>
+          )}
+          <p className="text-xs text-amber-700">
+            Bạn có thể cập nhật điểm đã nộp bên dưới để hệ thống tự đóng phúc khảo, hoặc giữ nguyên điểm bằng nút xác nhận.
+          </p>
+          <textarea
+            rows={2}
+            value={appealResolutionNote}
+            onChange={(event) => setAppealResolutionNote(event.target.value)}
+            placeholder="Ghi chú phản hồi (tùy chọn)..."
+            className="w-full px-3 py-2 rounded-xl border border-amber-200 bg-white text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-amber-300/60"
+          />
+          <button
+            type="button"
+            onClick={() => void handleResolveAppeal()}
+            disabled={isResolvingAppeal}
+            className="px-4 py-2 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 transition-colors disabled:opacity-60"
+          >
+            {isResolvingAppeal ? "Đang xử lý..." : "Giữ nguyên điểm và hoàn tất"}
+          </button>
         </div>
       )}
 

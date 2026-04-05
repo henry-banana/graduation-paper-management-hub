@@ -13,6 +13,8 @@ export type NotificationType =
   | 'SUBMISSION_CONFIRMED'
   | 'SCORE_SUBMITTED'
   | 'SCORE_PUBLISHED'
+  | 'SCORE_APPEAL_REQUESTED'
+  | 'SCORE_APPEAL_RESOLVED'
   | 'ASSIGNMENT_ADDED'
   | 'SYSTEM'
   | 'GENERAL';
@@ -57,6 +59,8 @@ export class NotificationResponseDto {
       'SUBMISSION_CONFIRMED',
       'SCORE_SUBMITTED',
       'SCORE_PUBLISHED',
+      'SCORE_APPEAL_REQUESTED',
+      'SCORE_APPEAL_RESOLVED',
       'ASSIGNMENT_ADDED',
       'SYSTEM',
       'GENERAL',

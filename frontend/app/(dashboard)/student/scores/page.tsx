@@ -39,6 +39,17 @@ interface ScoreSummaryDto {
   confirmedByGvhd: boolean;
   confirmedByCtHd: boolean;
   published: boolean;
+  rubricDocxLink?: string;
+  appeal?: {
+    requestedAt?: string;
+    requestedBy?: string;
+    reason?: string;
+    status?: "PENDING" | "RESOLVED";
+    resolvedAt?: string;
+    resolvedBy?: string;
+    resolutionNote?: string;
+    scoreAdjusted?: boolean;
+  };
 }
 
 const SCORE_READY_STATES = new Set([
@@ -80,6 +91,9 @@ function StudentScoresContent() {
   const [lecturerMap, setLecturerMap] = useState<Record<string, LecturerDto>>({});
   const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [appealReason, setAppealReason] = useState("");
+  const [isSubmittingAppeal, setIsSubmittingAppeal] = useState(false);
+  const [appealFeedback, setAppealFeedback] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const selectedTopic = useMemo(
@@ -130,6 +144,8 @@ function StudentScoresContent() {
     if (!selectedTopicId || !selectedTopic) {
       setSummary(null);
       setSummaryError(null);
+      setAppealReason("");
+      setAppealFeedback(null);
       return;
     }
 
@@ -171,6 +187,48 @@ function StudentScoresContent() {
 
     void loadSummary();
   }, [selectedTopicId, selectedTopic]);
+
+  const canRequestAppeal =
+    selectedTopic?.type === "BCTT" &&
+    Boolean(summary?.published) &&
+    !summary?.appeal?.requestedAt;
+
+  const handleSubmitAppeal = async () => {
+    if (!selectedTopicId || !canRequestAppeal) {
+      return;
+    }
+
+    const reason = appealReason.trim();
+    if (reason.length < 10) {
+      setAppealFeedback("Vui lòng nhập lý do phúc khảo tối thiểu 10 ký tự.");
+      return;
+    }
+
+    setAppealFeedback(null);
+    setIsSubmittingAppeal(true);
+
+    try {
+      await api.post<ApiResponse<{ status: "PENDING"; requestedAt: string }>>(
+        `/topics/${selectedTopicId}/scores/appeal`,
+        { reason },
+      );
+
+      const refreshed = await api.get<ApiResponse<ScoreSummaryDto>>(
+        `/topics/${selectedTopicId}/scores/summary`,
+      );
+      setSummary(refreshed.data);
+      setAppealReason("");
+      setAppealFeedback("Đã gửi yêu cầu phúc khảo. GVHD sẽ rà soát và phản hồi.");
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : "Không thể gửi yêu cầu phúc khảo.";
+      setAppealFeedback(message);
+    } finally {
+      setIsSubmittingAppeal(false);
+    }
+  };
 
   const totalScore = summary?.finalScore ?? 0;
   const progress = (totalScore / 10) * 100;
@@ -324,6 +382,75 @@ function StudentScoresContent() {
             </p>
           </div>
         </div>
+
+        {selectedTopic?.type === "BCTT" && summary && (
+          <div className="mx-6 mb-6 p-5 bg-surface-container rounded-2xl border border-outline-variant/15 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <h4 className="text-sm font-semibold text-on-surface">
+                Phiếu chấm BCTT (DOCX)
+              </h4>
+              {summary.rubricDocxLink ? (
+                <a
+                  href={summary.rubricDocxLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm font-semibold text-primary hover:underline"
+                >
+                  Mở phiếu chấm
+                </a>
+              ) : (
+                <span className="text-xs text-outline">Chưa có file phiếu chấm</span>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-outline-variant/15 space-y-3">
+              <h4 className="text-sm font-semibold text-on-surface">
+                Phúc khảo điểm (1 lần)
+              </h4>
+
+              {summary.appeal?.requestedAt ? (
+                <div className="text-sm text-on-surface-variant space-y-1.5">
+                  <p>
+                    Trạng thái:{" "}
+                    <strong>
+                      {summary.appeal.status === "RESOLVED"
+                        ? "Đã xử lý"
+                        : "Đang chờ GVHD xử lý"}
+                    </strong>
+                  </p>
+                  {summary.appeal.reason && (
+                    <p>Lý do: {summary.appeal.reason}</p>
+                  )}
+                  {summary.appeal.resolutionNote && (
+                    <p>Phản hồi GVHD: {summary.appeal.resolutionNote}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <textarea
+                    value={appealReason}
+                    onChange={(event) => setAppealReason(event.target.value)}
+                    rows={3}
+                    placeholder="Nêu rõ lý do phúc khảo điểm..."
+                    className="w-full px-3 py-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleSubmitAppeal()}
+                    disabled={isSubmittingAppeal}
+                    className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+                  >
+                    {isSubmittingAppeal ? "Đang gửi..." : "Gửi phúc khảo"}
+                  </button>
+                </div>
+              )}
+
+              {appealFeedback && (
+                <p className="text-xs text-outline">{appealFeedback}</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Next steps */}

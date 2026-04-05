@@ -1,18 +1,25 @@
 import {
   Injectable,
   Logger,
+  BadRequestException,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import {
+  SendPersonalNotificationDto,
   NotificationResponseDto,
   NotificationScope,
   NotificationType,
   GetNotificationsQueryDto,
 } from './dto';
 import { AuthUser } from '../../common/types';
-import { NotificationsRepository } from '../../infrastructure/google-sheets';
+import {
+  AssignmentsRepository,
+  NotificationsRepository,
+  TopicsRepository,
+  UsersRepository,
+} from '../../infrastructure/google-sheets';
 
 export interface NotificationRecord {
   id: string;
@@ -97,6 +104,16 @@ const NOTIFICATION_TEMPLATES: Record<
     body: (ctx) => `Điểm tổng kết cho đề tài "${ctx.topicTitle}" đã được công bố.`,
     deepLinkPattern: '/topics/{topicId}/scores',
   },
+  SCORE_APPEAL_REQUESTED: {
+    title: 'Có yêu cầu phúc khảo điểm',
+    body: (ctx) => `Sinh viên đã gửi yêu cầu phúc khảo cho đề tài "${ctx.topicTitle}".`,
+    deepLinkPattern: '/gvhd/scoring?topicId={topicId}',
+  },
+  SCORE_APPEAL_RESOLVED: {
+    title: 'Yêu cầu phúc khảo đã được xử lý',
+    body: (ctx) => `Yêu cầu phúc khảo cho đề tài "${ctx.topicTitle}" đã được GVHD xử lý.`,
+    deepLinkPattern: '/student/scores?topicId={topicId}',
+  },
   ASSIGNMENT_ADDED: {
     title: 'Vai trò mới được gán',
     body: (ctx) => `Bạn đã được gán vai trò ${ctx.role} cho đề tài "${ctx.topicTitle}".`,
@@ -128,6 +145,9 @@ export class NotificationsService {
 
   constructor(
     private readonly notificationsRepository: NotificationsRepository,
+    private readonly usersRepository: UsersRepository,
+    private readonly topicsRepository: TopicsRepository,
+    private readonly assignmentsRepository: AssignmentsRepository,
   ) {}
 
   private generateId(): string {
@@ -321,6 +341,90 @@ export class NotificationsService {
   }
 
   /**
+   * Send a PERSONAL notification with role/topic-aware authorization.
+   * - TBM can send to any active user (topicId optional)
+   * - Non-TBM must provide topicId and both sender/receiver must be topic participants
+   */
+  async sendPersonal(
+    dto: SendPersonalNotificationDto,
+    sender: AuthUser,
+  ): Promise<NotificationRecord> {
+    this.logger.log(
+      `[sendPersonal:start] senderUserId=${sender.userId} senderRole=${sender.role} receiverUserId=${dto.receiverUserId} topicId=${dto.topicId ?? '-'} type=${dto.type ?? 'GENERAL'}`,
+    );
+
+    if (sender.role === 'STUDENT') {
+      throw new ForbiddenException(
+        'Only lecturers and TBM can send personal notifications',
+      );
+    }
+
+    const receiver = await this.usersRepository.findById(dto.receiverUserId);
+    if (!receiver || receiver.isActive === false) {
+      throw new NotFoundException('Receiver user not found');
+    }
+
+    const topicId = dto.topicId?.trim() || undefined;
+
+    if (sender.role !== 'TBM' && !topicId) {
+      throw new BadRequestException(
+        'topicId is required for non-TBM personal notifications',
+      );
+    }
+
+    if (topicId) {
+      const topic = await this.topicsRepository.findById(topicId);
+      if (!topic) {
+        throw new NotFoundException(`Topic with ID ${topicId} not found`);
+      }
+
+      if (sender.role !== 'TBM') {
+        const [senderInTopic, receiverInTopic] = await Promise.all([
+          this.isTopicParticipant(topicId, sender.userId, topic.studentUserId, topic.supervisorUserId),
+          this.isTopicParticipant(topicId, dto.receiverUserId, topic.studentUserId, topic.supervisorUserId),
+        ]);
+
+        if (!senderInTopic) {
+          throw new ForbiddenException(
+            'Sender is not a participant of the related topic',
+          );
+        }
+
+        if (!receiverInTopic) {
+          throw new ForbiddenException(
+            'Receiver is not a participant of the related topic',
+          );
+        }
+      }
+    }
+
+    const type = dto.type ?? 'GENERAL';
+    const title = dto.title?.trim() || (type === 'SYSTEM' ? 'Thông báo hệ thống' : 'Thông báo');
+    const body = dto.body.trim();
+    const deepLink = dto.deepLink?.trim() || (topicId ? `/topics/${topicId}` : '/notifications');
+
+    const notification: NotificationRecord = {
+      id: this.generateId(),
+      receiverUserId: dto.receiverUserId,
+      scope: 'PERSONAL',
+      topicId,
+      type,
+      title,
+      body,
+      deepLink,
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    await this.notificationsRepository.create(notification);
+    this.logger.log(
+      `[sendPersonal:success] notificationId=${notification.id} senderUserId=${sender.userId} receiverUserId=${notification.receiverUserId}`,
+    );
+
+    return notification;
+  }
+
+  /**
    * Broadcast a notification to all users (GLOBAL scope).
    * Used by TBM to send system-wide announcements.
    */
@@ -409,6 +513,20 @@ export class NotificationsService {
     }
 
     return notification.receiverUserId === user.userId;
+  }
+
+  private async isTopicParticipant(
+    topicId: string,
+    userId: string,
+    studentUserId: string,
+    supervisorUserId: string,
+  ): Promise<boolean> {
+    if (userId === studentUserId || userId === supervisorUserId) {
+      return true;
+    }
+
+    const assignments = await this.assignmentsRepository.findByTopicId(topicId);
+    return assignments.some((assignment) => assignment.userId === userId && assignment.status === 'ACTIVE');
   }
 
   private resolveScope(notification: NotificationRecord): NotificationScope {

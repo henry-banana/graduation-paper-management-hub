@@ -27,6 +27,10 @@ import {
   ConfirmScoreResponseDto,
   UpdateCouncilCommentsDto,
   CouncilCommentsResponseDto,
+  RequestScoreAppealDto,
+  RequestScoreAppealResponseDto,
+  ResolveScoreAppealDto,
+  ResolveScoreAppealResponseDto,
 } from './dto';
 import { CreateDraftScoreDto } from './dto/create-score.dto';
 import { SubmitScoreDto, ConfirmScoreDto, RequestSummaryDto, ConfirmScoreRole } from './dto/submit-score.dto';
@@ -203,6 +207,57 @@ export class ScoresController {
     @CurrentUser() user: AuthUser,
   ) {
     const result = await this.scoresService.getSummary(topicId, user);
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Post('topics/:topicId/scores/appeal')
+  @Roles('STUDENT')
+  @ApiOperation({ summary: 'Student requests one-time score appeal for BCTT' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Appeal requested',
+    type: RequestScoreAppealResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid request' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 409, description: 'Appeal already requested or score not published' })
+  async requestAppeal(
+    @Param('topicId') topicId: string,
+    @Body() dto: RequestScoreAppealDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const result = await this.scoresService.requestAppeal(topicId, dto.reason, user);
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Post('topics/:topicId/scores/appeal/resolve')
+  @Roles('LECTURER')
+  @ApiOperation({ summary: 'GVHD resolves pending score appeal for BCTT' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Appeal resolved',
+    type: ResolveScoreAppealResponseDto,
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 409, description: 'No pending appeal' })
+  async resolveAppeal(
+    @Param('topicId') topicId: string,
+    @Body() dto: ResolveScoreAppealDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const result = await this.scoresService.resolveAppeal(
+      topicId,
+      user,
+      dto.resolutionNote,
+    );
     return {
       data: result,
       meta: { requestId: generateRequestId() },

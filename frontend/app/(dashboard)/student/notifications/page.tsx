@@ -74,10 +74,12 @@ function mapTypeToUi(type: string): UiNotificationType {
       return "important";
     case "DEADLINE_REMINDER":
     case "DEADLINE_OVERDUE":
+    case "SCORE_APPEAL_REQUESTED":
       return "warning";
     case "TOPIC_APPROVED":
     case "SUBMISSION_UPLOADED":
     case "SCORE_PUBLISHED":
+    case "SCORE_APPEAL_RESOLVED":
       return "success";
     default:
       return "info";

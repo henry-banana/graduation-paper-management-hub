@@ -26,6 +26,7 @@ import {
   GetNotificationsQueryDto,
   MarkReadDto,
   MarkBulkReadDto,
+  SendPersonalNotificationDto,
 } from './dto';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -40,7 +41,7 @@ class BroadcastNotificationDto {
   @IsIn(['SYSTEM', 'GENERAL', 'TOPIC_APPROVED', 'TOPIC_REJECTED', 'TOPIC_PENDING',
     'DEADLINE_SET', 'DEADLINE_REMINDER', 'DEADLINE_OVERDUE', 'REVISION_ROUND_OPENED',
     'REVISION_ROUND_CLOSED', 'SUBMISSION_UPLOADED', 'SUBMISSION_CONFIRMED',
-    'SCORE_SUBMITTED', 'SCORE_PUBLISHED', 'ASSIGNMENT_ADDED'])
+    'SCORE_SUBMITTED', 'SCORE_PUBLISHED', 'SCORE_APPEAL_REQUESTED', 'SCORE_APPEAL_RESOLVED', 'ASSIGNMENT_ADDED'])
   type!: NotificationType;
 
   @ApiPropertyOptional({ description: 'Custom title override' })
@@ -119,6 +120,24 @@ export class NotificationsController {
       title: dto.title,
       body: dto.body,
     });
+    return {
+      data: this.notificationsService.mapToDto(notification),
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
+  @Post('personal')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Send a personal notification (LECTURER/TBM)' })
+  @ApiResponse({ status: 201, description: 'Personal notification created', type: NotificationResponseDto })
+  @ApiResponse({ status: 400, description: 'Invalid request payload' })
+  @ApiResponse({ status: 403, description: 'Sender is not allowed to send' })
+  @ApiResponse({ status: 404, description: 'Receiver or topic not found' })
+  async sendPersonal(
+    @Body() dto: SendPersonalNotificationDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const notification = await this.notificationsService.sendPersonal(dto, user);
     return {
       data: this.notificationsService.mapToDto(notification),
       meta: { requestId: generateRequestId() },

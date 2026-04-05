@@ -8,6 +8,7 @@ import type {
 } from '../../../modules/scores/scores.service';
 import type {
   RubricItem,
+  ScoreAppealStatus,
   ScoreResult,
   ScorerRole,
   ScoreStatus,
@@ -174,10 +175,12 @@ export class ScoresRepository extends SheetsBaseRepository<ScoreRecord> {
 }
 
 /**
- * ScoreSummaries tab column layout (v3.2 — app-specific tab):
+ * ScoreSummaries tab column layout (v3.3 — app-specific tab):
  * [0]=id [1]=topicId [2]=gvhdScore [3]=gvpbScore [4]=councilAvgScore
  * [5]=finalScore [6]=result [7]=confirmedByGvhd [8]=confirmedByCtHd [9]=published [10]=updatedAt
  * [11]=councilComments (góp ý bổ sung của hội đồng - do Thư ký nhập)
+ * [12]=appealRequestedAt [13]=appealRequestedBy [14]=appealReason [15]=appealStatus
+ * [16]=appealResolvedAt [17]=appealResolvedBy [18]=appealResolutionNote [19]=appealScoreAdjusted
  */
 @Injectable()
 export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryRecord> {
@@ -200,6 +203,15 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       published: this.bool(v[9]),
       updatedAt: this.str(v[10]),     // DB-03: was missing
       councilComments: this.optionalStr(v[11]),
+      appealRequestedAt: this.optionalStr(v[12]),
+      appealRequestedBy: this.optionalStr(v[13]),
+      appealReason: this.optionalStr(v[14]),
+      appealStatus: this.parseAppealStatus(this.optionalStr(v[15])),
+      appealResolvedAt: this.optionalStr(v[16]),
+      appealResolvedBy: this.optionalStr(v[17]),
+      appealResolutionNote: this.optionalStr(v[18]),
+      appealScoreAdjusted:
+        this.optionalStr(v[19]) === undefined ? undefined : this.bool(v[19]),
     };
   }
 
@@ -217,11 +229,24 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       entity.published,
       new Date().toISOString(), // [10] updatedAt
       entity.councilComments ?? '', // [11] councilComments
+      this.str(entity.appealRequestedAt ?? ''), // [12] appealRequestedAt
+      this.str(entity.appealRequestedBy ?? ''), // [13] appealRequestedBy
+      this.str(entity.appealReason ?? ''), // [14] appealReason
+      this.str(entity.appealStatus ?? ''), // [15] appealStatus
+      this.str(entity.appealResolvedAt ?? ''), // [16] appealResolvedAt
+      this.str(entity.appealResolvedBy ?? ''), // [17] appealResolvedBy
+      this.str(entity.appealResolutionNote ?? ''), // [18] appealResolutionNote
+      entity.appealScoreAdjusted ?? '', // [19] appealScoreAdjusted
     ];
   }
 
   private parseScoreResult(value: string): ScoreResult {
     const valid: ScoreResult[] = ['PASS', 'FAIL', 'PENDING'];
     return valid.includes(value as ScoreResult) ? (value as ScoreResult) : 'PENDING';
+  }
+
+  private parseAppealStatus(value: string | undefined): ScoreAppealStatus | undefined {
+    if (!value) return undefined;
+    return value === 'PENDING' || value === 'RESOLVED' ? value : undefined;
   }
 }

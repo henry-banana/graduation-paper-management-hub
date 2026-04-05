@@ -65,6 +65,17 @@ interface ScoreSummaryDto {
   finalScore: number;
   result: "PASS" | "FAIL";
   published: boolean;
+  rubricDocxLink?: string;
+  appeal?: {
+    requestedAt?: string;
+    requestedBy?: string;
+    reason?: string;
+    status?: "PENDING" | "RESOLVED";
+    resolvedAt?: string;
+    resolvedBy?: string;
+    resolutionNote?: string;
+    scoreAdjusted?: boolean;
+  };
 }
 
 interface ScheduleDto {
@@ -464,6 +475,9 @@ export default function StudentTopicDetailPage() {
   const [submissions, setSubmissions] = useState<SubmissionDto[]>([]);
   const [activeRevisionRound, setActiveRevisionRound] = useState<RevisionRoundDto | null>(null);
   const [summary, setSummary] = useState<ScoreSummaryDto | null>(null);
+  const [appealReason, setAppealReason] = useState("");
+  const [isSubmittingAppeal, setIsSubmittingAppeal] = useState(false);
+  const [appealFeedback, setAppealFeedback] = useState<string | null>(null);
   const [schedule, setSchedule] = useState<ScheduleDto | null>(null);
   const [notifications, setNotifications] = useState<NotificationDto[]>([]);
   const [supervisors, setSupervisors] = useState<SupervisorOptionDto[]>([]);
@@ -674,6 +688,48 @@ export default function StudentTopicDetailPage() {
   };
 
   const [isSubmittingToGv, setIsSubmittingToGv] = useState(false);
+
+  const canRequestAppeal =
+    topic?.type === "BCTT" &&
+    Boolean(summary?.published) &&
+    !summary?.appeal?.requestedAt;
+
+  const handleSubmitAppeal = async () => {
+    if (!topic || !canRequestAppeal) {
+      return;
+    }
+
+    const reason = appealReason.trim();
+    if (reason.length < 10) {
+      setAppealFeedback("Vui lòng nhập lý do phúc khảo tối thiểu 10 ký tự.");
+      return;
+    }
+
+    setAppealFeedback(null);
+    setIsSubmittingAppeal(true);
+
+    try {
+      await api.post<ApiResponse<{ status: "PENDING"; requestedAt: string }>>(
+        `/topics/${topic.id}/scores/appeal`,
+        { reason },
+      );
+
+      const refreshed = await api.get<ApiResponse<ScoreSummaryDto>>(
+        `/topics/${topic.id}/scores/summary`,
+      );
+      setSummary(refreshed.data);
+      setAppealReason("");
+      setAppealFeedback("Đã gửi yêu cầu phúc khảo. GVHD sẽ xử lý sớm.");
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : "Không thể gửi phúc khảo.";
+      setAppealFeedback(message);
+    } finally {
+      setIsSubmittingAppeal(false);
+    }
+  };
 
   const handleSubmitToGv = async () => {
     if (!topic || !confirm("Xác nhận gửi đề tài đến GVHD để chờ duyệt?")) return;
@@ -935,6 +991,72 @@ export default function StudentTopicDetailPage() {
             )}
             {scoreError && (
               <div className="px-4 pb-4 text-xs text-outline">{scoreError}</div>
+            )}
+            {topic.type === "BCTT" && summary && (
+              <div className="px-4 pb-4 pt-1 border-t border-outline-variant/10 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-outline uppercase tracking-wider">
+                    Phiếu chấm
+                  </span>
+                  {summary.rubricDocxLink ? (
+                    <a
+                      href={summary.rubricDocxLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-semibold text-primary hover:underline"
+                    >
+                      Mở DOCX
+                    </a>
+                  ) : (
+                    <span className="text-[11px] text-outline">Chưa có file</span>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-outline uppercase tracking-wider">
+                    Phúc khảo điểm (1 lần)
+                  </p>
+
+                  {summary.appeal?.requestedAt ? (
+                    <div className="text-xs text-on-surface-variant space-y-1">
+                      <p>
+                        Trạng thái:{" "}
+                        <strong>
+                          {summary.appeal.status === "RESOLVED"
+                            ? "Đã xử lý"
+                            : "Đang chờ xử lý"}
+                        </strong>
+                      </p>
+                      {summary.appeal.reason && <p>Lý do: {summary.appeal.reason}</p>}
+                      {summary.appeal.resolutionNote && (
+                        <p>Phản hồi: {summary.appeal.resolutionNote}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <textarea
+                        rows={3}
+                        value={appealReason}
+                        onChange={(event) => setAppealReason(event.target.value)}
+                        placeholder="Nêu lý do phúc khảo..."
+                        className="w-full px-2.5 py-2 rounded-xl border border-outline-variant/20 bg-surface-container text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleSubmitAppeal()}
+                        disabled={isSubmittingAppeal}
+                        className="w-full px-3 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+                      >
+                        {isSubmittingAppeal ? "Đang gửi..." : "Gửi phúc khảo"}
+                      </button>
+                    </div>
+                  )}
+
+                  {appealFeedback && (
+                    <p className="text-[11px] text-outline">{appealFeedback}</p>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 

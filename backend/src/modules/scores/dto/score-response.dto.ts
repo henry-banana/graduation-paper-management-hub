@@ -4,6 +4,7 @@ import {
   SCORE_SCORER_ROLES,
   SCORE_STATUSES,
 } from '../scores.constants';
+import { ScoreAppealInfoDto } from './score-appeal.dto';
 
 export type ScorerRole = (typeof SCORE_SCORER_ROLES)[number];
 export type ScoreStatus = (typeof SCORE_STATUSES)[number];
@@ -117,6 +118,18 @@ export class ScoreSummaryDto {
     example: false,
   })
   published!: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Link DOCX phiếu chấm BCTT đã xuất gần nhất',
+    example: 'https://drive.google.com/file/d/abc123/view',
+  })
+  rubricDocxLink?: string;
+
+  @ApiPropertyOptional({
+    description: 'Thông tin phúc khảo điểm (BCTT)',
+    type: ScoreAppealInfoDto,
+  })
+  appeal?: ScoreAppealInfoDto;
 }
 
 export class DraftScoreResponseDto {

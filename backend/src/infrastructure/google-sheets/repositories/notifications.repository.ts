@@ -59,6 +59,8 @@ export class NotificationsRepository extends SheetsBaseRepository<NotificationRe
       'SUBMISSION_CONFIRMED',
       'SCORE_SUBMITTED',
       'SCORE_PUBLISHED',
+      'SCORE_APPEAL_REQUESTED',
+      'SCORE_APPEAL_RESOLVED',
       'ASSIGNMENT_ADDED',
       'SYSTEM',
       'GENERAL',

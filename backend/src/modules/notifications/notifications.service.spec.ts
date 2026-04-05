@@ -1,11 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
+  BadRequestException,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
 import { NotificationsService, NotificationRecord } from './notifications.service';
 import { AuthUser } from '../../common/types';
-import { NotificationsRepository } from '../../infrastructure/google-sheets';
+import {
+  AssignmentsRepository,
+  NotificationsRepository,
+  TopicsRepository,
+  UsersRepository,
+} from '../../infrastructure/google-sheets';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
@@ -27,6 +33,18 @@ describe('NotificationsService', () => {
     userId: 'USR_OTHER',
     email: 'other@hcmute.edu.vn',
     role: 'STUDENT',
+  };
+
+  const tbmUser: AuthUser = {
+    userId: 'USR_TBM',
+    email: 'tbm@hcmute.edu.vn',
+    role: 'TBM',
+  };
+
+  const reviewerUser: AuthUser = {
+    userId: 'USR_GVPB',
+    email: 'reviewer@hcmute.edu.vn',
+    role: 'LECTURER',
   };
 
   beforeEach(async () => {
@@ -67,6 +85,70 @@ describe('NotificationsService', () => {
       },
     ];
 
+    const usersStore: any[] = [
+      {
+        id: 'USR001',
+        email: 'student@hcmute.edu.vn',
+        name: 'Student 1',
+        role: 'STUDENT',
+        isActive: true,
+      },
+      {
+        id: 'USR002',
+        email: 'lecturer@hcmute.edu.vn',
+        name: 'Lecturer 1',
+        role: 'LECTURER',
+        isActive: true,
+      },
+      {
+        id: 'USR_GVPB',
+        email: 'reviewer@hcmute.edu.vn',
+        name: 'Reviewer 1',
+        role: 'LECTURER',
+        isActive: true,
+      },
+      {
+        id: 'USR_TBM',
+        email: 'tbm@hcmute.edu.vn',
+        name: 'TBM User',
+        role: 'TBM',
+        isActive: true,
+      },
+      {
+        id: 'USR_OTHER',
+        email: 'other@hcmute.edu.vn',
+        name: 'Other User',
+        role: 'STUDENT',
+        isActive: true,
+      },
+    ];
+
+    const topicsStore: any[] = [
+      {
+        id: 'tp_001',
+        periodId: 'prd_001',
+        type: 'KLTN',
+        title: 'Topic 1',
+        domain: 'AI',
+        studentUserId: 'USR001',
+        supervisorUserId: 'USR002',
+        state: 'IN_PROGRESS',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+
+    const assignmentsStore: any[] = [
+      {
+        id: 'asg_001',
+        topicId: 'tp_001',
+        userId: 'USR_GVPB',
+        topicRole: 'GVPB',
+        status: 'ACTIVE',
+        assignedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+
     const notificationsRepository = {
       findAll: jest.fn(async () => [...notificationsStore]),
       findById: jest.fn(
@@ -84,10 +166,27 @@ describe('NotificationsService', () => {
       }),
     };
 
+    const usersRepository = {
+      findById: jest.fn(async (id: string) => usersStore.find((user) => user.id === id) ?? null),
+    };
+
+    const topicsRepository = {
+      findById: jest.fn(async (id: string) => topicsStore.find((topic) => topic.id === id) ?? null),
+    };
+
+    const assignmentsRepository = {
+      findByTopicId: jest.fn(
+        async (topicId: string) => assignmentsStore.filter((assignment) => assignment.topicId === topicId),
+      ),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationsService,
         { provide: NotificationsRepository, useValue: notificationsRepository },
+        { provide: UsersRepository, useValue: usersRepository },
+        { provide: TopicsRepository, useValue: topicsRepository },
+        { provide: AssignmentsRepository, useValue: assignmentsRepository },
       ],
     }).compile();
 
@@ -227,6 +326,93 @@ describe('NotificationsService', () => {
       expect(result.title).toBe('Đề tài đã được duyệt');
       expect(result.deepLink).toContain('tp_new');
       expect(result.isRead).toBe(false);
+    });
+  });
+
+  describe('sendPersonal', () => {
+    it('should allow TBM to send personal notification without topic', async () => {
+      const result = await service.sendPersonal(
+        {
+          receiverUserId: 'USR001',
+          body: 'Thông báo từ TBM',
+        },
+        tbmUser,
+      );
+
+      expect(result.receiverUserId).toBe('USR001');
+      expect(result.scope).toBe('PERSONAL');
+      expect(result.deepLink).toBe('/notifications');
+    });
+
+    it('should allow lecturer topic participant to send to another topic participant', async () => {
+      const result = await service.sendPersonal(
+        {
+          receiverUserId: 'USR001',
+          topicId: 'tp_001',
+          body: 'Nhắc cập nhật báo cáo',
+          deepLink: '/gvhd/topics/tp_001',
+        },
+        lecturerUser,
+      );
+
+      expect(result.receiverUserId).toBe('USR001');
+      expect(result.topicId).toBe('tp_001');
+      expect(result.deepLink).toBe('/gvhd/topics/tp_001');
+    });
+
+    it('should reject lecturer personal send without topicId', async () => {
+      await expect(
+        service.sendPersonal(
+          {
+            receiverUserId: 'USR001',
+            body: 'Thiếu topicId',
+          },
+          lecturerUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject when receiver is not found', async () => {
+      await expect(
+        service.sendPersonal(
+          {
+            receiverUserId: 'USR_NOT_FOUND',
+            topicId: 'tp_001',
+            body: 'Không tìm thấy người nhận',
+          },
+          lecturerUser,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should reject when sender is not topic participant', async () => {
+      await expect(
+        service.sendPersonal(
+          {
+            receiverUserId: 'USR001',
+            topicId: 'tp_001',
+            body: 'Người gửi không thuộc đề tài',
+          },
+          {
+            userId: 'USR_OTHER',
+            email: 'other@hcmute.edu.vn',
+            role: 'LECTURER',
+          },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should reject when receiver is not topic participant', async () => {
+      await expect(
+        service.sendPersonal(
+          {
+            receiverUserId: 'USR_OTHER',
+            topicId: 'tp_001',
+            body: 'Người nhận không thuộc đề tài',
+          },
+          reviewerUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 

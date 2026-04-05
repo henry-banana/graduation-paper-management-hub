@@ -14,6 +14,10 @@ import {
   DraftScoreResponseDto,
   SubmitScoreResponseDto,
   ConfirmScoreResponseDto,
+  RequestScoreAppealResponseDto,
+  ResolveScoreAppealResponseDto,
+  ScoreAppealInfoDto,
+  ScoreAppealStatus,
   ScorerRole,
   ScoreStatus,
   ScoreResult,
@@ -28,6 +32,7 @@ import {
 import { ConfirmScoreRole, SummaryRequestRole } from './dto/submit-score.dto';
 import {
   AssignmentsRepository,
+  ExportFilesRepository,
   ScoreSummariesRepository,
   ScoresRepository,
   TopicsRepository,
@@ -70,6 +75,14 @@ export interface ScoreSummaryRecord {
   published: boolean;
   updatedAt?: string;           // DB-03: col K in ScoreSummaries sheet
   councilComments?: string;    // Góp ý bổ sung của hội đồng (do Thư ký nhập)
+  appealRequestedAt?: string;
+  appealRequestedBy?: string;
+  appealReason?: string;
+  appealStatus?: ScoreAppealStatus;
+  appealResolvedAt?: string;
+  appealResolvedBy?: string;
+  appealResolutionNote?: string;
+  appealScoreAdjusted?: boolean;
 }
 
 
@@ -84,6 +97,8 @@ export class ScoresService {
     private readonly topicsRepository: TopicsRepository,
     private readonly assignmentsRepository: AssignmentsRepository,
     private readonly usersRepository: UsersRepository,
+    @Optional()
+    private readonly exportFilesRepository?: ExportFilesRepository,
     @Optional()
     private readonly notificationsService?: NotificationsService,
     @Optional()
@@ -105,6 +120,67 @@ export class ScoresService {
     }
 
     return topic;
+  }
+
+  private toAppealInfo(summary?: ScoreSummaryRecord): ScoreAppealInfoDto | undefined {
+    if (!summary?.appealRequestedAt) {
+      return undefined;
+    }
+
+    return {
+      requestedAt: summary.appealRequestedAt,
+      requestedBy: summary.appealRequestedBy,
+      reason: summary.appealReason,
+      status: summary.appealStatus ?? 'PENDING',
+      resolvedAt: summary.appealResolvedAt,
+      resolvedBy: summary.appealResolvedBy,
+      resolutionNote: summary.appealResolutionNote,
+      scoreAdjusted: summary.appealScoreAdjusted,
+    };
+  }
+
+  private isPendingAppeal(summary?: ScoreSummaryRecord): boolean {
+    return summary?.appealStatus === 'PENDING';
+  }
+
+  private async getRubricDocxLink(topicId: string): Promise<string | undefined> {
+    if (!this.exportFilesRepository) {
+      return undefined;
+    }
+
+    const exports = await this.exportFilesRepository.findWhere(
+      (record) =>
+        record.topicId === topicId &&
+        record.exportType === 'RUBRIC_BCTT' &&
+        record.status === 'COMPLETED',
+    );
+
+    if (exports.length === 0) {
+      return undefined;
+    }
+
+    const latest = exports.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )[0];
+
+    return latest.driveLink ?? latest.downloadUrl ?? undefined;
+  }
+
+  private async attachStudentFacingFields(
+    base: ScoreSummaryDto,
+    topic: TopicRecord,
+    summaryRecord?: ScoreSummaryRecord,
+  ): Promise<ScoreSummaryDto> {
+    if (topic.type !== 'BCTT') {
+      return base;
+    }
+
+    return {
+      ...base,
+      rubricDocxLink: await this.getRubricDocxLink(topic.id),
+      appeal: this.toAppealInfo(summaryRecord),
+    };
   }
 
   /**
@@ -240,8 +316,7 @@ export class ScoresService {
     topic: TopicRecord,
     score: ScoreRecord,
   ): Promise<{ editable: boolean; reason?: string }> {
-    // Scope-limited behavior: only GVHD scores for KLTN can be edited after submit.
-    if (topic.type !== 'KLTN' || score.scorerRole !== 'GVHD') {
+    if (score.scorerRole !== 'GVHD') {
       return {
         editable: false,
         reason: 'Submitted score is immutable for this role/topic',
@@ -251,6 +326,26 @@ export class ScoresService {
     const summary = await this.scoreSummariesRepository.findFirst(
       (s) => s.topicId === topic.id,
     );
+
+    // BCTT: GVHD can only edit submitted score when there is a pending appeal.
+    if (topic.type === 'BCTT') {
+      if (this.isPendingAppeal(summary ?? undefined)) {
+        return { editable: true };
+      }
+
+      return {
+        editable: false,
+        reason: 'Submitted score is immutable unless there is a pending appeal',
+      };
+    }
+
+    // KLTN: existing editable window before final confirmations/publication.
+    if (topic.type !== 'KLTN') {
+      return {
+        editable: false,
+        reason: 'Submitted score is immutable for this role/topic',
+      };
+    }
 
     if (!summary) {
       return { editable: true };
@@ -317,6 +412,149 @@ export class ScoresService {
     }
 
     await this.scoreSummariesRepository.update(existingSummary.id, nextSummary);
+  }
+
+  private async completeTopicIfNeeded(topic: TopicRecord): Promise<void> {
+    if (topic.state === 'COMPLETED') {
+      return;
+    }
+
+    // Appeal flow is currently scoped to BCTT and completes from scoring states.
+    if (topic.type !== 'BCTT') {
+      return;
+    }
+
+    const completableStates = new Set(['GRADING', 'SCORING']);
+    if (!completableStates.has(topic.state)) {
+      return;
+    }
+
+    const nextTopic: TopicRecord = {
+      ...topic,
+      state: 'COMPLETED',
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.topicsRepository.update(topic.id, nextTopic);
+  }
+
+  async requestAppeal(
+    topicId: string,
+    reason: string,
+    user: AuthUser,
+  ): Promise<RequestScoreAppealResponseDto> {
+    const topic = await this.getTopicOrThrow(topicId);
+
+    if (topic.type !== 'BCTT') {
+      throw new ConflictException('Appeal is only available for BCTT topics');
+    }
+
+    if (user.role !== 'STUDENT' || topic.studentUserId !== user.userId) {
+      throw new ForbiddenException('Only the owning student can request appeal');
+    }
+
+    const summary = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topic.id,
+    );
+
+    if (!summary?.published) {
+      throw new ConflictException('Score must be published before requesting appeal');
+    }
+
+    if (summary.appealRequestedAt) {
+      throw new ConflictException('Appeal can only be requested once');
+    }
+
+    const normalizedReason = reason.trim();
+    if (normalizedReason.length < 10) {
+      throw new BadRequestException('Appeal reason must be at least 10 characters');
+    }
+
+    const requestedAt = new Date().toISOString();
+    const nextSummary: ScoreSummaryRecord = {
+      ...summary,
+      appealRequestedAt: requestedAt,
+      appealRequestedBy: user.userId,
+      appealReason: normalizedReason,
+      appealStatus: 'PENDING',
+      appealResolvedAt: undefined,
+      appealResolvedBy: undefined,
+      appealResolutionNote: undefined,
+      appealScoreAdjusted: undefined,
+    };
+
+    await this.scoreSummariesRepository.update(summary.id, nextSummary);
+
+    await this.notifyIfAvailable({
+      receiverUserId: topic.supervisorUserId,
+      type: 'SCORE_APPEAL_REQUESTED',
+      topicId: topic.id,
+      context: {
+        topicTitle: topic.title,
+      },
+    });
+
+    return {
+      status: 'PENDING',
+      requestedAt,
+    };
+  }
+
+  async resolveAppeal(
+    topicId: string,
+    user: AuthUser,
+    resolutionNote?: string,
+  ): Promise<ResolveScoreAppealResponseDto> {
+    const topic = await this.getTopicOrThrow(topicId);
+
+    if (topic.type !== 'BCTT') {
+      throw new ConflictException('Appeal is only available for BCTT topics');
+    }
+
+    if (user.role !== 'LECTURER') {
+      throw new ForbiddenException('Only GVHD can resolve appeals');
+    }
+
+    if (!(await this.hasAssignment(topic.id, user.userId, 'GVHD'))) {
+      throw new ForbiddenException('Only assigned GVHD can resolve appeals');
+    }
+
+    const summary = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topic.id,
+    );
+
+    if (!summary || !this.isPendingAppeal(summary)) {
+      throw new ConflictException('No pending appeal to resolve');
+    }
+
+    const resolvedAt = new Date().toISOString();
+    const nextSummary: ScoreSummaryRecord = {
+      ...summary,
+      appealStatus: 'RESOLVED',
+      appealResolvedAt: resolvedAt,
+      appealResolvedBy: user.userId,
+      appealResolutionNote:
+        resolutionNote?.trim() || 'Đã rà soát lại và giữ nguyên điểm.',
+      appealScoreAdjusted: false,
+    };
+
+    await this.scoreSummariesRepository.update(summary.id, nextSummary);
+    await this.completeTopicIfNeeded(topic);
+
+    await this.notifyIfAvailable({
+      receiverUserId: topic.studentUserId,
+      type: 'SCORE_APPEAL_RESOLVED',
+      topicId: topic.id,
+      context: {
+        topicTitle: topic.title,
+      },
+    });
+
+    return {
+      status: 'RESOLVED',
+      resolvedAt,
+      scoreAdjusted: false,
+    };
   }
 
   /**
@@ -542,13 +780,18 @@ export class ScoresService {
         throw new ForbiddenException('Score summary not yet published');
       }
 
-      return {
+      const baseSummary: ScoreSummaryDto = {
+        gvhdScore: existing.gvhdScore,
+        gvpbScore: existing.gvpbScore,
+        councilAvgScore: existing.councilAvgScore,
         finalScore: existing.finalScore,
         result: existing.result,
         confirmedByGvhd: existing.confirmedByGvhd,
         confirmedByCtHd: existing.confirmedByCtHd,
         published: existing.published,
       };
+
+      return this.attachStudentFacingFields(baseSummary, topic, existing);
     }
 
     if (user.role === 'TBM') {
@@ -556,7 +799,11 @@ export class ScoresService {
         throw new ForbiddenException('requestedByRole does not match current user');
       }
 
-      return await this.calculateSummary(topicId, topic);
+      const calculated = await this.calculateSummary(topicId, topic);
+      const existing = await this.scoreSummariesRepository.findFirst(
+        (s) => s.topicId === topicId,
+      );
+      return this.attachStudentFacingFields(calculated, topic, existing ?? undefined);
     }
 
     if (user.role !== 'LECTURER') {
@@ -577,7 +824,11 @@ export class ScoresService {
       throw new ForbiddenException('Cannot view score summary for this topic');
     }
 
-    return await this.calculateSummary(topicId, topic);
+    const calculated = await this.calculateSummary(topicId, topic);
+    const existing = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topicId,
+    );
+    return this.attachStudentFacingFields(calculated, topic, existing ?? undefined);
   }
 
   /**
@@ -825,13 +1076,57 @@ export class ScoresService {
         );
       }
 
+      const summaryBeforeUpdate = await this.scoreSummariesRepository.findFirst(
+        (s) => s.topicId === topicId,
+      );
+      const hadPendingAppeal = this.isPendingAppeal(summaryBeforeUpdate ?? undefined);
+      const previousFinalScore = summaryBeforeUpdate?.finalScore;
+
       submittedScore.rubricData = rubricData;
       submittedScore.totalScore = totalScore;
       submittedScore.questions = questions;
       submittedScore.updatedAt = new Date().toISOString();
       await this.scoresRepository.update(submittedScore.id, submittedScore);
 
-      await this.refreshSummaryAfterSubmittedScoreChange(topicId, topic);
+      if (topic.type === 'BCTT' && hadPendingAppeal && summaryBeforeUpdate) {
+        const recalculated = await this.calculateSummary(topicId, topic);
+        const resolvedAt = new Date().toISOString();
+        const scoreAdjusted =
+          previousFinalScore === undefined
+            ? true
+            : Math.abs(recalculated.finalScore - previousFinalScore) > 0.0001;
+
+        const nextSummary: ScoreSummaryRecord = {
+          ...summaryBeforeUpdate,
+          gvhdScore: recalculated.gvhdScore,
+          gvpbScore: recalculated.gvpbScore,
+          councilAvgScore: recalculated.councilAvgScore,
+          finalScore: recalculated.finalScore,
+          result: recalculated.result,
+          // Keep published state so student can see updated final score immediately.
+          appealStatus: 'RESOLVED',
+          appealResolvedAt: resolvedAt,
+          appealResolvedBy: user.userId,
+          appealResolutionNote: scoreAdjusted
+            ? 'GVHD đã điều chỉnh điểm sau khi phúc khảo.'
+            : 'GVHD đã rà soát lại và giữ nguyên điểm.',
+          appealScoreAdjusted: scoreAdjusted,
+        };
+
+        await this.scoreSummariesRepository.update(summaryBeforeUpdate.id, nextSummary);
+        await this.completeTopicIfNeeded(topic);
+
+        await this.notifyIfAvailable({
+          receiverUserId: topic.studentUserId,
+          type: 'SCORE_APPEAL_RESOLVED',
+          topicId: topic.id,
+          context: {
+            topicTitle: topic.title,
+          },
+        });
+      } else {
+        await this.refreshSummaryAfterSubmittedScoreChange(topicId, topic);
+      }
 
       await this.auditIfAvailable({
         action: 'SCORE_SUBMITTED',
@@ -1029,7 +1324,7 @@ export class ScoresService {
 
   private async notifyIfAvailable(params: {
     receiverUserId: string;
-    type: 'SCORE_PUBLISHED';
+    type: 'SCORE_PUBLISHED' | 'SCORE_APPEAL_REQUESTED' | 'SCORE_APPEAL_RESOLVED';
     context: Record<string, string>;
     topicId?: string;
   }): Promise<void> {

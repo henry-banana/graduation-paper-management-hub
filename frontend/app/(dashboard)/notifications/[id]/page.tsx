@@ -14,7 +14,8 @@ import {
   Clock,
 } from "lucide-react";
 import { ApiResponse, api } from "@/lib/api";
-import { resolveStudentNotificationLink } from "@/lib/notifications";
+import { resolveStaffNotificationLink } from "@/lib/notifications";
+import { getCurrentUiRole, UiRole } from "@/lib/auth/session";
 
 interface NotificationDto {
   id: string;
@@ -111,9 +112,16 @@ function formatDateTime(value: string): string {
   return date.toLocaleString("vi-VN", { hour12: false });
 }
 
-function resolveTopicLink(notification: NotificationDto): string | null {
-  const resolved = resolveStudentNotificationLink(notification);
-  if (!resolved || resolved === "/student/notifications") {
+function resolveTopicLink(
+  notification: NotificationDto,
+  uiRole: UiRole | null,
+): string | null {
+  if (!uiRole) {
+    return null;
+  }
+
+  const resolved = resolveStaffNotificationLink(notification, uiRole);
+  if (!resolved || resolved === "/notifications") {
     return null;
   }
 
@@ -128,6 +136,11 @@ export default function NotificationDetailPage() {
   const [notification, setNotification] = useState<NotificationDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [uiRole, setUiRole] = useState<UiRole | null>(null);
+
+  useEffect(() => {
+    setUiRole(getCurrentUiRole());
+  }, []);
 
   useEffect(() => {
     if (!notifId) return;
@@ -142,7 +155,6 @@ export default function NotificationDetailPage() {
         );
         setNotification(res.data);
 
-        // Mark as read silently
         if (!res.data.isRead) {
           void api
             .patch<ApiResponse<{ updated: boolean }>>(
@@ -182,7 +194,7 @@ export default function NotificationDetailPage() {
     return (
       <div className="max-w-2xl mx-auto space-y-4">
         <Link
-          href="/student/notifications"
+          href="/notifications"
           className="inline-flex items-center gap-1.5 text-sm font-semibold text-outline hover:text-primary transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> Quay lại Thông báo
@@ -200,25 +212,22 @@ export default function NotificationDetailPage() {
   const uiType = mapTypeToUi(notification.type);
   const cfg = TYPE_CONFIG[uiType];
   const Icon = cfg.icon;
-  const topicLink = resolveTopicLink(notification);
+  const topicLink = resolveTopicLink(notification, uiRole);
   const typeLabel =
     NOTIFICATION_TYPE_LABELS[notification.type] ?? NOTIFICATION_TYPE_LABELS["SYSTEM"];
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 pb-24">
-      {/* Back */}
       <Link
-        href="/student/notifications"
+        href="/notifications"
         className="inline-flex items-center gap-1.5 text-sm font-semibold text-outline hover:text-primary transition-colors"
       >
         <ArrowLeft className="w-4 h-4" /> Quay lại Thông báo
       </Link>
 
-      {/* Main Card */}
       <div
         className={`rounded-3xl border overflow-hidden shadow-sm ${cfg.border} ${cfg.bg}`}
       >
-        {/* Header */}
         <div className={`px-8 py-6 border-b ${cfg.border}`}>
           <div className="flex items-start gap-4">
             <div
@@ -247,7 +256,6 @@ export default function NotificationDetailPage() {
           </div>
         </div>
 
-        {/* Body */}
         <div className="px-8 py-6 bg-surface-container-lowest">
           {notification.body ? (
             <p className="text-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap">
@@ -260,8 +268,9 @@ export default function NotificationDetailPage() {
           )}
         </div>
 
-        {/* Footer metadata */}
-        <div className={`px-8 py-4 border-t ${cfg.border} bg-white/30 flex items-center gap-6 flex-wrap text-xs text-outline`}>
+        <div
+          className={`px-8 py-4 border-t ${cfg.border} bg-white/30 flex items-center gap-6 flex-wrap text-xs text-outline`}
+        >
           <span className="flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5" />
             {formatDateTime(notification.createdAt)}
@@ -279,7 +288,6 @@ export default function NotificationDetailPage() {
         </div>
       </div>
 
-      {/* CTA: Go to related topic */}
       {topicLink && (
         <Link
           href={topicLink}
@@ -287,17 +295,16 @@ export default function NotificationDetailPage() {
         >
           <div>
             <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors">
-              Xem đề tài liên quan
+              Xem nội dung liên quan
             </p>
             <p className="text-xs text-outline mt-0.5">
-              Nhấn để mở trang chi tiết đề tài
+              Nhấn để mở trang liên quan từ thông báo
             </p>
           </div>
           <ExternalLink className="w-4 h-4 text-outline group-hover:text-primary transition-colors flex-shrink-0" />
         </Link>
       )}
 
-      {/* Action: Back */}
       <button
         type="button"
         onClick={() => router.back()}

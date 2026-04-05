@@ -33,6 +33,7 @@ describe('NotificationsController', () => {
       markRead: jest.fn(),
       markBulkRead: jest.fn(),
       getUnreadCount: jest.fn(),
+      sendPersonal: jest.fn(),
       mapToDto: jest.fn((record: NotificationRecord) => ({
         id: record.id,
         receiverUserId: record.receiverUserId,
@@ -132,6 +133,31 @@ describe('NotificationsController', () => {
 
       expect(result.data.updatedCount).toBe(2);
       expect(result.meta.requestId).toBeDefined();
+    });
+  });
+
+  describe('sendPersonal', () => {
+    it('should send personal notification and return dto payload', async () => {
+      notificationsService.sendPersonal.mockResolvedValue(mockNotification);
+
+      const result = await controller.sendPersonal(
+        {
+          receiverUserId: 'USR001',
+          topicId: 'tp_001',
+          body: 'Nhắc việc cập nhật báo cáo',
+          type: 'GENERAL',
+          deepLink: '/gvhd/topics/tp_001',
+        },
+        {
+          userId: 'USR002',
+          email: 'lecturer@hcmute.edu.vn',
+          role: 'LECTURER',
+        },
+      );
+
+      expect(result.data.id).toBe('nt_001');
+      expect(result.meta.requestId).toBeDefined();
+      expect(notificationsService.sendPersonal).toHaveBeenCalled();
     });
   });
 });
