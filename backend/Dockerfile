@@ -74,4 +74,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:${PORT}/api/v1/health || exit 1
 
 # Start application
-CMD ["node", "dist/src/main.js"]
+CMD ["sh", "-c", "if [ -f /app/dist/main.js ]; then exec node /app/dist/main.js; elif [ -f /app/dist/src/main.js ]; then exec node /app/dist/src/main.js; else echo 'ERROR: Cannot find NestJS entrypoint in /app/dist'; ls -la /app/dist || true; exit 1; fi"]
