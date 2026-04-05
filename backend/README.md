@@ -50,11 +50,12 @@ In Google Cloud Console, add exactly the same callback URL to Authorized redirec
 
 ## Seed Sample Data
 
-`npm run seed:sheets` upserts canonical sample rows into Google Sheets tabs used by the system
+`npm run seed:sheets` seeds canonical sample rows into Google Sheets tabs used by the system
 (for example: `Data`, `Dot`, `Trangthaidetai`, `Điểm`, `TenDetai`, `Topics`, `RevisionRounds`,
 `ScoreSummaries`, `Notifications`, ...).
 
-This script does not hard-delete existing rows. It appends/upserts according to script logic.
+This script clears existing data rows on app-managed tabs and reseeds from scratch (idempotent for dev/staging).
+Teacher-managed reference tabs (`Quota`, `Major`) are preserved.
 
 `npm run seed:sheets:validate` runs read-only validation (schema + row counts) and fails closed if
 header/structure mismatches are detected.
@@ -84,10 +85,10 @@ Recommended reseed/rollback safety flow:
 4. If rollback needed: `npm run seed:sheets:rollback -- --file <pre-change-snapshot.json>`
 5. Export snapshot again and compare key row counts pre/post rollback
 
-Sample seeded score IDs for rubric export smoke tests:
+Sample seeded IDs for rubric export smoke tests:
 
-- BCTT: topic `tp_002`, score `sc_006` (role `GVHD`)
-- KLTN: topic `tp_001`, score `sc_001` (GVHD), `sc_002` (GVPB), `sc_003` (TV_HD)
+- BCTT: topic `topic-bctt-done`, score `score-bctt-done-gvhd` (role `GVHD`)
+- KLTN: topic `topic-kltn-demo`, score `score-kltn-gvhd` (GVHD), `score-kltn-gvpb` (GVPB)
 
 ## DOCX Template Files
 
@@ -123,15 +124,15 @@ curl -s -H "Authorization: Bearer <JWT>" \
 curl -s -X POST \
 	-H "Authorization: Bearer <JWT_LECTURER_OR_TBM>" \
 	-H "Content-Type: application/json" \
-	-d '{"scoreId":"sc_006"}' \
-	"http://localhost:3001/api/v1/exports/rubric/bctt/tp_002"
+	-d '{"scoreId":"score-bctt-done-gvhd"}' \
+	"http://localhost:3001/api/v1/exports/rubric/bctt/topic-bctt-done"
 
 # KLTN rubric export by role (GVHD/GVPB/TV_HD)
 curl -s -X POST \
 	-H "Authorization: Bearer <JWT_LECTURER_OR_TBM>" \
 	-H "Content-Type: application/json" \
-	-d '{"scoreId":"sc_002"}' \
-	"http://localhost:3001/api/v1/exports/rubric/kltn/tp_001/GVPB"
+	-d '{"scoreId":"score-kltn-gvpb"}' \
+	"http://localhost:3001/api/v1/exports/rubric/kltn/topic-kltn-demo/GVPB"
 ```
 
 Run full API sweep (auto-start backend if needed, then write result JSON):

@@ -1,13 +1,52 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { UsersService, UserRecord } from '../../src/modules/users/users.service';
+import { UsersRepository } from '../../src/infrastructure/google-sheets';
 
 describe('UsersService', () => {
   let usersService: UsersService;
   let cacheManager: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
+  let usersStore: UserRecord[];
 
   beforeEach(async () => {
     cacheManager = { get: jest.fn(), set: jest.fn(), del: jest.fn() };
+    usersStore = [
+      {
+        id: 'USR001',
+        email: 'student@hcmute.edu.vn',
+        name: 'Student User',
+        role: 'STUDENT',
+        studentId: '20110001',
+      },
+      {
+        id: 'USR002',
+        email: 'lecturer@hcmute.edu.vn',
+        name: 'Lecturer User',
+        role: 'LECTURER',
+        lecturerId: 'GV001',
+      },
+      {
+        id: 'USR003',
+        email: 'tbm@hcmute.edu.vn',
+        name: 'TBM User',
+        role: 'TBM',
+      },
+    ];
+
+    const usersRepository = {
+      findAll: jest.fn(async () => [...usersStore]),
+      findById: jest.fn(async (id: string) => usersStore.find((u) => u.id === id) ?? null),
+      findFirst: jest.fn(
+        async (predicate: (record: UserRecord) => boolean) =>
+          usersStore.find((record) => predicate(record)) ?? null,
+      ),
+      update: jest.fn(async (id: string, record: UserRecord) => {
+        const index = usersStore.findIndex((user) => user.id === id);
+        if (index >= 0) {
+          usersStore[index] = { ...record };
+        }
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -15,6 +54,10 @@ describe('UsersService', () => {
         {
           provide: CACHE_MANAGER,
           useValue: cacheManager,
+        },
+        {
+          provide: UsersRepository,
+          useValue: usersRepository,
         },
       ],
     }).compile();

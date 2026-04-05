@@ -11,6 +11,7 @@ import type { ExportStatus, ExportType } from '../../../modules/exports/dto/expo
  * [2]=id [3]=topicId [4]=exportType [5]=status [6]=driveFileId
  * [7]=driveLink [8]=downloadUrl [9]=fileName [10]=mimeType
  * [11]=errorMessage [12]=requestedBy [13]=createdAt [14]=completedAt
+ * [15]=expiresAt [16]=dedupKey (app-only)
  */
 @Injectable()
 export class ExportFilesRepository extends SheetsBaseRepository<ExportRecord> {
@@ -49,6 +50,8 @@ export class ExportFilesRepository extends SheetsBaseRepository<ExportRecord> {
       requestedBy: this.str(v[12]),
       createdAt: this.str(v[13]),
       completedAt: this.optionalStr(v[14]),
+      expiresAt: this.optionalStr(v[15]),
+      dedupKey: this.optionalStr(v[16]),
     };
   }
 
@@ -69,6 +72,8 @@ export class ExportFilesRepository extends SheetsBaseRepository<ExportRecord> {
       this.str(entity.requestedBy),              // M: requestedBy
       this.str(entity.createdAt),                // N: createdAt
       this.str(entity.completedAt ?? ''),        // O: completedAt
+      this.str(entity.expiresAt ?? ''),          // P: expiresAt
+      this.str(entity.dedupKey ?? ''),           // Q: dedupKey (app-only)
     ];
   }
 

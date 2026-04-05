@@ -7,7 +7,6 @@ import {
   BookOpen,
   Building,
   CheckCircle2,
-  GraduationCap,
   Hash,
   Mail,
   User,
@@ -93,6 +92,11 @@ export default function ProfilePage() {
   const requiredCredits = Number(profile.requiredCredits ?? 0);
   const quotaUsed = Number(profile.quotaUsed ?? 0);
   const totalQuota = Number(profile.totalQuota ?? 0);
+  const accountCode =
+    profile.accountRole === "STUDENT"
+      ? profile.studentId ?? "-"
+      : profile.lecturerId ?? "-";
+  const accountCodeLabel = profile.accountRole === "STUDENT" ? "MSSV" : "MSGV";
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
@@ -123,12 +127,10 @@ export default function ProfilePage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-0 rounded-2xl border border-outline-variant/15 overflow-hidden mt-6">
-            <InfoRow icon={Hash} label="Mã tài khoản" value={profile.id} />
+            <InfoRow icon={Hash} label={accountCodeLabel} value={accountCode} />
             <InfoRow icon={Mail} label="Email" value={profile.email} />
             <InfoRow icon={Building} label="Bộ môn" value={profile.department ?? "-"} />
             <InfoRow icon={Users} label="Loại tài khoản" value={ROLE_LABELS[profile.accountRole] ?? profile.accountRole} />
-            <InfoRow icon={BookOpen} label="MSSV" value={profile.studentId ?? "-"} />
-            <InfoRow icon={GraduationCap} label="MSGV" value={profile.lecturerId ?? "-"} />
           </div>
         </div>
       </div>

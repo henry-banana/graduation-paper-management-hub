@@ -4,14 +4,72 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { PeriodsService } from './periods.service';
+import { PeriodsService, PeriodRecord } from './periods.service';
+import { PeriodsRepository } from '../../infrastructure/google-sheets';
 
 describe('PeriodsService', () => {
   let service: PeriodsService;
+  let periodsStore: PeriodRecord[];
+
+  const buildSeedPeriods = (): PeriodRecord[] => [
+    {
+      id: 'prd_2026_hk1_bctt',
+      code: 'HK1-2026-BCTT',
+      type: 'BCTT',
+      openDate: '2026-01-01',
+      closeDate: '2026-01-15',
+      status: 'OPEN',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'prd_2026_hk1_kltn',
+      code: 'HK1-2026-KLTN',
+      type: 'KLTN',
+      openDate: '2026-03-01',
+      closeDate: '2026-03-20',
+      status: 'DRAFT',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    },
+    {
+      id: 'prd_2025_hk2_bctt',
+      code: 'HK2-2025-BCTT',
+      type: 'BCTT',
+      openDate: '2025-08-01',
+      closeDate: '2025-08-15',
+      status: 'CLOSED',
+      createdAt: '2025-07-01T00:00:00.000Z',
+      updatedAt: '2025-08-20T00:00:00.000Z',
+    },
+  ];
 
   beforeEach(async () => {
+    periodsStore = buildSeedPeriods();
+
+    const periodsRepository = {
+      findAll: jest.fn(async () => [...periodsStore]),
+      findById: jest.fn(async (id: string) => periodsStore.find((p) => p.id === id) ?? null),
+      findFirst: jest.fn(
+        async (predicate: (record: PeriodRecord) => boolean) =>
+          periodsStore.find((record) => predicate(record)) ?? null,
+      ),
+      create: jest.fn(async (record: PeriodRecord) => {
+        periodsStore.push({ ...record });
+      }),
+      update: jest.fn(async (id: string, record: PeriodRecord) => {
+        const index = periodsStore.findIndex((item) => item.id === id);
+        if (index >= 0) {
+          periodsStore[index] = { ...record };
+        }
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [PeriodsService],
+      providers: [
+        PeriodsService,
+        { provide: PeriodsRepository, useValue: periodsRepository },
+      ],
     }).compile();
 
     service = module.get<PeriodsService>(PeriodsService);

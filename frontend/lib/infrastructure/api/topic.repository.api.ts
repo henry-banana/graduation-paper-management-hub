@@ -21,7 +21,7 @@ interface TeacherDto {
   id: string;
   fullName: string;
   email?: string;
-  staffId?: string;
+  lecturerId?: string;
 }
 
 const EMPTY_TEACHERS_RESPONSE: ApiListResponse<TeacherDto> = {
@@ -78,7 +78,7 @@ export class ApiTopicRepository implements TopicRepository {
         topic.supervisor?.fullName?.trim() ||
         "GVHD chưa cập nhật";
       const gvhdCodeOrEmail =
-        teacher?.staffId?.trim() ||
+        teacher?.lecturerId?.trim() ||
         topic.supervisor?.lecturerId?.trim() ||
         teacher?.email?.trim() ||
         topic.supervisor?.email?.trim() ||

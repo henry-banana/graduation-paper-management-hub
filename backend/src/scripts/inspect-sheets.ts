@@ -100,11 +100,11 @@ async function bootstrap(): Promise<void> {
       logger.log(`${row.tab}: ${row.count} rows | sample IDs: ${row.sampleIds.join(', ')}`);
     }
 
-    const bcttScore = scores.find((score) => score.id === 'sc_006');
-    const kltnReviewer = scores.find((score) => score.id === 'sc_002');
+    const bcttScore = scores.find((score) => score.id === 'score-bctt-done-gvhd');
+    const kltnReviewer = scores.find((score) => score.id === 'score-kltn-gvpb');
 
     logger.log(
-      `Seed check: BCTT score sc_006 ${bcttScore ? 'FOUND' : 'MISSING'}, KLTN reviewer score sc_002 ${kltnReviewer ? 'FOUND' : 'MISSING'}`,
+      `Seed check: BCTT score score-bctt-done-gvhd ${bcttScore ? 'FOUND' : 'MISSING'}, KLTN reviewer score score-kltn-gvpb ${kltnReviewer ? 'FOUND' : 'MISSING'}`,
     );
   } finally {
     await app.close();

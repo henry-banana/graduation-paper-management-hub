@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   ConflictException,
   BadRequestException,
+  ServiceUnavailableException,
   Logger,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
@@ -17,6 +18,7 @@ import {
   buildVersionLabel,
   FileType,
   SubmissionStatus,
+  SUBMISSION_FILE_TYPES,
   SUBMISSION_POLICY_ERROR_CODES,
   VersionLabel,
 } from './submission.constants';
@@ -140,6 +142,9 @@ export class SubmissionsService {
     fileInfo: SubmissionFileInfo | undefined,
     fileBuffer: Buffer,
   ): Promise<CreateSubmissionResponseDto> {
+    if (!SUBMISSION_FILE_TYPES.includes(fileType)) {
+      throw new BadRequestException(`Unsupported fileType: ${fileType}`);
+    }
     const topic = await this.getTopicOrThrow(topicId);
     await this.assertUploadPermission(topic, fileType, user);
     this.assertUploadState(topic, fileType);
@@ -205,7 +210,7 @@ export class SubmissionsService {
     }
 
     const topic = await this.getTopicOrThrow(submission.topicId);
-    await this.assertSubmitterOwnership(submission, topic, user);
+  await this.assertConfirmPermission(topic, user);
 
     const policyState = this.syncSubmissionPolicyFlags(submission);
 
@@ -236,7 +241,7 @@ export class SubmissionsService {
     });
 
     await this.notificationsService.create({
-      receiverUserId: topic.supervisorUserId,
+      receiverUserId: topic.studentUserId,
       type: 'SUBMISSION_CONFIRMED',
       topicId: topic.id,
       context: {
@@ -509,7 +514,10 @@ export class SubmissionsService {
     topic: TopicRecord,
     fileType: FileType,
   ): Promise<RevisionRoundRecord> {
-    if (fileType !== 'REVISION') {
+    const requiresOpenRevisionRound =
+      fileType === 'REVISION' || fileType === 'REVISION_EXPLANATION';
+
+    if (!requiresOpenRevisionRound) {
       return this.createPseudoRound(topic.submitStartAt, topic.submitEndAt, 1, topic.id, 'SYSTEM');
     }
 
@@ -518,10 +526,6 @@ export class SubmissionsService {
     );
 
     if (!rounds.length) {
-      if (topic.submitStartAt && topic.submitEndAt) {
-        return this.createPseudoRound(topic.submitStartAt, topic.submitEndAt, 1, topic.id, 'SYSTEM');
-      }
-
       throw this.createPolicyConflict(
         SUBMISSION_POLICY_ERROR_CODES.REVISION_ROUND_NOT_OPEN,
         'Revision round is not open for this topic',
@@ -538,21 +542,24 @@ export class SubmissionsService {
     topicId: string,
     requestedBy: string,
   ): RevisionRoundRecord {
-    if (!startAt || !endAt) {
-      throw new ConflictException('Submission window is not configured');
-    }
+    // Fallback for topics without configured submission windows (e.g., TURNITIN uploads, legacy data).
+    const fallbackStart = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 minutes ago
+    const fallbackEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // +30 days
+
+    const effectiveStart = startAt ?? fallbackStart;
+    const effectiveEnd = endAt ?? fallbackEnd;
 
     return {
       id: `round_${topicId}_${roundNumber}`,
       topicId,
       roundNumber,
       status: 'OPEN',
-      startAt,
-      endAt,
+      startAt: effectiveStart,
+      endAt: effectiveEnd,
       requestedBy,
       reason: undefined,
-      createdAt: startAt,
-      updatedAt: startAt,
+      createdAt: effectiveStart,
+      updatedAt: effectiveStart,
     };
   }
 
@@ -630,14 +637,16 @@ export class SubmissionsService {
       }
     }
 
-    this.logger.warn(
-      `Google Drive client is not ready, using fallback upload metadata topicId=${topicId} userId=${userId}`,
+    // FIX: Drive không sẵn sàng → throw lỗi rõ ràng thay vì tạo link giả.
+    // Link giả gây người dùng tưởng đã upload thành công nhưng file không tồn tại trên Drive.
+    this.logger.error(
+      `Google Drive client is not ready. Refusing upload for topicId=${topicId} userId=${userId} fileType=${fileType}`,
     );
-
-    return {
-      fileId: fallbackDriveId,
-      webViewLink: `https://drive.google.com/file/d/${fallbackDriveId}`,
-    };
+    throw new ServiceUnavailableException({
+      error: 'DRIVE_UNAVAILABLE',
+      message: 'Dịch vụ lưu trữ file chưa sẵn sàng. Vui lòng thử lại sau hoặc liên hệ quản trị viên.',
+      code: 'DRIVE_UNAVAILABLE',
+    });
   }
 
   private async getTopicOrThrow(topicId: string): Promise<TopicRecord> {
@@ -684,6 +693,17 @@ export class SubmissionsService {
     }
 
     throw new ForbiddenException('Cannot access this topic');
+  }
+
+  private async assertConfirmPermission(
+    topic: TopicRecord,
+    user: AuthUser,
+  ): Promise<void> {
+    if (user.role !== 'LECTURER' || topic.supervisorUserId !== user.userId) {
+      throw new ForbiddenException('Only topic supervisor can confirm submissions');
+    }
+
+    await this.assertActiveAssignmentIfPresent(topic.id, user.userId, ['GVHD']);
   }
 
   private assertSubmitterOwnership(
@@ -751,6 +771,22 @@ export class SubmissionsService {
       if (user.role !== 'STUDENT' || topic.studentUserId !== user.userId) {
         throw new ForbiddenException(
           'Only the topic owner student can upload REVISION files',
+        );
+      }
+
+      return;
+    }
+
+    if (fileType === 'REVISION_EXPLANATION') {
+      if (topic.type !== 'KLTN') {
+        throw new ConflictException(
+          'REVISION_EXPLANATION submissions are only supported for KLTN topics',
+        );
+      }
+
+      if (user.role !== 'STUDENT' || topic.studentUserId !== user.userId) {
+        throw new ForbiddenException(
+          'Only the topic owner student can upload REVISION_EXPLANATION files',
         );
       }
 
@@ -826,6 +862,19 @@ export class SubmissionsService {
         );
       }
 
+      // FIX: áp dụng submission window cho INTERNSHIP_CONFIRMATION (tương tự REPORT)
+      this.ensureSubmissionWindowOpen(topic);
+      return;
+    }
+
+    if (fileType === 'REVISION_EXPLANATION') {
+      const allowedREStates = ['SCORING', 'COMPLETED'];
+      if (!allowedREStates.includes(topic.state)) {
+        throw new ConflictException(
+          `Cannot upload REVISION_EXPLANATION in topic state: ${topic.state}`,
+        );
+      }
+
       return;
     }
 
@@ -850,8 +899,9 @@ export class SubmissionsService {
   }
 
   private ensureSubmissionWindowOpen(topic: TopicRecord): void {
+    // If window is not configured, allow upload (legacy data or manual override).
     if (!topic.submitStartAt || !topic.submitEndAt) {
-      throw new ConflictException('Submission window is not configured');
+      return;
     }
 
     const now = Date.now();

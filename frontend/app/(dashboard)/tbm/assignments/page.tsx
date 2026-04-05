@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertCircle, BookOpen, Check, ChevronDown, GraduationCap,
+  AlertCircle, Check, ChevronDown, GraduationCap,
   RefreshCw, Search, UserCheck, Users, X,
 } from "lucide-react";
 import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
@@ -108,6 +108,21 @@ export default function TBMAssignmentsPage() {
   const findTeacherById = (teacherId: string) =>
     teachers.find((teacher) => teacher.id === teacherId);
 
+  const getTeacherRemainingSlots = (teacher: TeacherDto): number | null => {
+    if (typeof teacher.totalQuota === "number" && typeof teacher.quotaUsed === "number") {
+      return teacher.totalQuota - teacher.quotaUsed;
+    }
+    return null;
+  };
+
+  const getTeacherLabel = (teacher: TeacherDto): string => {
+    const remaining = getTeacherRemainingSlots(teacher);
+    const code = teacher.lecturerId?.trim() || teacher.staffId?.trim();
+    const codeSuffix = code ? ` · ${code}` : "";
+    const quotaSuffix = remaining != null ? ` (còn ${Math.max(remaining, 0)} slot)` : "";
+    return `${teacher.fullName}${codeSuffix}${quotaSuffix}`;
+  };
+
   const getSupervisorDisplay = (topic: TopicDto): { name: string; codeOrEmail?: string } => {
     const mappedTeacher = topic.supervisorUserId
       ? findTeacherById(topic.supervisorUserId)
@@ -141,6 +156,13 @@ export default function TBMAssignmentsPage() {
     );
   };
 
+  const refreshTeachers = async () => {
+    const teacherRes = await api.get<ApiListResponse<TeacherDto>>(
+      "/users?role=LECTURER&page=1&size=100",
+    );
+    setTeachers(teacherRes.data ?? []);
+  };
+
   const updateTopicReviewer = (topicId: string, teacherId: string) => {
     const reviewer = findTeacherById(teacherId);
     if (!reviewer) return;
@@ -166,9 +188,9 @@ export default function TBMAssignmentsPage() {
     topics
       .filter(t => !filterType || t.type === filterType)
       .filter(t =>
-        t.student?.fullName.toLowerCase().includes(search.toLowerCase()) ||
-        t.title.toLowerCase().includes(search.toLowerCase()) ||
-        t.supervisor?.fullName.toLowerCase().includes(search.toLowerCase()),
+        (t.student?.fullName?.toLowerCase() ?? "").includes(search.toLowerCase()) ||
+        (t.title?.toLowerCase() ?? "").includes(search.toLowerCase()) ||
+        (t.supervisor?.fullName?.toLowerCase() ?? "").includes(search.toLowerCase()),
       ),
     [topics, search, filterType],
   );
@@ -198,6 +220,7 @@ export default function TBMAssignmentsPage() {
     try {
       await api.post<ApiResponse<unknown>>(`/topics/${topicId}/assignments/gvpb`, { userId: teacherId });
       updateTopicReviewer(topicId, teacherId);
+      await refreshTeachers();
       setSuccess("Phân công GVPB thành công.");
       setTimeout(() => setSuccess(null), 3000);
     } catch (e) {
@@ -224,6 +247,7 @@ export default function TBMAssignmentsPage() {
           );
 
           updateTopicReviewer(topicId, teacherId);
+          await refreshTeachers();
           setSuccess("Đã thay thế GVPB thành công.");
           setTimeout(() => setSuccess(null), 3000);
           return;
@@ -402,15 +426,18 @@ export default function TBMAssignmentsPage() {
                                   >
                                     <option value="">Chọn GV phản biện...</option>
                                     {teachers
-                                      .filter(tc => tc.id !== t.supervisor?.id)
+                                      .filter(tc => tc.id !== (t.supervisor?.id ?? t.supervisorUserId))
                                       .map(tc => {
-                                        // Bug #9 fix: Show remaining quota (totalQuota - quotaUsed)
-                                        const remaining = tc.totalQuota != null && tc.quotaUsed != null 
-                                          ? tc.totalQuota - tc.quotaUsed 
-                                          : (tc.currentLoad ?? null);
+                                        const remaining = getTeacherRemainingSlots(tc);
+                                        const isAtCapacity = remaining != null && remaining <= 0;
+                                        const isSelected = gvpbMap[t.id] === tc.id;
                                         return (
-                                          <option key={tc.id} value={tc.id}>
-                                            {tc.fullName}{remaining != null ? ` (còn ${remaining} slot)` : ""}
+                                          <option
+                                            key={tc.id}
+                                            value={tc.id}
+                                            disabled={isAtCapacity && !isSelected}
+                                          >
+                                            {getTeacherLabel(tc)}
                                           </option>
                                         );
                                       })}
@@ -515,7 +542,7 @@ export default function TBMAssignmentsPage() {
                 <select value={councilForm.chairUserId} onChange={e => setCouncilForm(p => ({ ...p, chairUserId: e.target.value }))}
                   className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
                   <option value="">Chọn Chủ tịch...</option>
-                  {teachers.map(tc => <option key={tc.id} value={tc.id}>{tc.fullName}</option>)}
+                  {teachers.map(tc => <option key={tc.id} value={tc.id}>{getTeacherLabel(tc)}</option>)}
                 </select>
               </div>
               {/* Thư ký */}
@@ -524,7 +551,7 @@ export default function TBMAssignmentsPage() {
                 <select value={councilForm.secretaryUserId} onChange={e => setCouncilForm(p => ({ ...p, secretaryUserId: e.target.value }))}
                   className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
                   <option value="">Chọn Thư ký...</option>
-                  {teachers.map(tc => <option key={tc.id} value={tc.id}>{tc.fullName}</option>)}
+                  {teachers.map(tc => <option key={tc.id} value={tc.id}>{getTeacherLabel(tc)}</option>)}
                 </select>
               </div>
               {/* Thành viên */}

@@ -61,6 +61,16 @@ interface ScoreDto {
   criteria?: Record<string, number>;
 }
 
+interface PeriodOptionDto {
+  id: string;
+  code: string;
+}
+
+const EMPTY_PERIODS_RESPONSE: ApiListResponse<PeriodOptionDto> = {
+  data: [],
+  pagination: { page: 1, size: 0, total: 0 },
+};
+
 function formatDateTime(value?: string) {
   if (!value) return "—";
   const d = new Date(value);
@@ -83,6 +93,7 @@ export default function GVHDTopicDetailPage() {
   const [student, setStudent] = useState<UserDto | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionDto[]>([]);
   const [myScore, setMyScore] = useState<ScoreDto | null>(null);
+  const [periodCode, setPeriodCode] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -98,13 +109,18 @@ export default function GVHDTopicDetailPage() {
       setTopic(t);
 
       // Load student info, submissions, and my draft in parallel
-      const [studentRes, submissionsRes] = await Promise.all([
+      const [studentRes, submissionsRes, periodsRes] = await Promise.all([
         api.get<ApiResponse<UserDto>>(`/users/${t.studentUserId}`).catch(() => null),
         api.get<ApiResponse<SubmissionDto[]>>(`/topics/${topicId}/submissions`).catch(() => ({ data: [] })),
+        api
+          .get<ApiListResponse<PeriodOptionDto>>("/periods?page=1&size=200")
+          .catch(() => EMPTY_PERIODS_RESPONSE),
       ]);
 
       setStudent(studentRes?.data ?? null);
       setSubmissions(submissionsRes?.data ?? []);
+      const matchedPeriod = (periodsRes.data ?? []).find((period) => period.id === t.periodId);
+      setPeriodCode(matchedPeriod?.code ?? t.periodId);
 
       // Try to load my scoring draft
       try {
@@ -364,7 +380,7 @@ export default function GVHDTopicDetailPage() {
             <div className="space-y-3 text-sm">
               <div>
                 <span className="block text-xs text-outline mb-0.5">Đợt</span>
-                <span className="font-semibold text-on-surface">{topic.periodId}</span>
+                <span className="font-semibold text-on-surface">{periodCode || topic.periodId}</span>
               </div>
               {topic.companyName && (
                 <div>

@@ -54,7 +54,14 @@ type TopicExportReadiness = {
 };
 
 const logger = new Logger('FetchSheetPreview');
-const KLTN_READY_STATES = new Set(['DEFENSE', 'COMPLETED']);
+const KLTN_EXPORT_ELIGIBLE_STATES = new Set([
+  'IN_PROGRESS',
+  'PENDING_CONFIRM',
+  'GRADING',
+  'SCORING',
+  'DEFENSE',
+  'COMPLETED',
+]);
 
 function createCountSummary<T extends { id: string }>(rows: T[]): {
   count: number;
@@ -103,7 +110,7 @@ function computeTopicReadiness(
     const bcttReady = topic.type === 'BCTT' && bcttSubmitted.length > 0;
     const kltnReady =
       topic.type === 'KLTN' &&
-      KLTN_READY_STATES.has(topic.state) &&
+      KLTN_EXPORT_ELIGIBLE_STATES.has(topic.state) &&
       gvhdSubmitted.length > 0 &&
       gvpbSubmitted.length > 0 &&
       councilSubmitted.length > 0;
@@ -295,8 +302,10 @@ function analyzeDataImpact(data: {
 
     if (status.type === 'KLTN' && !status.kltnReady) {
       const details: string[] = [];
-      if (!KLTN_READY_STATES.has(status.state)) {
-        details.push(`state=${status.state} (need DEFENSE/COMPLETED)`);
+      if (!KLTN_EXPORT_ELIGIBLE_STATES.has(status.state)) {
+        details.push(
+          `state=${status.state} (need IN_PROGRESS/PENDING_CONFIRM/GRADING/SCORING/DEFENSE/COMPLETED)`,
+        );
       }
       if (status.kltnScoreIds.GVHD.length === 0) {
         details.push('missing SUBMITTED GVHD score');

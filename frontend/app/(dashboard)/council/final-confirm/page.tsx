@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronRight,
   ClipboardList, Download, MessageSquare, RefreshCw, Search,
@@ -18,8 +18,9 @@ interface TopicSummaryDto extends CouncilTopicListItem {
 }
 
 interface MinutesForm {
-  councilComments: string;
-  revisionNotes: string;
+  chairComments: string;       // Góp ý của Chủ tịch hội đồng
+  revisionRequirements: string; // Yêu cầu chỉnh sửa
+  revisionDeadline: string;    // Hạn chỉnh sửa (ISO date)
 }
 
 interface ExportResultDto {
@@ -36,7 +37,7 @@ export default function CouncilFinalConfirmPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState<string | null>(null);
   const [minutesModal, setMinutesModal] = useState<TopicSummaryDto | null>(null);
-  const [minutesForm, setMinutesForm] = useState<MinutesForm>({ councilComments: "", revisionNotes: "" });
+  const [minutesForm, setMinutesForm] = useState<MinutesForm>({ chairComments: "", revisionRequirements: "", revisionDeadline: "" });
   const [isSavingMinutes, setIsSavingMinutes] = useState(false);
 
   const load = async () => {
@@ -104,7 +105,13 @@ export default function CouncilFinalConfirmPage() {
     setIsSavingMinutes(true);
     setError(null);
     try {
-      const exportRes = await api.post<ApiResponse<ExportResultDto>>(`/exports/minutes/${minutesModal.id}`, {});
+      // Truyền đầy đủ body ExportMinutesDto để backend populate đúng biên bản
+      const body = {
+        chairComments: minutesForm.chairComments.trim() || undefined,
+        revisionRequirements: minutesForm.revisionRequirements.trim() || undefined,
+        revisionDeadline: minutesForm.revisionDeadline.trim() || undefined,
+      };
+      const exportRes = await api.post<ApiResponse<ExportResultDto>>(`/exports/minutes/${minutesModal.id}`, body);
       const minutesLink = exportRes.data?.driveLink ?? exportRes.data?.downloadUrl;
       setTopics(prev => prev.map(t =>
         t.id === minutesModal.id
@@ -162,12 +169,20 @@ export default function CouncilFinalConfirmPage() {
 
       {/* Alerts */}
       {error && (
-        <div className="flex items-center gap-3 bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3">
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-center gap-3 bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3"
+        >
           <AlertCircle className="w-4 h-4 text-error" /><p className="text-sm text-error">{error}</p>
         </div>
       )}
       {success && (
-        <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3">
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3"
+        >
           <CheckCircle2 className="w-4 h-4 text-green-600" /><p className="text-sm text-green-700">{success}</p>
         </div>
       )}
@@ -176,6 +191,7 @@ export default function CouncilFinalConfirmPage() {
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline" />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm sinh viên hoặc đề tài..."
+          aria-label="Tìm đề tài theo sinh viên hoặc tên đề tài"
           className="w-full pl-10 pr-4 py-2.5 bg-surface-container-lowest rounded-xl border border-outline-variant/20 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 text-on-surface placeholder:text-outline/60" />
       </div>
 
@@ -198,7 +214,7 @@ export default function CouncilFinalConfirmPage() {
                 <thead>
                   <tr className="bg-surface-container/50">
                     {["Sinh viên", "Đề tài", "Điểm GVHD", "Điểm GVPB", "Điểm HĐ", "Điểm cuối", "Trạng thái", ""].map(h => (
-                      <th key={h} className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">{h}</th>
+                      <th scope="col" key={h} className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -209,9 +225,8 @@ export default function CouncilFinalConfirmPage() {
                     const isExpanded = expandedId === t.id;
                     const detailsId = `topic-details-${t.id}`;
                     return (
-                      <>
+                      <Fragment key={t.id}>
                         <tr
-                          key={t.id}
                           className="hover:bg-surface-container-low/30 transition-colors"
                         >
                           <td className="px-4 py-4">
@@ -242,13 +257,15 @@ export default function CouncilFinalConfirmPage() {
                               : <span className="text-xs text-amber-600 font-semibold">Chưa công bố</span>}
                           </td>
                           <td className="px-4 py-4">
-                            <div className="flex items-center gap-1.5 justify-end" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1.5 justify-end">
                               {/* Secretary: minutes */}
                               <button
+                                type="button"
                                 onClick={() => {
                                   setMinutesModal(t);
-                                  setMinutesForm({ councilComments: t.councilComments ?? "", revisionNotes: "" });
+                                  setMinutesForm({ chairComments: t.councilComments ?? "", revisionRequirements: "", revisionDeadline: "" });
                                 }}
+                                aria-label="Mở tạo biên bản hội đồng"
                                 title="Biên bản Hội đồng"
                                 className="p-2 rounded-xl border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container transition-colors"
                               >
@@ -257,6 +274,7 @@ export default function CouncilFinalConfirmPage() {
                               {/* Publish */}
                               {!t.isPublished && (
                                 <button
+                                  type="button"
                                   onClick={() => void handlePublish(t.id)}
                                   disabled={publishing || !canPublish}
                                   className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white text-xs font-semibold rounded-xl hover:bg-primary/90 transition-all disabled:opacity-50"
@@ -280,8 +298,8 @@ export default function CouncilFinalConfirmPage() {
                           </td>
                         </tr>
                         {/* Expanded row */}
-                        {isExpanded && (
-                          <tr id={detailsId} className="bg-surface-container-low/20">
+                      {isExpanded && (
+                        <tr id={detailsId} className="bg-surface-container-low/20">
                             <td colSpan={8} className="px-6 py-5">
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-5 text-xs">
                                 <div>
@@ -322,7 +340,7 @@ export default function CouncilFinalConfirmPage() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -335,13 +353,24 @@ export default function CouncilFinalConfirmPage() {
       {/* Minutes Modal (Thư ký) */}
       {minutesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="minutes-modal-title"
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
+          >
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-outline-variant/10">
               <div>
-                <h3 className="font-bold text-on-surface text-lg flex items-center gap-2"><BookOpen className="w-5 h-5 text-primary" />Biên bản Hội đồng</h3>
+                <h3 id="minutes-modal-title" className="font-bold text-on-surface text-lg flex items-center gap-2"><BookOpen className="w-5 h-5 text-primary" />Biên bản Hội đồng</h3>
                 <p className="text-xs text-outline mt-0.5">{minutesModal.student?.fullName} — {minutesModal.title.slice(0, 60)}</p>
               </div>
-              <button onClick={() => setMinutesModal(null)} className="p-1.5 rounded-xl hover:bg-surface-container transition-colors">
+              <button
+                type="button"
+                aria-label="Đóng hộp thoại biên bản hội đồng"
+                title="Đóng"
+                onClick={() => setMinutesModal(null)}
+                className="p-1.5 rounded-xl hover:bg-surface-container transition-colors"
+              >
                 <X className="w-5 h-5 text-outline" />
               </button>
             </div>
@@ -358,25 +387,35 @@ export default function CouncilFinalConfirmPage() {
             </div>
             <div className="p-6 space-y-5">
               <div>
-                <label className="block text-xs font-semibold text-outline mb-1.5 uppercase flex items-center gap-2"><MessageSquare className="w-3.5 h-3.5" />Góp ý của Hội đồng</label>
-                <textarea rows={5} value={minutesForm.councilComments}
-                  onChange={e => setMinutesForm(p => ({ ...p, councilComments: e.target.value }))}
+                <label htmlFor="chair-comments" className="block text-xs font-semibold text-outline mb-1.5 uppercase flex items-center gap-2"><MessageSquare className="w-3.5 h-3.5" />Góp ý của Chủ tịch hội đồng</label>
+                <textarea id="chair-comments" rows={4} value={minutesForm.chairComments}
+                  onChange={e => setMinutesForm(p => ({ ...p, chairComments: e.target.value }))}
                   placeholder="Nhập các góp ý và yêu cầu chỉnh sửa của Hội đồng..."
                   className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-outline mb-1.5 uppercase">Yêu cầu chỉnh sửa sau bảo vệ</label>
-                <textarea rows={3} value={minutesForm.revisionNotes}
-                  onChange={e => setMinutesForm(p => ({ ...p, revisionNotes: e.target.value }))}
+                <label htmlFor="revision-requirements" className="block text-xs font-semibold text-outline mb-1.5 uppercase">Yêu cầu chỉnh sửa sau bảo vệ</label>
+                <textarea id="revision-requirements" rows={3} value={minutesForm.revisionRequirements}
+                  onChange={e => setMinutesForm(p => ({ ...p, revisionRequirements: e.target.value }))}
                   placeholder="Liệt kê cụ thể những mục sinh viên cần chỉnh sửa..."
                   className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
                 />
               </div>
+              <div>
+                <label htmlFor="revision-deadline" className="block text-xs font-semibold text-outline mb-1.5 uppercase">Hạn chỉnh sửa (nếu có)</label>
+                <input
+                  id="revision-deadline"
+                  type="date"
+                  value={minutesForm.revisionDeadline}
+                  onChange={e => setMinutesForm(p => ({ ...p, revisionDeadline: e.target.value }))}
+                  className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setMinutesModal(null)} className="flex-1 px-4 py-2.5 border border-outline-variant/20 rounded-xl text-sm font-semibold text-on-surface hover:bg-surface-container transition-colors">Hủy</button>
-              <button onClick={() => void handleSaveMinutes()} disabled={isSavingMinutes}
+              <button type="button" onClick={() => setMinutesModal(null)} className="flex-1 px-4 py-2.5 border border-outline-variant/20 rounded-xl text-sm font-semibold text-on-surface hover:bg-surface-container transition-colors">Hủy</button>
+              <button type="button" onClick={() => void handleSaveMinutes()} disabled={isSavingMinutes}
                 className="flex-1 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">
                 {isSavingMinutes ? "Đang tạo..." : "Tạo Biên bản"}
               </button>

@@ -3,11 +3,13 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { NotificationsService } from './notifications.service';
+import { NotificationsService, NotificationRecord } from './notifications.service';
 import { AuthUser } from '../../common/types';
+import { NotificationsRepository } from '../../infrastructure/google-sheets';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
+  let notificationsStore: NotificationRecord[];
 
   const studentUser: AuthUser = {
     userId: 'USR001',
@@ -28,8 +30,65 @@ describe('NotificationsService', () => {
   };
 
   beforeEach(async () => {
+    notificationsStore = [
+      {
+        id: 'nt_001',
+        receiverUserId: 'USR001',
+        topicId: 'tp_001',
+        type: 'TOPIC_APPROVED',
+        title: 'Đề tài đã được duyệt',
+        body: 'Đề tài đã được duyệt.',
+        deepLink: '/topics/tp_001',
+        isRead: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'nt_002',
+        receiverUserId: 'USR001',
+        topicId: 'tp_002',
+        type: 'GENERAL',
+        title: 'Thông báo',
+        body: 'Thông báo chung',
+        deepLink: '/notifications',
+        isRead: true,
+        createdAt: '2026-01-02T00:00:00.000Z',
+        readAt: '2026-01-02T00:05:00.000Z',
+      },
+      {
+        id: 'nt_003',
+        receiverUserId: 'USR002',
+        topicId: 'tp_003',
+        type: 'GENERAL',
+        title: 'Thông báo cho giảng viên',
+        body: 'Thông báo riêng',
+        deepLink: '/notifications',
+        isRead: false,
+        createdAt: '2026-01-03T00:00:00.000Z',
+      },
+    ];
+
+    const notificationsRepository = {
+      findAll: jest.fn(async () => [...notificationsStore]),
+      findById: jest.fn(
+        async (id: string) =>
+          notificationsStore.find((notification) => notification.id === id) ?? null,
+      ),
+      update: jest.fn(async (id: string, record: NotificationRecord) => {
+        const index = notificationsStore.findIndex((notification) => notification.id === id);
+        if (index >= 0) {
+          notificationsStore[index] = { ...record };
+        }
+      }),
+      create: jest.fn(async (record: NotificationRecord) => {
+        notificationsStore.push({ ...record });
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [NotificationsService],
+      providers: [
+        NotificationsService,
+        { provide: NotificationsRepository, useValue: notificationsRepository },
+      ],
     }).compile();
 
     service = module.get<NotificationsService>(NotificationsService);

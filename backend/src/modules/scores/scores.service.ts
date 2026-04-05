@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import {
@@ -67,13 +68,16 @@ export interface ScoreSummaryRecord {
   confirmedByGvhd: boolean;
   confirmedByCtHd: boolean;
   published: boolean;
-  councilComments?: string; // Góp ý bổ sung của hội đồng (do Thư ký nhập)
+  updatedAt?: string;           // DB-03: col K in ScoreSummaries sheet
+  councilComments?: string;    // Góp ý bổ sung của hội đồng (do Thư ký nhập)
 }
+
 
 const KLTN_SCORER_ROLES: ScorerRole[] = ['GVHD', 'GVPB', 'TV_HD'];
 
 @Injectable()
 export class ScoresService {
+  private readonly logger = new Logger(ScoresService.name);
   constructor(
     private readonly scoresRepository: ScoresRepository,
     private readonly scoreSummariesRepository: ScoreSummariesRepository,
@@ -183,14 +187,18 @@ export class ScoresService {
     }
 
     if (!topic.submitEndAt) {
-      throw new ConflictException(
-        'Cannot score BCTT before submission deadline is configured',
+      this.logger.warn(
+        `[assertBcttDeadlineElapsed] submitEndAt missing for topic=${topic.id}, allowing scoring (TBM override)`,
       );
+      return;
     }
 
     const submitEnd = new Date(topic.submitEndAt).getTime();
     if (Number.isNaN(submitEnd)) {
-      throw new ConflictException('BCTT submission deadline is invalid');
+      this.logger.warn(
+        `[assertBcttDeadlineElapsed] submitEndAt invalid (${topic.submitEndAt}) for topic=${topic.id}, allowing scoring`,
+      );
+      return;
     }
 
     if (Date.now() <= submitEnd) {
@@ -824,7 +832,7 @@ export class ScoresService {
       const assignedCouncilMembers = assignments.filter(
         (assignment) =>
           assignment.topicId === topicId &&
-          assignment.topicRole === 'TV_HD' &&
+          ['TV_HD', 'CT_HD', 'TK_HD'].includes(assignment.topicRole) &&
           assignment.status === 'ACTIVE',
       );
 

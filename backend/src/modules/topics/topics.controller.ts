@@ -3,12 +3,15 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Query,
   Body,
   HttpCode,
   HttpStatus,
   UseGuards,
+  ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -105,6 +108,94 @@ export class TopicsController {
         dot: s.dot,
       })),
     };
+  }
+
+  /**
+   * POST /topics/suggested-topics
+   * GV tạo đề xuất đề tài mới.
+   */
+  @Post('suggested-topics')
+  @Roles('LECTURER', 'TBM')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'GV: Create a new suggested topic' })
+  @ApiCreatedResponse({ description: 'Suggested topic created' })
+  async createSuggestedTopic(
+    @Body() body: { title: string; dot?: string },
+    @CurrentUser() user: AuthUser,
+  ) {
+    const crypto = await import('crypto');
+    const record = {
+      id: `det_${crypto.randomBytes(6).toString('hex')}`,
+      supervisorEmail: user.email,
+      title: body.title?.trim() ?? '',
+      dot: body.dot?.trim() ?? '',
+      lecturerUserId: user.userId,
+      createdAt: new Date().toISOString(),
+      isVisible: true,
+    };
+    if (!record.title) {
+      throw new ForbiddenException('title is required');
+    }
+    await this.suggestedTopicsRepository.create(record);
+    return { data: record };
+  }
+
+  /**
+   * GET /topics/suggested-topics
+   * GV: xem danh sách của mình. TBM: xem tất cả.
+   */
+  @Get('suggested-topics')
+  @Roles('LECTURER', 'TBM')
+  @ApiOperation({ summary: 'List suggested topics (GV: own | TBM: all)' })
+  @ApiOkResponse({ description: 'List of suggested topics' })
+  async listSuggestedTopics(@CurrentUser() user: AuthUser) {
+    if (user.role === 'TBM') {
+      const all = await this.suggestedTopicsRepository.findAll();
+      return { data: all };
+    }
+    // LECTURER: only their own
+    const own = await this.suggestedTopicsRepository.findByLecturerId(user.userId);
+    return { data: own };
+  }
+
+  /**
+   * PATCH /topics/suggested-topics/:id/visibility
+   * TBM toggle isVisible (ẩn/hiện đề xuất với sinh viên).
+   */
+  @Patch('suggested-topics/:id/visibility')
+  @Roles('TBM')
+  @ApiOperation({ summary: 'TBM: Toggle suggested topic visibility' })
+  async toggleSuggestedTopicVisibility(
+    @Param('id') id: string,
+    @Body() body: { isVisible: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    if (user.role !== 'TBM') throw new ForbiddenException('Only TBM can toggle visibility');
+    const record = await this.suggestedTopicsRepository.findById(id);
+    if (!record) throw new NotFoundException(`Suggested topic ${id} not found`);
+    record.isVisible = body.isVisible;
+    await this.suggestedTopicsRepository.update(id, record);
+    return { data: { id, isVisible: record.isVisible } };
+  }
+
+  /**
+   * DELETE /topics/suggested-topics/:id
+   * GV xóa của mình. TBM xóa bất kỳ.
+   */
+  @Delete('suggested-topics/:id')
+  @Roles('LECTURER', 'TBM')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a suggested topic (GV: own | TBM: any)' })
+  async deleteSuggestedTopic(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const record = await this.suggestedTopicsRepository.findById(id);
+    if (!record) throw new NotFoundException(`Suggested topic ${id} not found`);
+    if (user.role !== 'TBM' && record.lecturerUserId !== user.userId) {
+      throw new ForbiddenException('You can only delete your own suggested topics');
+    }
+    await this.suggestedTopicsRepository.softDelete(id);
   }
 
   @Get(':topicId')

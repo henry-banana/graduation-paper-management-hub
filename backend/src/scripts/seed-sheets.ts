@@ -617,7 +617,7 @@ const SYSTEM_CONFIG_ROWS: Row[] = [
 ];
 
 // ─── Main ────────────────────────────────────────────────────
-async function main(): Promise<void> {
+export async function runSeedSheets(): Promise<void> {
   const args = process.argv.slice(2);
   const isReset = args.includes('--reset');
   const isValidateOnly = args.includes('--validate-only');
@@ -698,8 +698,8 @@ async function main(): Promise<void> {
     'Topics': 0,            // 'id' column (first)
     'Trangthaidetai': 6,    // 'id' column
     'RevisionRounds': 0,    // 'id' column
-    'TenDetai': 0,          // 'id' column
-    'Điểm': 0,              // 'id' column
+    'TenDetai': 6,          // 'id' column
+    'Điểm': 16,             // 'id' column
     'ScoreSummaries': 0,    // 'id' column
     'Notifications': 0,     // 'id' column
   };
@@ -775,7 +775,9 @@ async function main(): Promise<void> {
   console.log('');
 }
 
-main().catch((err) => {
-  console.error('❌  Seed failed:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  runSeedSheets().catch((err) => {
+    console.error('❌  Seed failed:', err);
+    process.exit(1);
+  });
+}

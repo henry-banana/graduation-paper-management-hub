@@ -2,10 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { NotFoundException } from '@nestjs/common';
 import { UsersService, UserRecord } from './users.service';
+import { UsersRepository } from '../../infrastructure/google-sheets';
 
 describe('UsersService', () => {
   let service: UsersService;
   let cacheManager: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
+  let usersStore: UserRecord[];
 
   beforeEach(async () => {
     cacheManager = {
@@ -14,10 +16,57 @@ describe('UsersService', () => {
       del: jest.fn().mockResolvedValue(undefined),
     };
 
+    usersStore = [
+      {
+        id: 'USR001',
+        email: 'student@hcmute.edu.vn',
+        name: 'Nguyễn Văn A',
+        role: 'STUDENT',
+        studentId: '20110001',
+        earnedCredits: 120,
+        requiredCredits: 130,
+        completedBcttScore: 8.5,
+        isActive: true,
+      },
+      {
+        id: 'USR002',
+        email: 'lecturer@hcmute.edu.vn',
+        name: 'Nguyễn Văn B',
+        role: 'LECTURER',
+        lecturerId: 'GV001',
+        totalQuota: 6,
+        quotaUsed: 2,
+        isActive: true,
+      },
+      {
+        id: 'USR003',
+        email: 'tbm@hcmute.edu.vn',
+        name: 'Trần Thị C',
+        role: 'TBM',
+        isActive: true,
+      },
+    ];
+
+    const usersRepository = {
+      findAll: jest.fn(async () => [...usersStore]),
+      findById: jest.fn(async (id: string) => usersStore.find((u) => u.id === id) ?? null),
+      findFirst: jest.fn(
+        async (predicate: (record: UserRecord) => boolean) =>
+          usersStore.find((record) => predicate(record)) ?? null,
+      ),
+      update: jest.fn(async (id: string, record: UserRecord) => {
+        const index = usersStore.findIndex((user) => user.id === id);
+        if (index >= 0) {
+          usersStore[index] = { ...record };
+        }
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: CACHE_MANAGER, useValue: cacheManager },
+        { provide: UsersRepository, useValue: usersRepository },
       ],
     }).compile();
 

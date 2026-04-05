@@ -23,6 +23,7 @@ import {
   ExportResponseDto,
   CreateExportDto,
   CreateRubricExportDto,
+  ExportMinutesDto,
   CreateRubricExportResponseDto,
   ExportDownloadResponseDto,
 } from './dto';
@@ -125,12 +126,14 @@ export class ExportsController {
   @Roles('LECTURER', 'TBM')
   @ApiOperation({ summary: 'Generate biên bản họp hội đồng bảo vệ (PDF)' })
   @ApiParam({ name: 'topicId', example: 'tp_001' })
+  @ApiBody({ type: ExportMinutesDto, required: false })
   @ApiResponse({ status: 201, description: 'Biên bản PDF created', type: ExportResponseDto })
   async exportMinutes(
     @Param('topicId') topicId: string,
+    @Body() dto: ExportMinutesDto,
     @CurrentUser() user: AuthUser,
   ): Promise<{ data: ExportResponseDto; meta: { requestId: string } }> {
-    const result = await this.exportsService.exportMinutes(topicId, user);
+    const result = await this.exportsService.exportMinutes(topicId, dto, user);
     return {
       data: result,
       meta: { requestId: `req_${crypto.randomBytes(8).toString('hex')}` },

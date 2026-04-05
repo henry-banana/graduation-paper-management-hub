@@ -122,10 +122,9 @@ export class ScoresRepository extends SheetsBaseRepository<ScoreRecord> {
     };
     const resolved = mapping[normalized];
     if (!resolved) {
-      // DB-02 fix: throw instead of silently falling back to GVHD
+      // DB-02 fix: fail fast to avoid mis-assigning council scores.
       throw new Error(
-        `[ScoresRepository] Unknown scorerRole value: "${value}". ` +
-        `Expected one of GVHD | GVPB | TV_HD | CT_HD | TK_HD.`,
+        `[ScoresRepository] Unknown scorerRole value: "${value}". Expected one of GVHD|GVPB|TV_HD|CT_HD|TK_HD.`,
       );
     }
     return resolved;
@@ -199,6 +198,7 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       confirmedByGvhd: this.bool(v[7]),
       confirmedByCtHd: this.bool(v[8]),
       published: this.bool(v[9]),
+      updatedAt: this.str(v[10]),     // DB-03: was missing
       councilComments: this.optionalStr(v[11]),
     };
   }

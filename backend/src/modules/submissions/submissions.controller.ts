@@ -175,8 +175,8 @@ export class SubmissionsController {
   }
 
   @Post('submissions/:submissionId/confirm')
-  @Roles('STUDENT', 'LECTURER', 'TBM')
-  @ApiOperation({ summary: 'Confirm a submission version' })
+  @Roles('LECTURER')
+  @ApiOperation({ summary: 'Supervisor confirms a submission version' })
   @ApiParam({ name: 'submissionId', description: 'Submission ID' })
   @ApiResponse({
     status: 200,

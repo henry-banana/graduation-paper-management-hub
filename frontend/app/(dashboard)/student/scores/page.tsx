@@ -22,7 +22,7 @@ interface TopicDto {
 interface LecturerDto {
   id: string;
   fullName: string;
-  staffId?: string;
+  lecturerId?: string;
   email?: string;
 }
 
@@ -191,7 +191,7 @@ function StudentScoresContent() {
     const supervisorName =
       lecturer?.fullName?.trim() || selectedTopic.supervisor?.fullName?.trim() || "";
     const supervisorCodeOrEmail =
-      lecturer?.staffId?.trim() ||
+      lecturer?.lecturerId?.trim() ||
       selectedTopic.supervisor?.lecturerId?.trim() ||
       lecturer?.email?.trim() ||
       selectedTopic.supervisor?.email?.trim() ||
@@ -263,7 +263,11 @@ function StudentScoresContent() {
               </div>
               <div>
                 <span className="inline-block text-xs font-bold text-primary bg-primary/10 px-3 py-1 rounded-full mb-2">
-                  {selectedTopic?.id ?? "-"}
+                  {selectedTopic
+                    ? selectedTopic.type === "BCTT"
+                      ? "Báo cáo thực tập"
+                      : "Khóa luận tốt nghiệp"
+                    : "-"}
                 </span>
                 <h2 className="text-xl font-bold text-on-surface font-headline">{selectedTopic?.title ?? "Chưa chọn đề tài"}</h2>
                 <p className="text-sm text-outline mt-1">GVHD: {supervisorDisplay}</p>

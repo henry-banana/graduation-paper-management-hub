@@ -3,7 +3,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { X, BookOpen, Clock, CheckSquare, Users, Bell, ClipboardList, ChevronRight, LogOut, FileText, ExternalLink } from "lucide-react";
+import { X, BookOpen, Clock, CheckSquare, Users, Bell, ClipboardList, ChevronRight, LogOut, FileText, ExternalLink, Lightbulb } from "lucide-react";
 import { clearAuthSession, getCurrentUiRole } from "@/lib/auth/session";
 import { TOPIC_STATE_LABELS } from "@/lib/constants/vi-labels";
 
@@ -30,11 +30,13 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
     { name: "Duyệt đề tài", path: "/gvhd/pending", icon: Clock },
     { name: "Tiến độ hướng dẫn", path: "/gvhd/topics", icon: BookOpen },
     { name: "Chấm điểm (Rubric)", path: "/gvhd/scoring", icon: CheckSquare },
+    { name: "Đề xuất đề tài", path: "/gvhd/suggested-topics", icon: Lightbulb },
   ],
   GVHD: [
     { name: "Duyệt đề tài", path: "/gvhd/pending", icon: Clock },
     { name: "Tiến độ hướng dẫn", path: "/gvhd/topics", icon: BookOpen },
     { name: "Chấm điểm (Rubric)", path: "/gvhd/scoring", icon: CheckSquare },
+    { name: "Đề xuất đề tài", path: "/gvhd/suggested-topics", icon: Lightbulb },
     { name: "Thông báo", path: "/notifications", icon: Bell },
   ],
   GVPB: [
@@ -45,6 +47,7 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
     { name: "Quản lý đợt", path: "/tbm/periods", icon: Clock },
     { name: "Phân công hội đồng", path: "/tbm/assignments", icon: Users },
     { name: "Lịch trình bảo vệ", path: "/tbm/schedules", icon: FileText },
+    { name: "Đề xuất đề tài GV", path: "/tbm/suggested-topics", icon: Lightbulb },
     { name: "Lịch sử xuất file", path: "/exports", icon: ClipboardList },
   ],
   TV_HD: [

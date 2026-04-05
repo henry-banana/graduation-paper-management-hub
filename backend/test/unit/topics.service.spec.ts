@@ -133,7 +133,7 @@ describe('TopicsService - registration period window', () => {
       currentUser,
     );
 
-    expect(result.state).toBe('PENDING_GV');
+    expect(result.state).toBe('DRAFT');
     expect(result.id).toMatch(/^tp_/);
     expect(topicsRepository.create).toHaveBeenCalledTimes(1);
   });

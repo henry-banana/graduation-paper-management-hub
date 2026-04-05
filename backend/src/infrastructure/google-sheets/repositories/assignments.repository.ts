@@ -110,4 +110,23 @@ export class AssignmentsRepository extends SheetsBaseRepository<AssignmentRecord
   async findByTopicId(topicId: string): Promise<AssignmentRecord[]> {
     return this.findWhere((a) => a.topicId === topicId);
   }
+
+  /**
+   * DB-04: Check if an ACTIVE assignment already exists for (topicId, userId, topicRole).
+   * Returns the existing record to avoid duplicate Sheets rows.
+   */
+  async findExisting(
+    topicId: string,
+    userId: string,
+    topicRole: string,
+  ): Promise<AssignmentRecord | null> {
+    const all = await this.findWhere(
+      (a) =>
+        a.topicId === topicId &&
+        a.userId === userId &&
+        (a.topicRole as string) === topicRole &&
+        a.status === 'ACTIVE',
+    );
+    return all[0] ?? null;
+  }
 }

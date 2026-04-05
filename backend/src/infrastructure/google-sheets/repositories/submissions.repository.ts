@@ -112,7 +112,7 @@ export class SubmissionsRepository extends SheetsBaseRepository<SubmissionRecord
   }
 
   private parseFileType(value: string): FileType {
-    const valid: FileType[] = ['REPORT', 'TURNITIN', 'REVISION', 'INTERNSHIP_CONFIRMATION'];
+    const valid: FileType[] = ['REPORT', 'TURNITIN', 'REVISION', 'INTERNSHIP_CONFIRMATION', 'REVISION_EXPLANATION'];
     return valid.includes(value as FileType) ? (value as FileType) : 'REPORT';
   }
 

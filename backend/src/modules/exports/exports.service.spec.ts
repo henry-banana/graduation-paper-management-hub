@@ -22,6 +22,9 @@ describe('ExportsService', () => {
     create: jest.fn<(record: ExportRecord) => Promise<ExportRecord>>(),
     findById: jest.fn<(id: string) => Promise<ExportRecord | null>>(),
     findAll: jest.fn<() => Promise<ExportRecord[]>>(),
+    findWhere: jest.fn<
+      (predicate: (record: ExportRecord) => boolean) => Promise<ExportRecord[]>
+    >(),
   };
 
   const topicsRepository = {
@@ -78,6 +81,11 @@ describe('ExportsService', () => {
 
   const scoreSummariesRepository = {
     findWhere: jest.fn<(predicate: unknown) => Promise<unknown[]>>(),
+  };
+
+  const schedulesRepository = {
+    findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
+    findAll: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
   };
 
   const minutesGeneratorService = {
@@ -201,6 +209,7 @@ describe('ExportsService', () => {
       periodsRepository as never,
       assignmentsRepository as never,
       scoreSummariesRepository as never,
+      schedulesRepository as never,
       googleDriveClient as never,
       rubricGeneratorService as never,
       minutesGeneratorService as never,
@@ -212,6 +221,7 @@ describe('ExportsService', () => {
     );
     exportFilesRepository.findAll.mockResolvedValue([]);
     exportFilesRepository.findById.mockResolvedValue(null);
+    exportFilesRepository.findWhere.mockResolvedValue([]);
 
     topicsRepository.findById.mockImplementation(async (topicId: string) => {
       if (topicId === 'tp_bctt') {
@@ -268,38 +278,39 @@ describe('ExportsService', () => {
     });
 
     googleDriveClient.uploadFile.mockResolvedValue({
-      fileId: 'drv_001',
-      webViewLink: 'https://drive.google.com/file/d/drv_001/view',
-      webContentLink: 'https://drive.google.com/uc?id=drv_001',
+      fileId: 'gdrv_001',
+      webViewLink: 'https://drive.google.com/file/d/gdrv_001/view',
+      webContentLink: 'https://drive.google.com/uc?id=gdrv_001',
     });
   });
 
-  it('exports BCTT rubric with DOCX->PDF conversion when Drive is ready', async () => {
+  it('exports BCTT rubric as DOCX when Drive is ready', async () => {
     scoresRepository.findById.mockResolvedValue(submittedGvhdScore);
 
     const result = await service.exportRubricBctt('tp_bctt', 'sc_001', lecturerUser);
 
     expect(result.exportType).toBe('RUBRIC_BCTT');
-    expect(result.mimeType).toBe('application/pdf');
-    expect(result.driveFileId).toBe('pdf_001');
-    expect(result.fileName).toBe('rubric_bctt_001.pdf');
+    expect(result.mimeType).toBe(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    expect(result.driveFileId).toBe('gdrv_001');
+    expect(result.fileName).toBe('rubric_bctt_001.docx');
     expect(rubricGeneratorService.generateBctt).toHaveBeenCalledTimes(1);
-    expect(googleDriveClient.uploadDocxAndExportPdf).toHaveBeenCalledTimes(1);
+    expect(googleDriveClient.uploadFile).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to DOCX upload when PDF conversion fails', async () => {
+  it('marks export as failed when Drive upload fails', async () => {
     scoresRepository.findById.mockResolvedValue(submittedGvhdScore);
-    googleDriveClient.uploadDocxAndExportPdf.mockRejectedValueOnce(
-      new Error('Drive export failed'),
-    );
+    googleDriveClient.uploadFile.mockRejectedValueOnce(new Error('Drive upload failed'));
 
     const result = await service.exportRubricBctt('tp_bctt', 'sc_001', lecturerUser);
 
     expect(result.mimeType).toBe(
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
-    expect(result.driveFileId).toBe('drv_001');
-    expect(result.errorMessage).toContain('DOCX->PDF conversion failed');
+    expect((result.driveFileId ?? '').startsWith('drv_')).toBe(true);
+    expect(result.status).toBe('FAILED');
+    expect(result.errorMessage).toContain('Drive upload failed');
     expect(googleDriveClient.uploadFile).toHaveBeenCalledTimes(1);
   });
 
@@ -344,10 +355,10 @@ describe('ExportsService', () => {
     expect(rubricGeneratorService.generateKltnGvpb).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects KLTN rubric export when topic state is not allowed', async () => {
+  it('rejects KLTN rubric export when topic state is before in-progress', async () => {
     topicsRepository.findById.mockImplementation(async (topicId: string) => {
       if (topicId === 'tp_kltn') {
-        return { ...kltnTopic, state: 'PENDING_CONFIRM' };
+        return { ...kltnTopic, state: 'PENDING_GV' };
       }
       if (topicId === 'tp_bctt') {
         return bcttTopic;

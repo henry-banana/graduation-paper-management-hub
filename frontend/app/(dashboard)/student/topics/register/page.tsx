@@ -408,7 +408,6 @@ export default function StudentTopicRegisterPage() {
           <div>
             <h2 className="text-2xl font-bold font-headline text-on-surface">Đăng ký thành công!</h2>
             <p className="text-outline mt-2 max-w-sm">Đề tài đã được gửi đến GVHD. Hạn phản hồi duyệt là <strong>3 ngày</strong> kể từ lúc gửi.</p>
-            <p className="text-xs text-outline mt-2">Mã đề tài: {submittedTopicId}</p>
           </div>
           <Link href="/student/topics" className="text-sm text-primary font-semibold hover:underline">
             Xem đề tài của tôi

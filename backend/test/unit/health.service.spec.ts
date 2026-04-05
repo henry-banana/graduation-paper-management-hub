@@ -1,12 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HealthService } from '../../src/modules/health/health.service';
+import { GoogleSheetsClient } from '../../src/infrastructure/google-sheets';
+import { GoogleDriveClient } from '../../src/infrastructure/google-drive';
 
 describe('HealthService', () => {
   let healthService: HealthService;
 
+  const googleSheetsClient = {
+    isReady: jest.fn().mockReturnValue(true),
+    healthCheck: jest.fn().mockResolvedValue(true),
+  };
+
+  const googleDriveClient = {
+    isReady: jest.fn().mockReturnValue(true),
+    healthCheck: jest.fn().mockResolvedValue(true),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [HealthService],
+      providers: [
+        HealthService,
+        { provide: GoogleSheetsClient, useValue: googleSheetsClient },
+        { provide: GoogleDriveClient, useValue: googleDriveClient },
+      ],
     }).compile();
 
     healthService = module.get<HealthService>(HealthService);

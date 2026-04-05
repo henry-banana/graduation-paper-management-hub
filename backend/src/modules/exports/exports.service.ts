@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -12,7 +13,7 @@ import {
   ExportType,
   ExportStatus,
 } from './dto/export-response.dto';
-import { AuthUser } from '../../common/types';
+import { AuthUser, TopicRole } from '../../common/types';
 import {
   EXPORT_DOCX_MIME_TYPE,
   EXPORT_JSON_MIME_TYPE,
@@ -28,6 +29,7 @@ import {
   UsersRepository,
   AssignmentsRepository,
   ScoreSummariesRepository,
+  SchedulesRepository,
 } from '../../infrastructure/google-sheets';
 import { GoogleDriveClient } from '../../infrastructure/google-drive';
 import {
@@ -43,6 +45,7 @@ import type { PeriodRecord } from '../periods/periods.service';
 import type { RubricItem } from '../scores/dto';
 import type { AssignmentRecord } from '../assignments/assignments.service';
 import type { ScoreSummaryRecord } from '../scores/scores.service';
+import { ExportMinutesDto } from './dto';
 
 
 export interface ExportRecord {
@@ -57,6 +60,7 @@ export interface ExportRecord {
   mimeType?: string;
   errorMessage?: string;
   requestedBy: string;
+  dedupKey?: string;
   createdAt: string;
   completedAt?: string;
   expiresAt?: string;
@@ -85,6 +89,7 @@ export class ExportsService {
     private readonly periodsRepository: PeriodsRepository,
     private readonly assignmentsRepository: AssignmentsRepository,
     private readonly scoreSummariesRepository: ScoreSummariesRepository,
+    private readonly schedulesRepository: SchedulesRepository,
     private readonly googleDriveClient: GoogleDriveClient,
     private readonly rubricGeneratorService: RubricGeneratorService,
     private readonly minutesGeneratorService: MinutesGeneratorService,
@@ -92,13 +97,16 @@ export class ExportsService {
   ) {}
 
   /**
-   * Export biên bản họp hội đồng bảo vệ (MINUTES) as PDF
+   * Export biên bản họp hội đồng bảo vệ (MINUTES) as PDF.
+   * dto chứa các dữ liệu do hội đồng nhập sau buổi bảo vệ (nhận xét, yêu cầu chỉnh sửa, địa điểm).
    */
   async exportMinutes(
     topicId: string,
+    dto: ExportMinutesDto,
     user: AuthUser,
   ): Promise<ExportResponseDto> {
     const topic = await this.getTopicOrThrow(topicId);
+    await this.assertTopicAccess(topic, user);
 
     // Gather topic context
     const [student, supervisor, period] = await Promise.all([
@@ -113,28 +121,68 @@ export class ExportsService {
 
     // Get assignments to find council roles
     const assignments = await this.assignmentsRepository.findByTopicId(topicId);
+    const supervisorAssignment = assignments.find(
+      (a) =>
+        a.topicRole === 'GVHD' &&
+        a.status === 'ACTIVE' &&
+        a.userId === topic.supervisorUserId,
+    );
     const chairAssignment = assignments.find((a) => a.topicRole === 'CT_HD' && a.status === 'ACTIVE');
     const secretaryAssignment = assignments.find((a) => a.topicRole === 'TK_HD' && a.status === 'ACTIVE');
     const reviewerAssignment = assignments.find((a) => a.topicRole === 'GVPB' && a.status === 'ACTIVE');
     const tvhdAssignments = assignments.filter((a) => a.topicRole === 'TV_HD' && a.status === 'ACTIVE');
 
+    // Validate required assignment chain before generating legally valid minutes.
+    const missingRoles: string[] = [];
+    if (!supervisorAssignment) missingRoles.push('GVHD');
+    if (!reviewerAssignment) missingRoles.push('GVPB');
+    if (!chairAssignment) missingRoles.push('CT_HD');
+    if (!secretaryAssignment) missingRoles.push('TK_HD');
+    if (tvhdAssignments.length === 0) missingRoles.push('TV_HD');
+    if (missingRoles.length > 0) {
+      throw new ConflictException(
+        `Cần phân công đầy đủ trước khi xuất biên bản. Thiếu: ${missingRoles.join(', ')}`,
+      );
+    }
+
     // Resolve council names
-    const chairUser = chairAssignment
-      ? await this.usersRepository.findById(chairAssignment.userId)
-      : null;
-    const secretaryUser = secretaryAssignment
-      ? await this.usersRepository.findById(secretaryAssignment.userId)
-      : null;
-    const reviewerUser = reviewerAssignment
-      ? await this.usersRepository.findById(reviewerAssignment.userId)
-      : null;
+    const chairUser = await this.usersRepository.findById(chairAssignment!.userId);
+    const secretaryUser = await this.usersRepository.findById(secretaryAssignment!.userId);
+    const reviewerUser = await this.usersRepository.findById(reviewerAssignment!.userId);
     const tvhdUsers = await Promise.all(
       tvhdAssignments.map((a) => this.usersRepository.findById(a.userId)),
+    );
+    if (!chairUser || !secretaryUser || !reviewerUser || tvhdUsers.some((u) => !u)) {
+      throw new NotFoundException('Không tìm thấy đầy đủ thông tin giảng viên hội đồng');
+    }
+    const resolvedTvhdUsers = tvhdUsers.filter(
+      (u): u is UserRecord => Boolean(u),
     );
 
     // Get score summary for final score
     const summaries = await this.scoreSummariesRepository.findWhere((s) => s.topicId === topicId);
     const summary = summaries[0];
+
+    // Lấy lịch bảo vệ thật từ Schedules sheet để điền defenseDate chính xác vào biên bản
+    const schedule = await this.schedulesRepository.findFirst((s) => s.topicId === topicId);
+    if (!schedule?.defenseAt) {
+      throw new ConflictException('Chưa có lịch bảo vệ (defenseAt). Vui lòng cập nhật lịch trước khi xuất biên bản.');
+    }
+
+    const defenseDateStr = new Date(schedule.defenseAt).toLocaleString('vi-VN', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    // defenseLocation: ưu tiên dto (do hội đồng ghi đè), sau đó lấy từ schedule
+    const defenseLocation =
+      dto.defenseLocation?.trim() ||
+      schedule?.locationDetail ||
+      (schedule?.locationType === 'ONLINE' ? 'Trực tuyến' : undefined);
 
     const templateData: MinutesTemplateData = {
       topicTitle: topic.title,
@@ -142,20 +190,32 @@ export class ExportsService {
       period: period.code,
       studentName: student.name,
       studentId: student.studentId ?? '',
-      chairName: chairUser?.name ?? '(Chưa phân công)',
-      secretaryName: secretaryUser?.name ?? '(Chưa phân công)',
+      chairName: chairUser.name,
+      secretaryName: secretaryUser.name,
       supervisorName: supervisor.name,
-      reviewerName: reviewerUser?.name,
-      councilMembers: tvhdUsers.filter(Boolean).map((u) => u!.name),
-      defenseDate: new Date().toLocaleDateString('vi-VN', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-      }),
+      reviewerName: reviewerUser.name,
+      councilMembers: resolvedTvhdUsers.map((u) => u.name),
+      defenseDate: defenseDateStr,
+      defenseLocation,
+      // Nhận xét & yêu cầu chỉnh sửa từ body (do hội đồng nhập)
+      supervisorComments: dto.supervisorComments?.trim(),
+      chairComments: dto.chairComments?.trim(),
+      revisionRequirements: dto.revisionRequirements?.trim(),
+      revisionDeadline: dto.revisionDeadline?.trim(),
       finalScore: summary?.finalScore ?? undefined,
       result: (summary?.result as 'PASS' | 'FAIL' | 'PENDING') ?? 'PENDING',
     };
 
     // Generate PDF buffer
     const generated = await this.minutesGeneratorService.generatePdf(templateData);
+    if (!generated.buffer?.length) {
+      throw new ConflictException('Không thể tạo nội dung PDF biên bản');
+    }
+    if (generated.mimeType !== EXPORT_PDF_MIME_TYPE) {
+      throw new ConflictException(
+        `Định dạng biên bản không hợp lệ: ${generated.mimeType}`,
+      );
+    }
 
     const generatedDoc: GeneratedDocument = {
       filename: generated.filename,
@@ -163,7 +223,17 @@ export class ExportsService {
       buffer: generated.buffer,
     };
 
-    return this.createExport(topicId, 'MINUTES', user, {}, generatedDoc);
+    const exportResult = await this.createExport(topicId, 'MINUTES', user, {}, generatedDoc);
+    if (
+      exportResult.status !== 'COMPLETED' ||
+      !exportResult.driveFileId ||
+      !exportResult.driveLink
+    ) {
+      throw new ConflictException(
+        'Xuất biên bản thất bại. File PDF chưa được lưu hợp lệ lên Drive/DB.',
+      );
+    }
+    return exportResult;
   }
 
   /**
@@ -183,7 +253,7 @@ export class ExportsService {
       throw new BadRequestException('Chỉ hỗ trợ xuất phiếu BCTT cho đề tài loại BCTT');
     }
 
-    const score = await this.getScoreOrThrow(scoreId, topic.id, 'GVHD');
+    const score = await this.getScoreOrThrow(scoreId, topic.id, 'GVHD', user);
     const generatedDoc = await this.buildBcttRubricDocument(topic, score);
 
     return this.createExport(topicId, 'RUBRIC_BCTT', user, { scoreId }, generatedDoc);
@@ -221,7 +291,7 @@ export class ExportsService {
       );
     }
 
-    const score = await this.getScoreOrThrow(scoreId, topic.id, role);
+    const score = await this.getScoreOrThrow(scoreId, topic.id, role, user);
     const generatedDoc = await this.buildKltnRubricDocument(topic, role, score);
 
     return this.createExport(
@@ -244,6 +314,8 @@ export class ExportsService {
     if (!topic) {
       throw new NotFoundException(`Đề tài ${topicId} không tồn tại`);
     }
+
+    await this.assertTopicAccess(topic, user);
 
     return this.createExport(topicId, 'SCORE_SHEET', user);
   }
@@ -364,6 +436,25 @@ export class ExportsService {
     metadata?: ExportMetadata,
     generatedDoc?: GeneratedDocument,
   ): Promise<ExportResponseDto> {
+    const dedupKey = this.buildDedupKey(topicId, exportType, user.userId, metadata);
+    const existingRecords = await this.exportFilesRepository.findWhere((record) => {
+      if (record.topicId !== topicId || record.exportType !== exportType) return false;
+      if (record.requestedBy !== user.userId) return false;
+      if ((record.dedupKey ?? '') !== dedupKey) return false;
+      if (record.status !== 'COMPLETED') return false;
+      return !this.isExportRecordExpired(record);
+    });
+    if (existingRecords.length > 0) {
+      const latest = [...existingRecords].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )[0];
+      this.logger.log(
+        `[DB-07] Returning cached export record ${latest.id} (dedup key: ${dedupKey})`,
+      );
+      return this.mapToDto(latest);
+    }
+
     const id = `exp_${crypto.randomBytes(8).toString('hex')}`;
     const now = new Date().toISOString();
     const fileToUpload =
@@ -428,44 +519,27 @@ export class ExportsService {
       driveLink = `https://drive.google.com/file/d/${fallbackDriveId}/view`;
     }
 
+    const uploadFailed = driveFileId?.startsWith('drv_') ?? false;
+
     const newExport: ExportRecord = {
       id,
       topicId,
       exportType,
-      status: 'COMPLETED',
+      // FIX: nếu Drive upload thất bại (fallback id), đánh status FAILED thay vì COMPLETED.
+      // Tránh trường hợp GV/SV tập h click link nhưng file không tồn tại trên Drive.
+      status: uploadFailed ? 'FAILED' : 'COMPLETED',
       driveFileId,
       driveLink,
-      downloadUrl: driveLink,
+      downloadUrl: uploadFailed ? undefined : driveLink,
       fileName: uploadedFileName,
       mimeType: uploadedMimeType,
       errorMessage: warnings.length > 0 ? warnings.join(' | ') : undefined,
       requestedBy: user.userId,
+      dedupKey,
       createdAt: now,
-      completedAt: now,
-      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12 hours
+      completedAt: uploadFailed ? undefined : now,
+      expiresAt: uploadFailed ? undefined : new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12 hours
     };
-
-    // DB-07 fix: idempotency guard for rubric exports.
-    // If an identical (topicId + exportType) record was created in the last 15 minutes
-    // and has not expired yet, return it instead of appending a duplicate row.
-    if (isRubricExport) {
-      const deduplicationWindowMs = 15 * 60 * 1000; // 15 minutes
-      const cutoff = Date.now() - deduplicationWindowMs;
-      const existingRecords = await this.exportFilesRepository.findWhere(
-        (r) =>
-          r.topicId === topicId &&
-          r.exportType === exportType &&
-          r.status === 'COMPLETED' &&
-          new Date(r.createdAt).getTime() > cutoff &&
-          (!r.expiresAt || new Date(r.expiresAt) > new Date()),
-      );
-      if (existingRecords.length > 0) {
-        this.logger.log(
-          `[DB-07] Returning cached export record ${existingRecords[0].id} (dedup hit for ${exportType}/${topicId})`,
-        );
-        return this.mapToDto(existingRecords[0]);
-      }
-    }
 
     await this.exportFilesRepository.create(newExport);
 
@@ -495,6 +569,33 @@ export class ExportsService {
     };
   }
 
+  private buildDedupKey(
+    topicId: string,
+    exportType: ExportType,
+    requestedBy: string,
+    metadata?: ExportMetadata,
+  ): string {
+    const rolePart = metadata?.role ?? '-';
+    const scorePart = metadata?.scoreId ?? '-';
+    return `${topicId}|${exportType}|${requestedBy}|${rolePart}|${scorePart}`;
+  }
+
+  private isExportRecordExpired(record: ExportRecord): boolean {
+    const expirationIso = record.expiresAt ?? this.deriveLegacyExpiry(record);
+    if (!expirationIso) return false;
+    const expiration = new Date(expirationIso).getTime();
+    if (Number.isNaN(expiration)) return false;
+    return expiration <= Date.now();
+  }
+
+  private deriveLegacyExpiry(record: ExportRecord): string | undefined {
+    const baseIso = record.completedAt ?? record.createdAt;
+    if (!baseIso) return undefined;
+    const base = new Date(baseIso).getTime();
+    if (Number.isNaN(base)) return undefined;
+    return new Date(base + 12 * 60 * 60 * 1000).toISOString();
+  }
+
   private async getTopicOrThrow(topicId: string): Promise<TopicRecord> {
     const topic = await this.topicsRepository.findById(topicId);
     if (!topic) {
@@ -503,10 +604,34 @@ export class ExportsService {
     return topic;
   }
 
+  /**
+   * Authorization helper for exports: allow TBM, supervisor, or assigned council/reviewer lecturers.
+   */
+  private async assertTopicAccess(topic: TopicRecord, user: AuthUser): Promise<void> {
+    if (user.role === 'TBM') return;
+
+    // Supervisor always allowed
+    if (user.role === 'LECTURER' && topic.supervisorUserId === user.userId) {
+      return;
+    }
+
+    // Check assignments for other lecturers
+    const assignments = await this.assignmentsRepository.findByTopicId(topic.id);
+    const allowedRoles: TopicRole[] = ['GVHD', 'GVPB', 'CT_HD', 'TK_HD', 'TV_HD'];
+    const hasAssignment = assignments.some(
+      (a) => a.userId === user.userId && allowedRoles.includes(a.topicRole) && a.status === 'ACTIVE',
+    );
+
+    if (!hasAssignment) {
+      throw new ForbiddenException('Không có quyền xuất tài liệu cho đề tài này');
+    }
+  }
+
   private async getScoreOrThrow(
     scoreId: string,
     topicId: string,
     expectedRole: KltnRubricExportRole | 'GVHD',
+    requester: AuthUser,
   ): Promise<ScoreRecord> {
     const score = await this.scoresRepository.findById(scoreId);
     if (!score) {
@@ -521,6 +646,13 @@ export class ExportsService {
       throw new BadRequestException(
         `Bảng điểm ${scoreId} không thuộc vai trò ${expectedRole}`,
       );
+    }
+
+    // Authorization: requester must be the scorer or TBM.
+    if (requester.role !== 'TBM') {
+      if (score.scorerUserId !== requester.userId) {
+        throw new ForbiddenException('Bạn không có quyền xuất phiếu cho bảng điểm này');
+      }
     }
 
     if (score.status !== 'SUBMITTED') {

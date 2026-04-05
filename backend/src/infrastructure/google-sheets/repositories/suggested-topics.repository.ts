@@ -15,6 +15,7 @@ export interface SuggestedTopicRecord {
   dot: string;
   lecturerUserId?: string;
   createdAt?: string;
+  isVisible?: boolean;  // TBM can hide suggestions from search results
 }
 
 @Injectable()
@@ -37,6 +38,8 @@ export class SuggestedTopicsRepository extends SheetsBaseRepository<SuggestedTop
       .map((r) => this.fromRow(r))
       .filter((rec) => {
         if (!rec.title) return false;
+        // Only return visible suggestions to students
+        if (rec.isVisible === false) return false;
         const matchTitle = rec.title.toLowerCase().includes(queryLower);
         if (!matchTitle) return false;
         if (supervisorEmail) {
@@ -67,6 +70,7 @@ export class SuggestedTopicsRepository extends SheetsBaseRepository<SuggestedTop
       dot: this.str(v[2]),
       lecturerUserId: this.optionalStr(v[4]),
       createdAt: this.optionalStr(v[5]),
+      isVisible: v[6] !== undefined ? this.bool(v[6]) : true, // default visible
     };
   }
 
@@ -78,6 +82,14 @@ export class SuggestedTopicsRepository extends SheetsBaseRepository<SuggestedTop
       entity.id,
       entity.lecturerUserId ?? '',
       entity.createdAt ?? '',
+      entity.isVisible !== false ? 'TRUE' : 'FALSE', // [6]: isVisible
     ];
+  }
+
+  /**
+   * Find all suggestions created by a specific lecturer.
+   */
+  async findByLecturerId(lecturerUserId: string): Promise<SuggestedTopicRecord[]> {
+    return this.findWhere((r) => r.lecturerUserId === lecturerUserId);
   }
 }

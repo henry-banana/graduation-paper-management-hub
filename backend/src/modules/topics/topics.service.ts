@@ -940,11 +940,14 @@ export class TopicsService {
       topic.updatedAt = new Date().toISOString();
       await this.topicsRepository.update(topic.id, topic);
 
-      // Bug fix: Create GVHD assignment when topic is submitted to supervisor (DRAFT → PENDING_GV)
+      // DB-04: Create GVHD assignment only if none exists (uses findExisting duplicate guard)
       if (action === 'SUBMIT_TO_GV' && toState === 'PENDING_GV' && this.assignmentsRepository) {
-        const existingAssignment = (await this.assignmentsRepository.findAll())
-          .find(a => a.topicId === topic.id && a.userId === topic.supervisorUserId && a.topicRole === 'GVHD');
-        
+        const existingAssignment = await this.assignmentsRepository.findExisting(
+          topic.id,
+          topic.supervisorUserId,
+          'GVHD',
+        );
+
         if (!existingAssignment) {
           const newAssignment = {
             id: `as_${crypto.randomBytes(6).toString('hex')}`,
@@ -955,7 +958,7 @@ export class TopicsService {
             assignedAt: new Date().toISOString(),
             revokedAt: undefined,
           };
-          await this.assignmentsRepository.insert(newAssignment);
+          await this.assignmentsRepository.create(newAssignment);
           this.logger.log(`Created GVHD assignment for topic=${topic.id} supervisor=${topic.supervisorUserId}`);
         }
 
@@ -972,10 +975,11 @@ export class TopicsService {
           topicId: topic.id,
           context: {
             topicTitle: topic.title,
-            studentName: currentUser.email, // Will be enriched later if needed
+            studentName: currentUser.email,
           },
         });
       }
+
 
       if (
         (toState === 'COMPLETED' && fromState !== 'COMPLETED') ||
@@ -1393,6 +1397,10 @@ export class TopicsService {
       case 'APPROVE':
       case 'START_PROGRESS':
       case 'MOVE_TO_GRADING':
+        // TBM can move topics forward operationally; GVHD retains control otherwise
+        if (action === 'MOVE_TO_GRADING' && authContext.isTbm) {
+          return true;
+        }
         return authContext.isSupervisor;
 
       case 'REJECT':
@@ -1402,8 +1410,8 @@ export class TopicsService {
         return authContext.isSupervisor;
 
       case 'REQUEST_CONFIRM':
-        // Pre-defense request must be confirmed by assigned supervisor.
-        return authContext.isSupervisor;
+        // Student owner initiates request; GVHD can also trigger on behalf of student; TBM allowed to unblock flow.
+        return authContext.isStudentOwner || authContext.isSupervisor || authContext.isTbm;
 
       case 'CONFIRM_DEFENSE':
         // Assigned reviewer can confirm defense readiness; TBM can override.

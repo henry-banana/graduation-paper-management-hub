@@ -6,12 +6,31 @@ import { ApiListResponse, api } from "@/lib/api";
 
 interface ExportJob {
   id: string;
+  fileName?: string;
   filename?: string;
+  exportType?: string;
   type?: string;
   status: "COMPLETED" | "PROCESSING" | "FAILED" | "PENDING";
   createdAt?: string;
   driveLink?: string;
   errorMessage?: string;
+}
+
+function formatExportTypeLabel(value?: string): string {
+  switch (value) {
+    case "RUBRIC_BCTT":
+      return "Phiếu chấm BCTT";
+    case "RUBRIC_KLTN":
+      return "Phiếu chấm KLTN";
+    case "SCORE_SHEET":
+      return "Bảng điểm tổng hợp";
+    case "TOPIC_LIST":
+      return "Danh sách đề tài";
+    case "MINUTES":
+      return "Biên bản hội đồng";
+    default:
+      return "Tệp export";
+  }
 }
 
 export default function ExportsPage() {
@@ -102,7 +121,9 @@ export default function ExportsPage() {
                 {exports.map((job) => (
                   <tr key={job.id} className="hover:bg-surface-container-low/50 transition-colors">
                     <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-on-surface">{job.filename ?? job.type ?? job.id}</div>
+                      <div className="text-sm font-medium text-on-surface">
+                        {job.fileName ?? job.filename ?? formatExportTypeLabel(job.exportType ?? job.type)}
+                      </div>
                       {job.errorMessage && <div className="text-xs text-error mt-1">{job.errorMessage}</div>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">

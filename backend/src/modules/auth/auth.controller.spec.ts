@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthUser } from '../../common/types';
+import { AssignmentsService } from '../assignments/assignments.service';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -26,12 +27,17 @@ describe('AuthController', () => {
     }),
   };
 
+  const mockAssignmentsService = {
+    getActiveTopicRolesForUser: jest.fn().mockResolvedValue([]),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
       providers: [
         { provide: AuthService, useValue: mockAuthService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: AssignmentsService, useValue: mockAssignmentsService },
       ],
     }).compile();
 

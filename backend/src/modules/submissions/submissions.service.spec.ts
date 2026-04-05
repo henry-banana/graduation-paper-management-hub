@@ -234,10 +234,17 @@ describe('SubmissionsService', () => {
       findById: jest.fn(async (id: string) => topicsStore.find((t) => t.id === id) ?? null),
     };
 
+    let uploadSeq = 0;
     const googleDriveClientMock: Partial<GoogleDriveClient> = {
-      isReady: jest.fn(() => false),
-      getOrCreateUserUploadFolderId: jest.fn(),
-      uploadFile: jest.fn(),
+      isReady: jest.fn(() => true),
+      getOrCreateUserUploadFolderId: jest.fn(async () => 'folder_mock_001'),
+      uploadFile: jest.fn(async () => {
+        uploadSeq += 1;
+        return {
+          fileId: `drv_mock_${uploadSeq}`,
+          webViewLink: `https://drive.google.com/file/d/drv_mock_${uploadSeq}`,
+        };
+      }),
     };
 
     notificationsService = {

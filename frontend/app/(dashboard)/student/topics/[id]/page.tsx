@@ -25,7 +25,7 @@ import {
   formatDeadlineStatus,
 } from "@/lib/constants/vi-labels";
 
-type SubmissionFileType = "REPORT" | "TURNITIN" | "REVISION" | "INTERNSHIP_CONFIRMATION";
+type SubmissionFileType = "REPORT" | "TURNITIN" | "REVISION" | "INTERNSHIP_CONFIRMATION" | "REVISION_EXPLANATION";
 
 interface TopicDto {
   id: string;
@@ -86,10 +86,22 @@ interface NotificationDto {
 interface SupervisorOptionDto {
   id: string;
   fullName: string;
+  lecturerId?: string;
+  email?: string;
   department?: string;
   totalQuota?: number;
   quotaUsed?: number;
 }
+
+interface PeriodOptionDto {
+  id: string;
+  code: string;
+}
+
+const EMPTY_PERIODS_RESPONSE: ApiListResponse<PeriodOptionDto> = {
+  data: [],
+  pagination: { page: 1, size: 0, total: 0 },
+};
 
 const SCORE_READY_STATES = new Set([
   "GRADING",
@@ -296,6 +308,7 @@ function SubmissionPanel({
     }
     if (topic.type === "KLTN" && ["SCORING", "COMPLETED"].includes(topic.state)) {
       types.push("REVISION");
+      types.push("REVISION_EXPLANATION");
     }
     return types;
   }, [topic.type, topic.state]);
@@ -367,6 +380,8 @@ function SubmissionPanel({
                     ? activeRevisionRound
                       ? `Vòng chỉnh sửa V${activeRevisionRound.roundNumber}: ${formatDateTime(activeRevisionRound.startAt)} - ${formatDateTime(activeRevisionRound.endAt)}`
                       : "Bản chỉnh sửa yêu cầu một vòng chỉnh sửa đang mở do TBM cấu hình."
+                    : selectedFileType === "REVISION_EXPLANATION"
+                    ? "File giải trình chỉnh sửa (PDF), đính kèm cùng với bản REVISION."
                     : "Báo cáo PDF, dung lượng tối đa 50MB."}
                 </div>
               </div>
@@ -452,6 +467,7 @@ export default function StudentTopicDetailPage() {
   const [schedule, setSchedule] = useState<ScheduleDto | null>(null);
   const [notifications, setNotifications] = useState<NotificationDto[]>([]);
   const [supervisors, setSupervisors] = useState<SupervisorOptionDto[]>([]);
+  const [periodCode, setPeriodCode] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scoreError, setScoreError] = useState<string | null>(null);
@@ -488,7 +504,7 @@ export default function StudentTopicDetailPage() {
 
         // Bug #6 fix: Include current supervisor ID to show their name even if at full quota
         const currentSupervisorId = topicRes.data.supervisorUserId;
-        const [submissionsRes, notificationsRes, supervisorsRes, roundsRes] = await Promise.all([
+        const [submissionsRes, notificationsRes, supervisorsRes, roundsRes, periodsRes] = await Promise.all([
           api.get<ApiResponse<SubmissionDto[]>>(`/topics/${topicId}/submissions`),
           api.get<ApiListResponse<NotificationDto>>("/notifications?page=1&size=100"),
           api.get<ApiResponse<SupervisorOptionDto[]>>(
@@ -497,6 +513,9 @@ export default function StudentTopicDetailPage() {
           api
             .get<ApiResponse<RevisionRoundDto[]>>(`/topics/${topicId}/revisions/rounds`)
             .catch(() => null),
+          api
+            .get<ApiListResponse<PeriodOptionDto>>("/periods?page=1&size=200")
+            .catch(() => EMPTY_PERIODS_RESPONSE),
         ]);
 
         setSubmissions(submissionsRes.data);
@@ -508,6 +527,10 @@ export default function StudentTopicDetailPage() {
           notificationsRes.data.filter((notification) => notification.topicId === topicId),
         );
         setSupervisors(supervisorsRes.data);
+        const matchedPeriod = (periodsRes.data ?? []).find(
+          (period) => period.id === topicRes.data.periodId,
+        );
+        setPeriodCode(matchedPeriod?.code ?? topicRes.data.periodId);
 
         const scoreReady = SCORE_READY_STATES.has(topicRes.data.state);
         if (scoreReady) {
@@ -650,6 +673,22 @@ export default function StudentTopicDetailPage() {
     }
   };
 
+  const [isSubmittingToGv, setIsSubmittingToGv] = useState(false);
+
+  const handleSubmitToGv = async () => {
+    if (!topic || !confirm("Xác nhận gửi đề tài đến GVHD để chờ duyệt?")) return;
+    setIsSubmittingToGv(true);
+    setError(null);
+    try {
+      await api.post(`/topics/${topic.id}/transition`, { action: "SUBMIT_TO_GV" });
+      setTopic({ ...topic, state: "PENDING_GV" });
+    } catch (err: any) {
+      setError(err.message || "Gửi đến GVHD thất bại. Vui lòng thử lại.");
+    } finally {
+      setIsSubmittingToGv(false);
+    }
+  };
+
   if (error && !topic) {
     return (
       <div className="flex items-start gap-3 bg-error-container/20 border border-error/20 rounded-2xl px-4 py-3">
@@ -687,6 +726,15 @@ export default function StudentTopicDetailPage() {
           </div>
           
           <div className="flex gap-2 shrink-0">
+             {topic.state === "DRAFT" && (
+               <button
+                 onClick={handleSubmitToGv}
+                 disabled={isSubmittingToGv}
+                 className="px-4 py-2 bg-primary text-white font-semibold text-sm rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-50"
+               >
+                 {isSubmittingToGv ? "Đang gửi..." : "Gửi đến GVHD"}
+               </button>
+             )}
              {["DRAFT", "PENDING_GV"].includes(topic.state) && !isEditing && (
                 <button
                   onClick={() => setIsEditing(true)}
@@ -771,6 +819,11 @@ export default function StudentTopicDetailPage() {
                           (supervisor.quotaUsed ?? 0) >=
                             (supervisor.totalQuota ?? 0) &&
                           supervisor.id !== topic.supervisorUserId;
+                        const remainingSlots =
+                          typeof supervisor.totalQuota === "number" &&
+                          typeof supervisor.quotaUsed === "number"
+                            ? Math.max(supervisor.totalQuota - supervisor.quotaUsed, 0)
+                            : null;
 
                         return (
                           <option
@@ -779,12 +832,12 @@ export default function StudentTopicDetailPage() {
                             disabled={isFull}
                           >
                             {supervisor.fullName}
+                            {supervisor.lecturerId ? ` (${supervisor.lecturerId})` : ""}
                             {supervisor.department
                               ? ` (${supervisor.department})`
                               : ""}
-                            {typeof supervisor.quotaUsed === "number" &&
-                            typeof supervisor.totalQuota === "number"
-                              ? ` - ${supervisor.quotaUsed}/${supervisor.totalQuota}`
+                            {remainingSlots != null
+                              ? ` - Còn ${remainingSlots}/${supervisor.totalQuota}`
                               : ""}
                             {isFull ? " (Đã đầy)" : ""}
                           </option>
@@ -807,9 +860,14 @@ export default function StudentTopicDetailPage() {
                     {selectedSupervisor?.department && (
                       <p className="text-xs text-outline mt-1">{selectedSupervisor.department}</p>
                     )}
+                    {(selectedSupervisor?.lecturerId || selectedSupervisor?.email) && (
+                      <p className="text-xs text-outline mt-1">
+                        {selectedSupervisor.lecturerId ?? selectedSupervisor.email}
+                      </p>
+                    )}
                   </div>
                   <div><span className="block text-xs text-on-surface-variant mb-1">Ngành/Chuyên ngành</span><span className="font-semibold text-on-surface text-[15px]">{topic.domain}</span></div>
-                  <div><span className="block text-xs text-on-surface-variant mb-1">Đợt</span><span className="font-semibold text-on-surface text-[15px]">{topic.periodId}</span></div>
+                  <div><span className="block text-xs text-on-surface-variant mb-1">Đợt</span><span className="font-semibold text-on-surface text-[15px]">{periodCode || topic.periodId}</span></div>
                   <div>
                      <span className="block text-xs text-on-surface-variant mb-1">Hạn nộp báo cáo</span>
                      <span className={`font-semibold ${formatDeadlineStatus(topic.submitEndAt).urgency === 'urgent' ? 'text-amber-600' : 'text-on-surface'}`}>

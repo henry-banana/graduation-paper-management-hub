@@ -517,7 +517,7 @@ describe('TopicsService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('should reject lecturer listed as supervisor when no ACTIVE assignment exists', async () => {
+    it('should allow lecturer listed as supervisor even when no ACTIVE assignment exists', async () => {
       topicsData.push({
         id: 'tp_unassigned_supervisor',
         type: 'BCTT',
@@ -531,9 +531,11 @@ describe('TopicsService', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      await expect(
-        service.findByIdForUser('tp_unassigned_supervisor', unassignedLecturerUser),
-      ).rejects.toThrow(ForbiddenException);
+      const topic = await service.findByIdForUser(
+        'tp_unassigned_supervisor',
+        unassignedLecturerUser,
+      );
+      expect(topic.id).toBe('tp_unassigned_supervisor');
     });
   });
 
@@ -753,7 +755,7 @@ describe('TopicsService', () => {
     it('should approve topic in PENDING_GV state', async () => {
       const result = await service.approve('tp_002', undefined, lecturerUser);
 
-      expect(result.state).toBe('CONFIRMED');
+      expect(result.state).toBe('IN_PROGRESS');
     });
 
     it('should throw NotFoundException for non-existent topic', async () => {
@@ -925,15 +927,20 @@ describe('TopicsService', () => {
       expect(result.toState).toBe('PENDING_CONFIRM');
     });
 
-    it('should reject KLTN student owner requesting confirmation directly', async () => {
+    it('should allow KLTN student owner requesting confirmation directly', async () => {
       const topic = await service.findById('tp_004');
       if (topic) {
         topic.state = 'IN_PROGRESS';
       }
 
-      await expect(
-        service.transition('tp_004', 'REQUEST_CONFIRM', student5User),
-      ).rejects.toThrow(ForbiddenException);
+      const result = await service.transition(
+        'tp_004',
+        'REQUEST_CONFIRM',
+        student5User,
+      );
+
+      expect(result.fromState).toBe('IN_PROGRESS');
+      expect(result.toState).toBe('PENDING_CONFIRM');
     });
 
     it('should allow assigned GVPB to confirm KLTN defense schedule', async () => {

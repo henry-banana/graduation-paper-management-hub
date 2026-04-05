@@ -14,7 +14,7 @@ import {
 import { AuthUser } from '../../common/types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
-import { SchedulesRepository, TopicsRepository } from '../../infrastructure/google-sheets';
+import { SchedulesRepository, TopicsRepository, AssignmentsRepository } from '../../infrastructure/google-sheets';
 
 export interface ScheduleRecord {
   id: string;
@@ -37,6 +37,7 @@ export class SchedulesService {
     private readonly auditService: AuditService,
     private readonly schedulesRepository: SchedulesRepository,
     private readonly topicsRepository: TopicsRepository,
+    private readonly assignmentsRepository: AssignmentsRepository,
   ) {}
 
   async findByTopicId(topicId: string): Promise<ScheduleResponseDto | null> {
@@ -149,8 +150,27 @@ export class SchedulesService {
         message: `Lịch bảo vệ đề tài đã được xếp vào ${new Date(dto.defenseAt).toLocaleString('vi-VN')}`,
       },
     });
+
+    // Notify tất cả thành viên hội đồng được phân công (GVPB, CT_HD, TK_HD, TV_HD)
+    const assignments = await this.assignmentsRepository.findAll();
+    const notifiedUsers = new Set([topic.studentUserId, topic.supervisorUserId]);
+    const councilAssignments = assignments.filter(
+      (a) => a.topicId === topicId && a.status === 'ACTIVE' && !notifiedUsers.has(a.userId),
+    );
+    for (const a of councilAssignments) {
+      await this.notificationsService.create({
+        receiverUserId: a.userId,
+        type: 'GENERAL',
+        topicId,
+        context: {
+          message: `Lịch bảo vệ đề tài đã được xếp vào ${new Date(dto.defenseAt).toLocaleString('vi-VN')}. Địa điểm: ${dto.locationDetail || dto.locationType}`,
+        },
+      });
+      notifiedUsers.add(a.userId);
+    }
+
     this.logger.log(
-      `[create:success] topicId=${topicId} scheduleId=${schedule.id} notifiedUsers=${topic.studentUserId},${topic.supervisorUserId}`,
+      `[create:success] topicId=${topicId} scheduleId=${schedule.id} notifiedCount=${notifiedUsers.size}`,
     );
 
     return this.mapToDto(schedule);
@@ -209,20 +229,44 @@ export class SchedulesService {
       },
     });
 
-    // Notify about schedule change
+    // Notify về schedule change — gửi cho tất cả người liên quan
     if (topic) {
+      const changeMsg = `Lịch bảo vệ đề tài đã được cập nhật. Ngày mới: ${new Date(schedule.defenseAt).toLocaleString('vi-VN')}`;
       await this.notificationsService.create({
         receiverUserId: topic.studentUserId,
         type: 'GENERAL',
         topicId,
-        context: {
-          message: `Lịch bảo vệ đề tài đã được cập nhật. Ngày mới: ${new Date(schedule.defenseAt).toLocaleString('vi-VN')}`,
-        },
+        context: { message: changeMsg },
       });
+
+      // Notify GVHD
+      await this.notificationsService.create({
+        receiverUserId: topic.supervisorUserId,
+        type: 'GENERAL',
+        topicId,
+        context: { message: changeMsg },
+      });
+
+      // Notify các thành viên hội đồng
+      const updateAssignments = await this.assignmentsRepository.findAll();
+      const notifiedOnUpdate = new Set([topic.studentUserId, topic.supervisorUserId]);
+      const councilOnUpdate = updateAssignments.filter(
+        (a) => a.topicId === topicId && a.status === 'ACTIVE' && !notifiedOnUpdate.has(a.userId),
+      );
+      for (const a of councilOnUpdate) {
+        await this.notificationsService.create({
+          receiverUserId: a.userId,
+          type: 'GENERAL',
+          topicId,
+          context: { message: changeMsg },
+        });
+        notifiedOnUpdate.add(a.userId);
+      }
+
+      this.logger.log(
+        `[update:success] topicId=${topicId} scheduleId=${schedule.id} notifiedCount=${notifiedOnUpdate.size}`,
+      );
     }
-    this.logger.log(
-      `[update:success] topicId=${topicId} scheduleId=${schedule.id} notifiedStudent=${topic?.studentUserId ?? '-'}`,
-    );
 
     return this.mapToDto(schedule);
   }

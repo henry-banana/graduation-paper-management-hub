@@ -12,6 +12,7 @@ import {
   ScoreSummariesRepository,
   ScoresRepository,
   TopicsRepository,
+  UsersRepository,
 } from '../../infrastructure/google-sheets';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
@@ -72,6 +73,14 @@ describe('ScoresService', () => {
   let assignments: MockAssignment[];
   let scores: MockScore[];
   let summaries: MockSummary[];
+  let users: Array<{
+    id: string;
+    email: string;
+    role: 'STUDENT' | 'LECTURER' | 'TBM';
+    name: string;
+    studentId?: string;
+    lecturerId?: string;
+  }>;
 
   const lecturerUser: AuthUser = {
     userId: 'USR002',
@@ -177,6 +186,26 @@ describe('ScoresService', () => {
       tv3User,
     );
     await service.submit(tv3Draft.scoreId, tv3User);
+
+    const ctDraft = await service.createOrUpdateDraft(
+      'tp_001',
+      {
+        scorerRole: 'TV_HD',
+        rubricData: [{ criterion: 'quality', score: 8.0, max: 10 }],
+      },
+      ctUser,
+    );
+    await service.submit(ctDraft.scoreId, ctUser);
+
+    const tkDraft = await service.createOrUpdateDraft(
+      'tp_001',
+      {
+        scorerRole: 'TV_HD',
+        rubricData: [{ criterion: 'quality', score: 8.0, max: 10 }],
+      },
+      tkUser,
+    );
+    await service.submit(tkDraft.scoreId, tkUser);
   };
 
   beforeEach(async () => {
@@ -235,6 +264,79 @@ describe('ScoresService', () => {
 
     summaries = [];
 
+    users = [
+      {
+        id: 'USR001',
+        email: 'student@hcmute.edu.vn',
+        role: 'STUDENT',
+        name: 'Student One',
+        studentId: 'SE160001',
+      },
+      {
+        id: 'USR002',
+        email: 'lecturer@hcmute.edu.vn',
+        role: 'LECTURER',
+        name: 'Lecturer Main',
+        lecturerId: 'GV002',
+      },
+      {
+        id: 'USR004',
+        email: 'gvhd2@hcmute.edu.vn',
+        role: 'LECTURER',
+        name: 'Lecturer Two',
+        lecturerId: 'GV004',
+      },
+      {
+        id: 'USR_GVPB',
+        email: 'gvpb@hcmute.edu.vn',
+        role: 'LECTURER',
+        name: 'Reviewer One',
+        lecturerId: 'GV005',
+      },
+      {
+        id: 'USR_TV1',
+        email: 'tv1@hcmute.edu.vn',
+        role: 'LECTURER',
+        name: 'Council Member 1',
+        lecturerId: 'GV101',
+      },
+      {
+        id: 'USR_TV2',
+        email: 'tv2@hcmute.edu.vn',
+        role: 'LECTURER',
+        name: 'Council Member 2',
+        lecturerId: 'GV102',
+      },
+      {
+        id: 'USR_TV3',
+        email: 'tv3@hcmute.edu.vn',
+        role: 'LECTURER',
+        name: 'Council Member 3',
+        lecturerId: 'GV103',
+      },
+      {
+        id: 'USR_CT',
+        email: 'ct@hcmute.edu.vn',
+        role: 'LECTURER',
+        name: 'Council Chair',
+        lecturerId: 'GV201',
+      },
+      {
+        id: 'USR_TK',
+        email: 'tk@hcmute.edu.vn',
+        role: 'LECTURER',
+        name: 'Council Secretary',
+        lecturerId: 'GV202',
+      },
+      {
+        id: 'USR_TBM',
+        email: 'tbm@hcmute.edu.vn',
+        role: 'TBM',
+        name: 'Department Head',
+        lecturerId: 'GV999',
+      },
+    ];
+
     const scoresRepositoryMock = {
       findAll: jest.fn(async () => scores),
       findById: jest.fn(async (id: string) => scores.find((score) => score.id === id) ?? null),
@@ -273,6 +375,10 @@ describe('ScoresService', () => {
       findAll: jest.fn(async () => assignments),
     };
 
+    const usersRepositoryMock = {
+      findById: jest.fn(async (id: string) => users.find((u) => u.id === id) ?? null),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ScoresService,
@@ -280,6 +386,7 @@ describe('ScoresService', () => {
         { provide: ScoreSummariesRepository, useValue: scoreSummariesRepositoryMock },
         { provide: TopicsRepository, useValue: topicsRepositoryMock },
         { provide: AssignmentsRepository, useValue: assignmentsRepositoryMock },
+        { provide: UsersRepository, useValue: usersRepositoryMock },
         { provide: NotificationsService, useValue: { create: jest.fn() } },
         { provide: AuditService, useValue: { log: jest.fn() } },
       ],
@@ -517,8 +624,8 @@ describe('ScoresService', () => {
 
       const result = await service.getSummary('tp_001', tkUser, 'TK_HD');
 
-      expect(result.councilAvgScore).toBe(7.5);
-      expect(result.finalScore).toBe(6.83);
+      expect(result.councilAvgScore).toBe(7.75);
+      expect(result.finalScore).toBe(6.92);
     });
 
     it('should block summary when active TV_HD is missing even if revoked TV_HD submitted', async () => {
