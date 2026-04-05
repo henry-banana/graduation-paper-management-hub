@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Award, TrendingUp, CheckCircle, Star, BarChart2, FileText } from "lucide-react";
-import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 
 interface TopicDto {
   id: string;
@@ -169,22 +169,15 @@ function StudentScoresContent() {
         setSummary(response.data);
       } catch (loadError) {
         setSummary(null);
-        const message =
-          loadError instanceof Error
-            ? loadError.message
-            : "Chưa có điểm được công bố cho đề tài này.";
-        const normalized = message.toLowerCase();
-
         if (
-          normalized.includes("not yet published") ||
-          normalized.includes("chưa có điểm") ||
-          normalized.includes("chưa được công bố")
+          loadError instanceof ApiRequestError &&
+          [403, 404, 409].includes(loadError.status)
         ) {
           setSummaryError(null);
           return;
         }
 
-        setSummaryError(message);
+        setSummaryError("Không thể tải dữ liệu điểm vào lúc này.");
       }
     };
 

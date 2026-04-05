@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, AlertCircle, ChevronDown, Send, Calendar, Info, Lock, Sparkles, CheckCircle2 } from "lucide-react";
-import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 import {
   KLTN_ELIGIBILITY_REASONS,
   PERIOD_STATUS_LABELS,
@@ -58,6 +58,12 @@ interface TopicSuggestionDto {
   supervisorEmail?: string;
   supervisorName?: string;
   domain?: string;
+}
+
+interface ScoreSummaryDto {
+  finalScore: number;
+  published: boolean;
+  result: "PASS" | "FAIL" | "PENDING";
 }
 
 const TERMINAL_STATES = new Set(["COMPLETED", "CANCELLED"]);
@@ -131,10 +137,17 @@ export default function StudentTopicRegisterPage() {
     [topics],
   );
 
+  const hasCompletedBctt = useMemo(
+    () => topics.some((topic) => topic.type === "BCTT" && topic.state === "COMPLETED"),
+    [topics],
+  );
+
   const canRegisterKLTN =
     profile?.canRegisterKltn ??
     (typeof profile?.completedBcttScore === "number" && profile.completedBcttScore > 5);
-  const kltnEligibilityReason = profile?.kltnEligibilityReason ?? "OK";
+  const kltnEligibilityReason = hasCompletedBctt
+    ? profile?.kltnEligibilityReason ?? "OK"
+    : "BCTT_INCOMPLETE";
 
   const availablePeriods = useMemo(() => {
     return periods.filter(
@@ -188,30 +201,85 @@ export default function StudentTopicRegisterPage() {
 
         setPeriods(periodsRes.data);
         setTopics(topicsRes.data);
-        setProfile(profileRes.data);
+        let normalizedProfile = profileRes.data;
         const supervisorOptions = supervisorsRes.data;
         setSupervisors(supervisorOptions);
 
+        const completedBcttTopics = topicsRes.data
+          .filter((topic) => topic.type === "BCTT" && topic.state === "COMPLETED")
+          .sort((a, b) => b.id.localeCompare(a.id));
+
+        const latestCompletedBctt = completedBcttTopics[0];
+        const canRegisterFromProfile =
+          normalizedProfile.canRegisterKltn ??
+          (typeof normalizedProfile.completedBcttScore === "number" &&
+            normalizedProfile.completedBcttScore > 5);
+
+        if (!canRegisterFromProfile && latestCompletedBctt) {
+          try {
+            const summaryRes = await api.get<ApiResponse<ScoreSummaryDto>>(
+              `/topics/${latestCompletedBctt.id}/scores/summary`,
+            );
+            const summary = summaryRes.data;
+            if (summary.finalScore > 5) {
+              normalizedProfile = {
+                ...normalizedProfile,
+                completedBcttScore: summary.finalScore,
+                canRegisterKltn: true,
+                kltnEligibilityReason: "OK",
+              };
+            }
+          } catch {
+            // Keep profile fallback as-is when summary is unavailable.
+          }
+        }
+
+        setProfile(normalizedProfile);
+
+        const canRegisterKltn =
+          normalizedProfile.canRegisterKltn ??
+          (typeof normalizedProfile.completedBcttScore === "number" &&
+            normalizedProfile.completedBcttScore > 5);
+
+        const firstOpenKltn = periodsRes.data.find(
+          (period) => period.type === "KLTN" && isPeriodCurrentlyOpen(period),
+        );
         const firstOpenBctt = periodsRes.data.find(
           (period) => period.type === "BCTT" && isPeriodCurrentlyOpen(period),
         );
 
-        if (firstOpenBctt) {
-          setForm((prev) => ({
-            ...prev,
-            periodId: firstOpenBctt.id,
-            supervisorUserId:
-              supervisorOptions.find((supervisor) => {
-                const total = supervisor.totalQuota;
-                const used = supervisor.quotaUsed;
-                return (
-                  typeof total === "number" &&
-                  typeof used === "number" &&
-                  total - used > 0
-                );
-              })?.id ?? "",
-          }));
-        }
+        const defaultAvailableSupervisorId =
+          supervisorOptions.find((supervisor) => {
+            const total = supervisor.totalQuota;
+            const used = supervisor.quotaUsed;
+            return (
+              typeof total === "number" &&
+              typeof used === "number" &&
+              total - used > 0
+            );
+          })?.id ?? "";
+
+        const preferredKltnSupervisorId =
+          latestCompletedBctt?.supervisorUserId &&
+            supervisorOptions.some((supervisor) => supervisor.id === latestCompletedBctt.supervisorUserId)
+            ? latestCompletedBctt.supervisorUserId
+            : defaultAvailableSupervisorId;
+
+        const shouldAutoTargetKltn = completedBcttTopics.length > 0 && canRegisterKltn;
+        const defaultType = shouldAutoTargetKltn ? "KLTN" : "BCTT";
+        const defaultPeriodId = shouldAutoTargetKltn
+          ? firstOpenKltn?.id ?? ""
+          : firstOpenBctt?.id ?? "";
+        const defaultSupervisorId = shouldAutoTargetKltn
+          ? preferredKltnSupervisorId
+          : defaultAvailableSupervisorId;
+
+        setForm((prev) => ({
+          ...prev,
+          type: defaultType,
+          periodId: defaultPeriodId,
+          supervisorUserId: defaultSupervisorId,
+        }));
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : "Không thể tải dữ liệu đăng ký.";
         setError(message);
@@ -308,6 +376,11 @@ export default function StudentTopicRegisterPage() {
 
   const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newType = e.target.value as "BCTT" | "KLTN";
+    if (newType === "BCTT" && hasCompletedBctt) {
+      setError("Bạn đã có đề tài BCTT COMPLETED. Vui lòng xóa đề tài cũ trước khi đăng ký mới.");
+      return;
+    }
+
     if (newType === "KLTN" && !canRegisterKLTN) {
       setError(`Bạn chưa đủ điều kiện đăng ký KLTN: ${KLTN_ELIGIBILITY_REASONS[kltnEligibilityReason] || "N/A"}`);
       return;
@@ -374,6 +447,11 @@ export default function StudentTopicRegisterPage() {
       return;
     }
 
+    if (form.type === "BCTT" && hasCompletedBctt) {
+      setError("Bạn đã có đề tài BCTT COMPLETED. Vui lòng xóa đề tài cũ trước khi đăng ký mới.");
+      return;
+    }
+
     setIsSubmitting(true);
     setError("");
 
@@ -389,7 +467,11 @@ export default function StudentTopicRegisterPage() {
 
       setSubmittedTopicId(response.data.id);
     } catch (submitError) {
-      const message = submitError instanceof Error ? submitError.message : "Đăng ký đề tài thất bại.";
+      const message = submitError instanceof ApiRequestError
+        ? submitError.message
+        : submitError instanceof Error
+          ? submitError.message
+          : "Đăng ký đề tài thất bại.";
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -607,7 +689,9 @@ export default function StudentTopicRegisterPage() {
                       disabled={isSubmitting || isLoading}
                       className="w-full px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary appearance-none pr-9"
                     >
-                      <option value="BCTT">Báo cáo thực tập</option>
+                      <option value="BCTT" disabled={hasCompletedBctt}>
+                        Báo cáo thực tập {hasCompletedBctt && "(Đã hoàn thành trước đó)"}
+                      </option>
                       <option value="KLTN" disabled={!canRegisterKLTN}>Khóa luận tốt nghiệp {!canRegisterKLTN && "(Bị khóa)"}</option>
                     </select>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline pointer-events-none" />

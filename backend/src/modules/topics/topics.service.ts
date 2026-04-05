@@ -437,8 +437,32 @@ export class TopicsService {
       );
     }
 
-    // KLTN eligibility: check completedBcttScore from user profile (consistent with /users/me)
+    if (dto.type === 'BCTT') {
+      const existingCompletedBctt = await this.topicsRepository.findFirst(
+        (topic) =>
+          topic.studentUserId === currentUser.userId &&
+          topic.type === 'BCTT' &&
+          topic.state === 'COMPLETED',
+      );
+
+      if (existingCompletedBctt) {
+        throw new ConflictException(
+          'Bạn đã có đề tài BCTT COMPLETED. Vui lòng xóa đề tài cũ trước khi đăng ký mới.',
+        );
+      }
+    }
+
+    // KLTN eligibility: must have completed BCTT and final BCTT score > 5.
     if (dto.type === 'KLTN') {
+      const completedBcttTopics = await this.getCompletedBcttTopicsForStudent(
+        currentUser.userId,
+      );
+      if (!completedBcttTopics.length) {
+        throw new BadRequestException(
+          'KLTN eligibility requires a completed BCTT topic',
+        );
+      }
+
       const studentProgress = await this.usersRepository.findById(
         currentUser.userId,
       );
@@ -448,13 +472,35 @@ export class TopicsService {
         );
       }
 
-      if ((studentProgress.completedBcttScore ?? 0) <= 5) {
+      const derivedCompletedBcttScore =
+        await this.getBestCompletedBcttScoreFromSummaries(completedBcttTopics);
+      const profileCompletedBcttScore = studentProgress.completedBcttScore;
+
+      const bestCompletedBcttScore = Math.max(
+        profileCompletedBcttScore ?? Number.NEGATIVE_INFINITY,
+        derivedCompletedBcttScore ?? Number.NEGATIVE_INFINITY,
+      );
+
+      if (!(bestCompletedBcttScore > 5)) {
         throw new BadRequestException(
           'KLTN eligibility requires completed BCTT score greater than 5',
         );
       }
-      
-      // Note: earnedCredits/requiredCredits check đã bỏ theo yêu cầu mới
+
+      if (
+        typeof derivedCompletedBcttScore === 'number' &&
+        (profileCompletedBcttScore ?? Number.NEGATIVE_INFINITY) <
+        derivedCompletedBcttScore
+      ) {
+        try {
+          await this.usersRepository.update(studentProgress.id, {
+            ...studentProgress,
+            completedBcttScore: derivedCompletedBcttScore,
+          });
+        } catch {
+          // Non-blocking: eligibility already validated from authoritative summary.
+        }
+      }
     }
 
     const now = new Date().toISOString();
@@ -1701,6 +1747,47 @@ export class TopicsService {
     }
 
     await this.auditService.log(params);
+  }
+
+  private async getCompletedBcttTopicsForStudent(
+    studentUserId: string,
+  ): Promise<TopicRecord[]> {
+    const topics = await this.topicsRepository.findAll();
+    return topics.filter(
+      (topic) =>
+        topic.studentUserId === studentUserId &&
+        topic.type === 'BCTT' &&
+        topic.state === 'COMPLETED',
+    );
+  }
+
+  private async getBestCompletedBcttScoreFromSummaries(
+    completedBcttTopics: TopicRecord[],
+  ): Promise<number | null> {
+    if (!this.scoreSummariesRepository || completedBcttTopics.length === 0) {
+      return null;
+    }
+
+    const topicIds = new Set(completedBcttTopics.map((topic) => topic.id));
+    const summaries = await this.scoreSummariesRepository.findAll();
+
+    let bestScore: number | null = null;
+    for (const summary of summaries) {
+      if (!topicIds.has(summary.topicId)) {
+        continue;
+      }
+
+      if (!Number.isFinite(summary.finalScore)) {
+        continue;
+      }
+
+      bestScore =
+        bestScore === null
+          ? summary.finalScore
+          : Math.max(bestScore, summary.finalScore);
+    }
+
+    return bestScore;
   }
 
   private async validateSupervisor(

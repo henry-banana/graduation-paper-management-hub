@@ -475,6 +475,69 @@ export class ScoresService {
     }
   }
 
+  private buildStudentPendingSummary(): ScoreSummaryDto {
+    return {
+      gvhdScore: undefined,
+      gvpbScore: undefined,
+      councilAvgScore: undefined,
+      finalScore: 0,
+      result: 'PENDING',
+      confirmedByGvhd: false,
+      confirmedByCtHd: false,
+      published: false,
+    };
+  }
+
+  /**
+   * Ensure BCTT summary is persisted and visible to student immediately
+   * once GVHD submits a score.
+   */
+  private async ensureBcttPublishedSummary(
+    topic: TopicRecord,
+  ): Promise<ScoreSummaryRecord | null> {
+    if (topic.type !== 'BCTT') {
+      return null;
+    }
+
+    const existing = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topic.id,
+    );
+
+    let calculated: ScoreSummaryDto;
+    try {
+      calculated = await this.calculateSummary(topic.id, topic);
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        return existing ?? null;
+      }
+      throw error;
+    }
+
+    const nextSummary: ScoreSummaryRecord = {
+      ...(existing ?? {
+        id: `sum_${crypto.randomBytes(6).toString('hex')}`,
+        topicId: topic.id,
+      }),
+      topicId: topic.id,
+      gvhdScore: calculated.gvhdScore,
+      gvpbScore: undefined,
+      councilAvgScore: undefined,
+      finalScore: calculated.finalScore,
+      result: calculated.result,
+      confirmedByGvhd: true,
+      confirmedByCtHd: true,
+      published: true,
+    };
+
+    if (existing) {
+      await this.scoreSummariesRepository.update(existing.id, nextSummary);
+    } else {
+      await this.scoreSummariesRepository.create(nextSummary);
+    }
+
+    return nextSummary;
+  }
+
   async requestAppeal(
     topicId: string,
     reason: string,
@@ -490,9 +553,11 @@ export class ScoresService {
       throw new ForbiddenException('Only the owning student can request appeal');
     }
 
-    const summary = await this.scoreSummariesRepository.findFirst(
-      (s) => s.topicId === topic.id,
-    );
+    const summary =
+      (await this.ensureBcttPublishedSummary(topic)) ??
+      (await this.scoreSummariesRepository.findFirst(
+        (s) => s.topicId === topic.id,
+      ));
 
     if (!summary?.published) {
       throw new ConflictException('Score must be published before requesting appeal');
@@ -650,9 +715,11 @@ export class ScoresService {
       throw new ForbiddenException('Only the owning student can submit appeal choice');
     }
 
-    const summary = await this.scoreSummariesRepository.findFirst(
-      (record) => record.topicId === topic.id,
-    );
+    const summary =
+      (await this.ensureBcttPublishedSummary(topic)) ??
+      (await this.scoreSummariesRepository.findFirst(
+        (record) => record.topicId === topic.id,
+      ));
     if (!summary?.published) {
       throw new ConflictException('Score must be published before selecting appeal choice');
     }
@@ -906,6 +973,9 @@ export class ScoresService {
     score.updatedAt = new Date().toISOString();
     await this.scoresRepository.update(score.id, score);
 
+    // BCTT policy: score is visible to student right after GVHD submits.
+    await this.ensureBcttPublishedSummary(topic);
+
     await this.auditIfAvailable({
       action: 'SCORE_SUBMITTED',
       actorId: user.userId,
@@ -939,20 +1009,17 @@ export class ScoresService {
         throw new ForbiddenException('Cannot view score summary for this topic');
       }
 
+      // Legacy-safe behavior: BCTT should be visible immediately after GVHD submit.
+      if (topic.type === 'BCTT') {
+        await this.ensureBcttPublishedSummary(topic);
+      }
+
       const existing = await this.scoreSummariesRepository.findFirst(
         (s) => s.topicId === topicId,
       );
       if (!existing?.published) {
-        // DB-12 improvement: Provide more specific error message
-        if (!existing) {
-          throw new ForbiddenException('Điểm chưa được nhập hoặc chưa được tổng hợp.');
-        }
-        if (!existing.confirmedByGvhd || !existing.confirmedByCtHd) {
-          throw new ForbiddenException(
-            'Điểm đang chờ xác nhận từ Giảng viên hướng dẫn và Chủ tịch hội đồng.',
-          );
-        }
-        throw new ForbiddenException('Score summary not yet published');
+        const pending = this.buildStudentPendingSummary();
+        return this.attachStudentFacingFields(pending, topic, existing ?? undefined);
       }
 
       const baseSummary: ScoreSummaryDto = {
@@ -1385,6 +1452,8 @@ export class ScoresService {
     scoreRecord.submittedAt = new Date().toISOString();
     scoreRecord.updatedAt = new Date().toISOString();
     await this.scoresRepository.update(scoreRecord.id, scoreRecord);
+
+    await this.ensureBcttPublishedSummary(topic);
 
     await this.auditIfAvailable({
       action: 'SCORE_SUBMITTED',

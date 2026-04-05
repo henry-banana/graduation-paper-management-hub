@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { FileUpload } from "@/components/ui/file-upload";
-import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 import {
   TOPIC_DOMAIN_OPTIONS,
   TOPIC_STATE_LABELS,
@@ -558,17 +558,13 @@ export default function StudentTopicDetailPage() {
             setSummary(summaryRes.data);
           } catch (summaryLoadError) {
             setSummary(null);
-            if (summaryLoadError instanceof Error) {
-              const normalized = summaryLoadError.message.toLowerCase();
-              if (
-                normalized.includes("not yet published") ||
-                normalized.includes("chưa có điểm") ||
-                normalized.includes("chưa được công bố")
-              ) {
-                setScoreError(null);
-              } else {
-                setScoreError(summaryLoadError.message);
-              }
+            if (
+              summaryLoadError instanceof ApiRequestError &&
+              [403, 404, 409].includes(summaryLoadError.status)
+            ) {
+              setScoreError(null);
+            } else if (summaryLoadError instanceof Error) {
+              setScoreError("Không thể tải dữ liệu điểm vào lúc này.");
             }
           }
         } else {
@@ -576,7 +572,9 @@ export default function StudentTopicDetailPage() {
           setScoreError(null);
         }
 
-        const scheduleReady = SCHEDULE_READY_STATES.has(topicRes.data.state);
+        const scheduleReady =
+          topicRes.data.type === "KLTN" &&
+          SCHEDULE_READY_STATES.has(topicRes.data.state);
         if (!scheduleReady) {
           setSchedule(null);
         } else {

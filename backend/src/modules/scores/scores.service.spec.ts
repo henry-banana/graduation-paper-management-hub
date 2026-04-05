@@ -236,6 +236,18 @@ describe('ScoresService', () => {
         createdAt: now,
         updatedAt: now,
       },
+      {
+        id: 'tp_bctt',
+        type: 'BCTT',
+        title: 'BCTT - Practical report',
+        domain: 'SE',
+        state: 'GRADING',
+        studentUserId: 'USR001',
+        supervisorUserId: 'USR002',
+        periodId: 'prd_001',
+        createdAt: now,
+        updatedAt: now,
+      },
     ];
 
     assignments = [
@@ -247,6 +259,7 @@ describe('ScoresService', () => {
       { id: 'as_006', topicId: 'tp_001', userId: 'USR_CT', topicRole: 'CT_HD', status: 'ACTIVE', assignedAt: now },
       { id: 'as_007', topicId: 'tp_001', userId: 'USR_TK', topicRole: 'TK_HD', status: 'ACTIVE', assignedAt: now },
       { id: 'as_008', topicId: 'tp_002', userId: 'USR004', topicRole: 'GVHD', status: 'ACTIVE', assignedAt: now },
+      { id: 'as_009', topicId: 'tp_bctt', userId: 'USR002', topicRole: 'GVHD', status: 'ACTIVE', assignedAt: now },
     ];
 
     scores = [
@@ -660,10 +673,28 @@ describe('ScoresService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('should throw ForbiddenException for student on unpublished', async () => {
-      await expect(
-        service.getSummary('tp_001', studentUser),
-      ).rejects.toThrow(ForbiddenException);
+    it('should return pending summary for student on unpublished KLTN', async () => {
+      const result = await service.getSummary('tp_001', studentUser);
+      expect(result.published).toBe(false);
+      expect(result.result).toBe('PENDING');
+      expect(result.finalScore).toBe(0);
+    });
+
+    it('should auto-publish BCTT summary after GVHD submits', async () => {
+      const draft = await service.createOrUpdateDraft(
+        'tp_bctt',
+        {
+          scorerRole: 'GVHD',
+          rubricData: [{ criterion: 'quality', score: 8.0, max: 10 }],
+        },
+        lecturerUser,
+      );
+      await service.submit(draft.scoreId, lecturerUser);
+
+      const result = await service.getSummary('tp_bctt', studentUser);
+      expect(result.published).toBe(true);
+      expect(result.result).toBe('PASS');
+      expect(result.finalScore).toBe(8);
     });
   });
 

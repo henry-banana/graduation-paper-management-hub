@@ -12,6 +12,7 @@ import {
   PeriodsRepository,
   RevisionRoundRecord,
   RevisionRoundsRepository,
+  ScoreSummariesRepository,
   TopicsRepository,
   UsersRepository,
 } from '../../infrastructure/google-sheets';
@@ -25,6 +26,16 @@ describe('TopicsService', () => {
   let usersData: UserRecord[];
   let periodsData: PeriodRecord[];
   let revisionRoundsData: RevisionRoundRecord[];
+  let scoreSummariesData: Array<{
+    id: string;
+    topicId: string;
+    finalScore: number;
+    result: 'PASS' | 'FAIL' | 'PENDING';
+    confirmedByGvhd: boolean;
+    confirmedByCtHd: boolean;
+    published: boolean;
+    updatedAt: string;
+  }>;
   let assignmentsData: Array<{
     id: string;
     topicId: string;
@@ -363,6 +374,7 @@ describe('TopicsService', () => {
     ];
 
     revisionRoundsData = [];
+    scoreSummariesData = [];
 
     const topicsRepositoryMock = {
       findAll: jest.fn(async () => topicsData),
@@ -434,6 +446,39 @@ describe('TopicsService', () => {
 
     const assignmentsRepositoryMock = {
       findAll: jest.fn(async () => assignmentsData),
+      create: jest.fn(async (entity: (typeof assignmentsData)[number]) => {
+        assignmentsData.push(entity);
+        return entity;
+      }),
+    };
+
+    const scoreSummariesRepositoryMock = {
+      findAll: jest.fn(async () => scoreSummariesData),
+      findById: jest.fn(
+        async (id: string) =>
+          scoreSummariesData.find((summary) => summary.id === id) ?? null,
+      ),
+      findFirst: jest.fn(
+        async (
+          predicate: (summary: (typeof scoreSummariesData)[number]) => boolean,
+        ) => scoreSummariesData.find(predicate) ?? null,
+      ),
+      create: jest.fn(async (entity: (typeof scoreSummariesData)[number]) => {
+        scoreSummariesData.push(entity);
+        return entity;
+      }),
+      update: jest.fn(
+        async (id: string, entity: (typeof scoreSummariesData)[number]) => {
+          const index = scoreSummariesData.findIndex(
+            (summary) => summary.id === id,
+          );
+          if (index < 0) {
+            throw new Error(`Score summary ${id} not found`);
+          }
+          scoreSummariesData[index] = entity;
+          return entity;
+        },
+      ),
     };
 
     const notificationsServiceMock = {
@@ -451,6 +496,10 @@ describe('TopicsService', () => {
         { provide: PeriodsRepository, useValue: periodsRepositoryMock },
         { provide: UsersRepository, useValue: usersRepositoryMock },
         { provide: AssignmentsRepository, useValue: assignmentsRepositoryMock },
+        {
+          provide: ScoreSummariesRepository,
+          useValue: scoreSummariesRepositoryMock,
+        },
         { provide: NotificationsService, useValue: notificationsServiceMock },
       ],
     }).compile();
@@ -588,6 +637,40 @@ describe('TopicsService', () => {
             supervisorUserId: 'USR002',
           },
           studentUser,
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('should throw ConflictException when creating BCTT after completed BCTT already exists', async () => {
+      const studentWithCompletedBctt: AuthUser = {
+        userId: 'USR004',
+        email: 'low-eligibility@hcmute.edu.vn',
+        role: 'STUDENT',
+      };
+
+      topicsData.push({
+        id: 'tp_004_completed_bctt',
+        type: 'BCTT',
+        title: 'Completed BCTT',
+        domain: 'Software Engineering',
+        state: 'COMPLETED',
+        studentUserId: studentWithCompletedBctt.userId,
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_bctt',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      await expect(
+        service.create(
+          {
+            type: 'BCTT',
+            title: 'Another BCTT',
+            domain: 'Test',
+            periodId: 'prd_2026_hk1_bctt',
+            supervisorUserId: 'USR002',
+          },
+          studentWithCompletedBctt,
         ),
       ).rejects.toThrow(ConflictException);
     });
@@ -733,6 +816,52 @@ describe('TopicsService', () => {
           lowEligibilityStudent,
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should allow KLTN registration when completed BCTT summary score is > 5 even if profile score is stale', async () => {
+      const studentWithStaleProfile: AuthUser = {
+        userId: 'USR004',
+        email: 'low-eligibility@hcmute.edu.vn',
+        role: 'STUDENT',
+      };
+
+      topicsData.push({
+        id: 'tp_004_completed_for_kltn',
+        type: 'BCTT',
+        title: 'Completed BCTT with score on summary',
+        domain: 'Software Engineering',
+        state: 'COMPLETED',
+        studentUserId: studentWithStaleProfile.userId,
+        supervisorUserId: 'USR002',
+        periodId: 'prd_2026_hk1_bctt',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      scoreSummariesData.push({
+        id: 'sum_004',
+        topicId: 'tp_004_completed_for_kltn',
+        finalScore: 8.2,
+        result: 'PASS',
+        confirmedByGvhd: true,
+        confirmedByCtHd: true,
+        published: true,
+        updatedAt: new Date().toISOString(),
+      });
+
+      const result = await service.create(
+        {
+          type: 'KLTN',
+          title: 'Eligible KLTN Topic',
+          domain: 'Test',
+          periodId: 'prd_2026_hk1_kltn',
+          supervisorUserId: 'USR002',
+        },
+        studentWithStaleProfile,
+      );
+
+      expect(result.id).toBeDefined();
+      expect(result.state).toBe('DRAFT');
     });
   });
 
