@@ -307,14 +307,28 @@ export default function TBMAssignmentsPage() {
         defenseAt: defenseAtDate.toISOString(),
         location,
       });
-      setTopics(prev => prev.map(t =>
-        t.id === councilTopic!.id
-          ? { ...t, council: { id: "assigned", name: "Đã phân công" } }
-          : t,
-      ));
+
+      const chairTeacher = findTeacherById(councilForm.chairUserId);
+      const chairName = chairTeacher?.fullName?.trim() || "Chủ tịch hội đồng";
+      const assignedTopicId = councilTopic.id;
+
+      setTopics((prev) =>
+        prev.map((topic) =>
+          topic.id === assignedTopicId
+            ? {
+                ...topic,
+                state: topic.state === "PENDING_CONFIRM" ? "DEFENSE" : topic.state,
+                council: { id: councilForm.chairUserId, name: chairName },
+              }
+            : topic,
+        ),
+      );
       setCouncilTopic(null);
-      setSuccess("Phân công Hội đồng thành công.");
+      setSuccess(`Phân công Hội đồng thành công. Đại diện: ${chairName}.`);
       setTimeout(() => setSuccess(null), 3000);
+
+      // Sync from server to ensure UI reflects latest council/schedule metadata.
+      void load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Phân công Hội đồng thất bại.");
     } finally {
@@ -520,7 +534,12 @@ export default function TBMAssignmentsPage() {
                             <td className="px-4 py-4 text-xs text-on-surface-variant">{t.reviewer?.fullName ?? <span className="italic text-outline">Chưa có</span>}</td>
                             <td className="px-4 py-4 text-xs">
                               {t.council
-                                ? <span className="flex items-center gap-1 text-green-600"><Check className="w-3 h-3" />Đã phân công</span>
+                                ? (
+                                  <span className="flex items-center gap-1 text-green-600">
+                                    <Check className="w-3 h-3" />
+                                    {t.council.name || "Đã phân công"}
+                                  </span>
+                                )
                                 : <span className="text-outline italic">Chưa có</span>}
                             </td>
                             <td className="px-4 py-4">
