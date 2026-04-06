@@ -1918,9 +1918,10 @@ export class ScoresService {
       );
 
       // Bug fix: Read weights from SystemConfig DB instead of hardcoded 30-30-40
-      const weightGvhd = await this.systemConfigRepository.getNumber('score.weight.gvhd', 0.3);
-      const weightGvpb = await this.systemConfigRepository.getNumber('score.weight.gvpb', 0.3);
-      const weightCouncil = await this.systemConfigRepository.getNumber('score.weight.council', 0.4);
+      // Default weights: GVHD=60%, GVPB=20%, Council=20%
+      const weightGvhd = await this.systemConfigRepository.getNumber('score.weight.gvhd', 0.6);
+      const weightGvpb = await this.systemConfigRepository.getNumber('score.weight.gvpb', 0.2);
+      const weightCouncil = await this.systemConfigRepository.getNumber('score.weight.council', 0.2);
 
       finalScore = this.roundTo2(
         gvhd.totalScore * weightGvhd +
