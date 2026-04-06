@@ -8,6 +8,7 @@ import {
   FileCheck, RefreshCw, Save, Sliders, User,
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { TopicStateGuide } from "@/components/shared/topic-state-guide";
 import type { CouncilTopicListItem } from "@/types";
 
 /* ---------- Types ---------- */
@@ -20,6 +21,15 @@ interface ScoreDto {
   role?: string;
   isLocked?: boolean;
   lockReason?: string;
+}
+
+interface SubmissionDto {
+  id: string;
+  fileType: "REPORT" | "TURNITIN" | "REVISION" | "REVISION_EXPLANATION" | "INTERNSHIP_CONFIRMATION" | string;
+  version: number;
+  uploadedAt?: string;
+  originalFileName?: string;
+  driveLink?: string;
 }
 
 /* ---------- Rubrics by role ---------- */
@@ -44,6 +54,7 @@ function CouncilScoringContent() {
   const [comments, setComments] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [submissions, setSubmissions] = useState<SubmissionDto[]>([]);
   
   // TK_HD council comments
   const [councilComments, setCouncilComments] = useState("");
@@ -75,17 +86,54 @@ function CouncilScoringContent() {
   const canSubmitScores = selectedTopic?.state === "SCORING" || selectedTopic?.state === "DEFENSE";
   const canSaveDraft = selectedTopic?.state === "SCORING";
   const isDefensePhase = selectedTopic?.state === "DEFENSE";
+  const latestReportSubmission = useMemo(
+    () =>
+      submissions
+        .filter((s) => s.fileType === "REPORT")
+        .sort((a, b) => b.version - a.version)[0],
+    [submissions],
+  );
+  const latestTurnitinSubmission = useMemo(
+    () =>
+      submissions
+        .filter((s) => s.fileType === "TURNITIN")
+        .sort((a, b) => b.version - a.version)[0],
+    [submissions],
+  );
 
   // Load topics assigned to council role
   useEffect(() => {
     void (async () => {
       setIsLoadingTopics(true);
       try {
-        const res = await api.get<ApiListResponse<TopicDto>>(
-          "/topics?role=tv_hd&page=1&size=100&states=DEFENSE,SCORING",
-        );
-        setTopics(res.data ?? []);
-        setSelectedId((current) => current || res.data?.[0]?.id || "");
+        const [tvRes, ctRes, tkRes] = await Promise.all([
+          api
+            .get<ApiListResponse<TopicDto>>(
+              "/topics?role=tv_hd&page=1&size=100&states=DEFENSE,SCORING",
+            )
+            .catch(() => ({ data: [], pagination: { page: 1, size: 0, total: 0 } })),
+          api
+            .get<ApiListResponse<TopicDto>>(
+              "/topics?role=ct_hd&page=1&size=100&states=DEFENSE,SCORING",
+            )
+            .catch(() => ({ data: [], pagination: { page: 1, size: 0, total: 0 } })),
+          api
+            .get<ApiListResponse<TopicDto>>(
+              "/topics?role=tk_hd&page=1&size=100&states=DEFENSE,SCORING",
+            )
+            .catch(() => ({ data: [], pagination: { page: 1, size: 0, total: 0 } })),
+        ]);
+
+        const mergedById = new Map<string, TopicDto>();
+        [...(ctRes.data ?? []), ...(tkRes.data ?? []), ...(tvRes.data ?? [])].forEach((topic) => {
+          if (!mergedById.has(topic.id)) {
+            mergedById.set(topic.id, topic);
+          }
+        });
+
+        const mergedTopics = Array.from(mergedById.values());
+        setTopics(mergedTopics);
+        setSelectedId((current) => current || mergedTopics[0]?.id || "");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Không thể tải danh sách đề tài.");
       } finally {
@@ -98,19 +146,38 @@ function CouncilScoringContent() {
   useEffect(() => {
     if (!selectedId) return;
     setExistingScore(null);
+    setSubmissions([]);
     setIsLoadingScore(true);
     void (async () => {
       try {
-        const res = await api.get<ApiResponse<ScoreDto>>(`/topics/${selectedId}/scores/my-draft`);
-        const s = res.data;
-        setExistingScore(s);
-        setScores(s.criteria ?? {});
-        setComments(s.comments ?? "");
+        const [scoreRes, submissionsRes] = await Promise.all([
+          api
+            .get<ApiResponse<ScoreDto>>(`/topics/${selectedId}/scores/my-draft`)
+            .catch(() => null),
+          api
+            .get<ApiListResponse<SubmissionDto>>(`/topics/${selectedId}/submissions`)
+            .catch(() => ({ data: [], pagination: { page: 1, size: 0, total: 0 } })),
+        ]);
+
+        if (scoreRes?.data) {
+          const s = scoreRes.data;
+          setExistingScore(s);
+          setScores(s.criteria ?? {});
+          setComments(s.comments ?? "");
+        } else {
+          const defaults: Record<string, number> = {};
+          RUBRIC_COUNCIL.forEach(c => { defaults[c.id] = 0; });
+          setScores(defaults);
+          setComments("");
+        }
+
+        setSubmissions(submissionsRes.data ?? []);
       } catch {
         const defaults: Record<string, number> = {};
         RUBRIC_COUNCIL.forEach(c => { defaults[c.id] = 0; });
         setScores(defaults);
         setComments("");
+        setSubmissions([]);
       } finally {
         setIsLoadingScore(false);
       }
@@ -262,6 +329,9 @@ function CouncilScoringContent() {
           <CheckCircle2 className="w-4 h-4 text-green-600" /><p className="text-sm text-green-700">{success}</p>
         </div>
       )}
+      {selectedTopic && (
+        <TopicStateGuide role="COUNCIL" topicType={selectedTopic.type} topicState={selectedTopic.state} />
+      )}
       {existingScore?.isSubmitted && (
         <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-2xl px-4 py-3">
           <FileCheck className="w-4 h-4 text-primary" />
@@ -276,13 +346,40 @@ function CouncilScoringContent() {
         </div>
       )}
 
-      {/* View submission */}
-      {selectedTopic?.latestSubmission?.driveLink && (
-        <div className="flex items-center gap-3">
-          <a href={selectedTopic.latestSubmission.driveLink} target="_blank" rel="noreferrer"
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 transition-colors">
-            <BookOpen className="w-4 h-4" />Xem bài SV (v{selectedTopic.latestSubmission.version})
-          </a>
+      {/* View submissions */}
+      {(latestReportSubmission || latestTurnitinSubmission) && (
+        <div className="grid sm:grid-cols-2 gap-3">
+          {latestReportSubmission?.driveLink ? (
+            <a
+              href={latestReportSubmission.driveLink}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 transition-colors"
+            >
+              <BookOpen className="w-4 h-4" />
+              Báo cáo SV (v{latestReportSubmission.version})
+            </a>
+          ) : (
+            <div className="px-4 py-2.5 rounded-xl border border-outline-variant/20 text-xs text-outline bg-surface-container-lowest">
+              Chưa có file báo cáo SV.
+            </div>
+          )}
+
+          {latestTurnitinSubmission?.driveLink ? (
+            <a
+              href={latestTurnitinSubmission.driveLink}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-100 text-amber-800 text-sm font-semibold hover:bg-amber-200 transition-colors"
+            >
+              <FileCheck className="w-4 h-4" />
+              File Turnitin (v{latestTurnitinSubmission.version})
+            </a>
+          ) : (
+            <div className="px-4 py-2.5 rounded-xl border border-amber-200 text-xs text-amber-700 bg-amber-50">
+              Chưa có file Turnitin từ GVHD.
+            </div>
+          )}
         </div>
       )}
 

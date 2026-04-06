@@ -5,7 +5,7 @@ export const TOPIC_STATE_LABELS: Record<string, { label: string; color: string; 
   CONFIRMED:       { label: 'Đã xác nhận',      color: 'text-blue-700',   bg: 'bg-blue-50'   },
   PENDING_TBM:     { label: 'Chờ Bộ môn duyệt', color: 'text-indigo-700', bg: 'bg-indigo-50' },
   IN_PROGRESS:     { label: 'Đang thực hiện',   color: 'text-green-700',  bg: 'bg-green-50'  },
-  PENDING_CONFIRM: { label: 'Chờ chốt hội đồng',color: 'text-orange-700', bg: 'bg-orange-50' },
+  PENDING_CONFIRM: { label: 'Chờ phản biện / chốt hội đồng',color: 'text-orange-700', bg: 'bg-orange-50' },
   DEFENSE:         { label: 'Đang bảo vệ',      color: 'text-purple-700', bg: 'bg-purple-50' },
   GRADING:         { label: 'Đang chấm điểm',   color: 'text-pink-700',   bg: 'bg-pink-50'   },
   SCORING:         { label: 'Đang chấm điểm',   color: 'text-pink-700',   bg: 'bg-pink-50'   },

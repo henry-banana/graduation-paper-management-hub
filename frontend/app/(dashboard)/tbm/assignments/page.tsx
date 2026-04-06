@@ -6,6 +6,7 @@ import {
   RefreshCw, Search, UserCheck, Users, X,
 } from "lucide-react";
 import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
+import { TopicStateGuide } from "@/components/shared/topic-state-guide";
 
 /* ---------- Types ---------- */
 interface TopicDto {
@@ -203,6 +204,13 @@ export default function TBMAssignmentsPage() {
     () => filtered.filter(t => t.type === "KLTN" && ["PENDING_CONFIRM", "DEFENSE"].includes(t.state)),
     [filtered],
   );
+  const tbmGuideTopicType = filterType === "BCTT" ? "BCTT" : "KLTN";
+  const tbmGuideState =
+    tab === "council"
+      ? "PENDING_CONFIRM"
+      : tbmGuideTopicType === "BCTT"
+      ? "IN_PROGRESS"
+      : "PENDING_CONFIRM";
 
   const handleAssignGvpb = async (topicId: string) => {
     const teacherId = gvpbMap[topicId];
@@ -400,6 +408,8 @@ export default function TBMAssignmentsPage() {
           </select>
         </div>
       </div>
+
+      <TopicStateGuide role="TBM" topicType={tbmGuideTopicType} topicState={tbmGuideState} />
 
       {isLoading ? (
         <div className="flex items-center justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-outline" /><span className="ml-3 text-sm text-outline">Đang tải...</span></div>

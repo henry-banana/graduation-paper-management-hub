@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { FileUpload } from "@/components/ui/file-upload";
+import { TopicStateGuide } from "@/components/shared/topic-state-guide";
 import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 import {
   TOPIC_DOMAIN_OPTIONS,
@@ -861,6 +862,8 @@ export default function StudentTopicDetailPage() {
           <ProgressStepper steps={steps} activeIdx={activeStepIndex} />
         </div>
       </div>
+
+      <TopicStateGuide role="STUDENT" topicType={topic.type} topicState={topic.state} />
 
       <div className="grid lg:grid-cols-3 gap-6 items-start">
         {/* Main Content */}

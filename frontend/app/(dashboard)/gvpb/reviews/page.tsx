@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen, CheckCircle2, FileCheck, MessageSquare, RefreshCw, Save, Search, Sliders, User, AlertCircle, ChevronRight } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
+import { TopicStateGuide } from "@/components/shared/topic-state-guide";
 
 interface TopicDto {
   id: string;
@@ -279,6 +280,10 @@ export default function GVPBReviewsPage() {
                       </div>
                     </div>
                   </div>
+                )}
+
+                {selectedTopic && (
+                  <TopicStateGuide role="GVPB" topicType={selectedTopic.type} topicState={selectedTopic.state} />
                 )}
 
                 {isSubmitted && (

@@ -20,6 +20,7 @@ import {
 import Link from "next/link";
 import { ApiListResponse, ApiRequestError, ApiResponse, api } from "@/lib/api";
 import { TOPIC_STATE_LABELS } from "@/lib/constants/vi-labels";
+import { TopicStateGuide } from "@/components/shared/topic-state-guide";
 
 interface TopicDetailDto {
   id: string;
@@ -288,6 +289,8 @@ export default function GVHDTopicDetailPage() {
         </div>
       </div>
 
+      <TopicStateGuide role="GVHD" topicType={topic.type} topicState={topic.state} />
+
       <div className="grid lg:grid-cols-3 gap-6 items-start">
         {/* Left - Student Info + Submissions */}
         <div className="lg:col-span-2 space-y-5">
@@ -490,12 +493,12 @@ export default function GVHDTopicDetailPage() {
               )}
               {canTransitionToPendingConfirm && (
                 <button
-                  onClick={() => void handleTransition("REQUEST_CONFIRM", "Chờ xác nhận bảo vệ")}
+                  onClick={() => void handleTransition("REQUEST_CONFIRM", "Chờ phản biện / chốt hội đồng (chưa chấm điểm)")}
                   disabled={isTransitioning}
                   className="w-full px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isTransitioning ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  Chuyển sang Chờ xác nhận bảo vệ
+                  Chuyển sang Chờ phản biện (chưa chấm)
                 </button>
               )}
               {canTransitionToCompleted && (
