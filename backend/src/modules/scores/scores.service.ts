@@ -38,6 +38,7 @@ import {
   ExportFilesRepository,
   ScoreSummariesRepository,
   ScoresRepository,
+  SystemConfigRepository,
   TopicsRepository,
   UsersRepository,
 } from '../../infrastructure/google-sheets';
@@ -109,6 +110,7 @@ export class ScoresService {
     private readonly topicsRepository: TopicsRepository,
     private readonly assignmentsRepository: AssignmentsRepository,
     private readonly usersRepository: UsersRepository,
+    private readonly systemConfigRepository: SystemConfigRepository,
     @Optional()
     private readonly exportsService?: ExportsService,
     @Optional()
@@ -1843,10 +1845,11 @@ export class ScoresService {
       gvpbScore = gvpb.totalScore;
 
       const assignments = await this.assignmentsRepository.findAll();
+      // Bug fix: Only TV_HD members need to submit scores (CT_HD and TK_HD don't score)
       const assignedCouncilMembers = assignments.filter(
         (assignment) =>
           assignment.topicId === topicId &&
-          ['TV_HD', 'CT_HD', 'TK_HD'].includes(assignment.topicRole) &&
+          assignment.topicRole === 'TV_HD' &&
           assignment.status === 'ACTIVE',
       );
 
@@ -1880,8 +1883,15 @@ export class ScoresService {
           councilScores.length,
       );
 
+      // Bug fix: Read weights from SystemConfig DB instead of hardcoded 30-30-40
+      const weightGvhd = await this.systemConfigRepository.getNumber('score.weight.gvhd', 0.3);
+      const weightGvpb = await this.systemConfigRepository.getNumber('score.weight.gvpb', 0.3);
+      const weightCouncil = await this.systemConfigRepository.getNumber('score.weight.council', 0.4);
+
       finalScore = this.roundTo2(
-        (gvhd.totalScore + gvpbScore + councilAvgScore) / 3,
+        gvhd.totalScore * weightGvhd +
+        gvpbScore * weightGvpb +
+        councilAvgScore * weightCouncil,
       );
     }
 
