@@ -1504,6 +1504,9 @@ export class TopicsService {
         gvhdConfirmed: summary?.confirmedByGvhd ?? false,
         ctHdConfirmed: summary?.confirmedByCtHd ?? false,
         published: summary?.published ?? false,
+        aggregatedByTkHd: summary?.aggregatedByTkHd ?? false,
+        aggregatedByTkHdAt: summary?.aggregatedByTkHdAt,
+        aggregatedByTkHdUserId: summary?.aggregatedByTkHdUserId,
       };
 
       dto.isPublished = summary?.published ?? false;

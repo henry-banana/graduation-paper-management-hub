@@ -81,7 +81,7 @@ export default function CouncilFinalConfirmPage() {
     if (!scores) return "Chưa có dữ liệu điểm tổng hợp";
     if (topic.isPublished || scores.published) return "Đã công bố điểm";
     if (!scores.isReady) return "Chưa đủ điểm thành phần để công bố";
-    if (!scores.isSummarized) return "Thư ký chưa tổng hợp điểm";
+    if (!scores.aggregatedByTkHd) return "Thư ký chưa tổng hợp điểm";
     if (!scores.gvhdConfirmed) return "Chờ GVHD xác nhận";
     if (scores.ctHdConfirmed) return "CT_HĐ đã xác nhận trước đó";
     if (typeof scores.final !== "number") return "Chưa có điểm cuối";
@@ -221,8 +221,8 @@ export default function CouncilFinalConfirmPage() {
       <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 text-sm text-on-surface">
         <p className="font-semibold mb-1">Hướng dẫn CT_HĐ xác nhận lần cuối</p>
         <p>
-          1) Thư ký có thể tạo biên bản trước hoặc sau. 2) Chủ tịch bấm <span className="font-semibold">Công bố</span> để xác nhận lần cuối và publish điểm.
-          Khi publish thành công, đề tài tự chuyển sang trạng thái COMPLETED.
+          1) TK_HĐ tổng hợp điểm ở trang <span className="font-semibold">Tổng hợp thư ký</span>. 2) GVHD xác nhận ở trang <span className="font-semibold">Xác nhận điểm cuối</span>.
+          3) CT_HĐ bấm <span className="font-semibold">Công bố</span> để xác nhận lần cuối và publish điểm.
         </p>
       </div>
 

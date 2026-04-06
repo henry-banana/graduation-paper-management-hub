@@ -59,6 +59,7 @@ test.describe('role navigation matrix', () => {
     await expectSidebarLinkVisible(page, 'Duyệt đề tài');
     await expectSidebarLinkVisible(page, 'Tiến độ hướng dẫn');
     await expectSidebarLinkVisible(page, 'Chấm điểm (Rubric)');
+    await expectSidebarLinkVisible(page, 'Xác nhận điểm cuối');
     await expectSidebarLinkHidden(page, 'Hồ sơ phản biện');
     await expectSidebarLinkHidden(page, 'Quản lý đợt');
   });
@@ -70,6 +71,7 @@ test.describe('role navigation matrix', () => {
     await expectSidebarLinkVisible(page, 'Duyệt đề tài');
     await expectSidebarLinkVisible(page, 'Tiến độ hướng dẫn');
     await expectSidebarLinkVisible(page, 'Chấm điểm (Rubric)');
+    await expectSidebarLinkVisible(page, 'Xác nhận điểm cuối');
     await expectSidebarLinkHidden(page, 'Hồ sơ phản biện');
     await expectSidebarLinkHidden(page, 'Quản lý đợt');
   });

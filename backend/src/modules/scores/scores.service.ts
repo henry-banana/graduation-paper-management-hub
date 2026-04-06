@@ -1296,6 +1296,11 @@ export class ScoresService {
     let summary = await this.scoreSummariesRepository.findFirst(
       (s) => s.topicId === topicId,
     );
+    if (role === 'CT_HD' && !summary?.aggregatedByTkHd) {
+      throw new ConflictException(
+        'TK_HD must aggregate scores before CT_HD can publish',
+      );
+    }
     if (!summary) {
       summary = {
         id: `sum_${crypto.randomBytes(6).toString('hex')}`,
@@ -1346,7 +1351,7 @@ export class ScoresService {
     if (published) {
       // Bug fix: Auto-transition topic to COMPLETED when score is published
       // Previously topic state remained at SCORING even after all confirmations
-      if (topic.state === 'SCORING') {
+      if (topic.state === 'SCORING' || topic.state === 'DEFENSE') {
         topic.state = 'COMPLETED';
         topic.updatedAt = new Date().toISOString();
         await this.topicsRepository.update(topicId, topic);
@@ -1486,6 +1491,9 @@ export class ScoresService {
    * TK_HD completes aggregation and locks all score editing.
    * After this, nobody can unlock or edit scores.
    * This creates an irreversible audit trail.
+   * 
+   * Aggregation by TK_HD only locks and marks summary as aggregated.
+   * Final publish still requires GVHD + CT_HD confirmation.
    */
   async aggregateByTkHd(topicId: string, user: AuthUser): Promise<ScoreSummaryDto> {
     if (user.role !== 'LECTURER') {

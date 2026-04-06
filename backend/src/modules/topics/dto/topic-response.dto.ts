@@ -58,6 +58,15 @@ export class TopicScoresDto {
 
   @ApiPropertyOptional({ example: true })
   published!: boolean;
+
+  @ApiPropertyOptional({ example: true })
+  aggregatedByTkHd?: boolean;
+
+  @ApiPropertyOptional({ example: '2026-04-06T08:12:00.000Z' })
+  aggregatedByTkHdAt?: string;
+
+  @ApiPropertyOptional({ example: 'u6' })
+  aggregatedByTkHdUserId?: string;
 }
 
 export class TopicResponseDto {

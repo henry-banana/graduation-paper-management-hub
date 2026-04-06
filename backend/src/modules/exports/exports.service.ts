@@ -488,9 +488,12 @@ export class ExportsService {
     // Determine whether this is a rubric export
     const isRubricExport = exportType.includes('RUBRIC');
 
-    // Convert rubric DOCX to PDF for better print quality
-    // Minutes are already PDF, so skip conversion
-    if (isRubricExport && fileToUpload.mimeType === EXPORT_DOCX_MIME_TYPE) {
+    // Convert rubric DOCX to PDF (optional via env var ENABLE_RUBRIC_PDF_CONVERSION)
+    // Bug fix: PDF conversion via HTML can lose table formatting
+    // Default: disabled (export DOCX directly)
+    const enablePdfConversion = this.configService.get('ENABLE_RUBRIC_PDF_CONVERSION', 'false') === 'true';
+    
+    if (isRubricExport && fileToUpload.mimeType === EXPORT_DOCX_MIME_TYPE && enablePdfConversion) {
       this.logger.log(`Converting rubric ${fileToUpload.filename} to PDF`);
       try {
         const converted = await this.pdfConverterService.convertDocxToPdf(
@@ -510,6 +513,8 @@ export class ExportsService {
         );
         // Continue with DOCX if conversion fails
       }
+    } else if (isRubricExport && fileToUpload.mimeType === EXPORT_DOCX_MIME_TYPE) {
+      this.logger.log(`PDF conversion disabled (ENABLE_RUBRIC_PDF_CONVERSION=false), uploading DOCX: ${fileToUpload.filename}`);
     }
 
     let uploadedFileName = fileToUpload.filename;

@@ -65,6 +65,9 @@ export interface TopicListScores {
   gvhdConfirmed: boolean;
   ctHdConfirmed: boolean;
   published: boolean;
+  aggregatedByTkHd?: boolean;
+  aggregatedByTkHdAt?: string;
+  aggregatedByTkHdUserId?: string;
 }
 
 export interface CouncilTopicListItem {

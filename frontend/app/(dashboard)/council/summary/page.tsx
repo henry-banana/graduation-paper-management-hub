@@ -127,9 +127,13 @@ export default function CouncilSummaryPage() {
           ) : (
             filtered.map(t => {
               const sc = t.scores;
-              const isReady = sc?.isReady;
-              const isSummarized = sc?.isSummarized;
+              const isReady = Boolean(sc?.isReady);
+              const isPublished = Boolean(sc?.published);
+              const isAggregatedByTkHd = Boolean(sc?.aggregatedByTkHd);
               const summarizing = isSummarizing === t.id;
+              const aggregatedAt = sc?.aggregatedByTkHdAt
+                ? new Date(sc.aggregatedByTkHdAt).toLocaleString("vi-VN")
+                : null;
 
               return (
                 <div key={t.id} className="bg-surface-container-lowest rounded-3xl border border-outline-variant/10 overflow-hidden shadow-sm">
@@ -194,9 +198,16 @@ export default function CouncilSummaryPage() {
 
                   {/* Action footer */}
                   <div className="px-6 py-4 flex items-center justify-end gap-3 border-t border-outline-variant/10">
-                    {isSummarized ? (
+                    {isPublished ? (
+                      <span className="flex items-center gap-2 text-sm font-semibold text-green-700 bg-green-50 px-4 py-2 rounded-xl border border-green-200">
+                        <CheckCircle2 className="w-4 h-4" />Đã công bố điểm cho sinh viên
+                      </span>
+                    ) : isAggregatedByTkHd ? (
                       <span className="flex items-center gap-2 text-sm font-semibold text-green-600 bg-green-50 px-4 py-2 rounded-xl border border-green-200">
-                        <CheckCircle2 className="w-4 h-4" />Đã tổng hợp — Chờ CT_HD & GVHD xác nhận
+                        <CheckCircle2 className="w-4 h-4" />
+                        {aggregatedAt
+                          ? `Đã tổng hợp lúc ${aggregatedAt} — Chờ GVHD & CT_HĐ xác nhận`
+                          : "Đã tổng hợp — Chờ GVHD & CT_HĐ xác nhận"}
                       </span>
                     ) : !isReady ? (
                       <span className="flex items-center gap-2 text-sm font-semibold text-amber-600 bg-amber-50 px-4 py-2 rounded-xl border border-amber-200">

@@ -807,8 +807,18 @@ describe('ScoresService', () => {
     it('should publish after both GVHD and CT_HD confirm', async () => {
       await prepareSubmittedKltnScores();
       await service.confirm('tp_001', 'GVHD', lecturerUser);
+      await service.aggregateByTkHd('tp_001', tkUser);
       const result = await service.confirm('tp_001', 'CT_HD', ctUser);
       expect(result.published).toBe(true);
+    });
+
+    it('should block CT_HD confirm when TK_HD has not aggregated', async () => {
+      await prepareSubmittedKltnScores();
+      await service.confirm('tp_001', 'GVHD', lecturerUser);
+
+      await expect(
+        service.confirm('tp_001', 'CT_HD', ctUser),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('should throw ForbiddenException when TBM confirms without ACTIVE CT_HD assignment', async () => {
