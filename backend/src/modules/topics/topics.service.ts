@@ -35,6 +35,7 @@ import {
   RevisionRoundsRepository,
   ScoreSummariesRepository,
   ScoresRepository,
+  SystemConfigRepository,
   SubmissionsRepository,
   TopicsRepository,
   UsersRepository,
@@ -102,6 +103,8 @@ export class TopicsService {
     private readonly revisionRoundsRepository: RevisionRoundsRepository,
     private readonly periodsRepository: PeriodsRepository,
     private readonly usersRepository: UsersRepository,
+    @Optional()
+    private readonly systemConfigRepository?: SystemConfigRepository,
     @Optional()
     private readonly assignmentsRepository?: AssignmentsRepository,
     @Optional()
@@ -1389,6 +1392,7 @@ export class TopicsService {
     };
 
     const roundTo2 = (value: number): number => Math.round(value * 100) / 100;
+    const scoreWeights = await this.getNormalizedScoreWeights();
 
     return topics.map((topic) => {
       const period = periodsById.get(topic.periodId);
@@ -1447,6 +1451,46 @@ export class TopicsService {
         hasAllCouncilScores;
       const isSummarized = summary !== undefined;
 
+      const gvhdDisplayScore = summary?.gvhdScore ?? gvhdScore ?? null;
+      const gvpbDisplayScore = summary?.gvpbScore ?? gvpbScore ?? null;
+      const councilDisplayScore =
+        summary?.councilAvgScore ?? councilAvgFromScores ?? null;
+
+      const sources: Array<{
+        role: 'GVHD' | 'GVPB' | 'COUNCIL';
+        rawScore: number | null;
+        weight: number;
+        weightedScore: number | null;
+      }> = [
+        {
+          role: 'GVHD',
+          rawScore: gvhdDisplayScore,
+          weight: scoreWeights.gvhd,
+          weightedScore:
+            gvhdDisplayScore != null
+              ? roundTo2(gvhdDisplayScore * scoreWeights.gvhd)
+              : null,
+        },
+        {
+          role: 'GVPB',
+          rawScore: gvpbDisplayScore,
+          weight: scoreWeights.gvpb,
+          weightedScore:
+            gvpbDisplayScore != null
+              ? roundTo2(gvpbDisplayScore * scoreWeights.gvpb)
+              : null,
+        },
+        {
+          role: 'COUNCIL',
+          rawScore: councilDisplayScore,
+          weight: scoreWeights.council,
+          weightedScore:
+            councilDisplayScore != null
+              ? roundTo2(councilDisplayScore * scoreWeights.council)
+              : null,
+        },
+      ];
+
       dto.student = {
         id: topic.studentUserId,
         fullName: student?.name ?? topic.studentUserId,
@@ -1494,10 +1538,10 @@ export class TopicsService {
       }
 
       dto.scores = {
-        gvhd: summary?.gvhdScore ?? gvhdScore ?? null,
-        gvpb: summary?.gvpbScore ?? gvpbScore ?? null,
-        councilAvg: summary?.councilAvgScore ?? councilAvgFromScores ?? null,
-        council: summary?.councilAvgScore ?? councilAvgFromScores ?? null,
+        gvhd: gvhdDisplayScore,
+        gvpb: gvpbDisplayScore,
+        councilAvg: councilDisplayScore,
+        council: councilDisplayScore,
         final: summary?.finalScore ?? null,
         isReady,
         isSummarized,
@@ -1507,6 +1551,7 @@ export class TopicsService {
         aggregatedByTkHd: summary?.aggregatedByTkHd ?? false,
         aggregatedByTkHdAt: summary?.aggregatedByTkHdAt,
         aggregatedByTkHdUserId: summary?.aggregatedByTkHdUserId,
+        sources,
       };
 
       dto.isPublished = summary?.published ?? false;
@@ -1544,6 +1589,68 @@ export class TopicsService {
 
       return dto;
     });
+  }
+
+  private async getNormalizedScoreWeights(): Promise<{
+    gvhd: number;
+    gvpb: number;
+    council: number;
+  }> {
+    const fallback = { gvhd: 0.6, gvpb: 0.2, council: 0.2 };
+
+    if (!this.systemConfigRepository) {
+      return fallback;
+    }
+
+    const [rawGvhd, rawGvpb, rawCouncil] = await Promise.all([
+      this.systemConfigRepository.getNumber('score.weight.gvhd', fallback.gvhd),
+      this.systemConfigRepository.getNumber('score.weight.gvpb', fallback.gvpb),
+      this.systemConfigRepository.getNumber(
+        'score.weight.council',
+        fallback.council,
+      ),
+    ]);
+
+    return this.normalizeScoreWeights(
+      { gvhd: rawGvhd, gvpb: rawGvpb, council: rawCouncil },
+      fallback,
+    );
+  }
+
+  private normalizeScoreWeights(
+    rawWeights: { gvhd: number; gvpb: number; council: number },
+    fallback: { gvhd: number; gvpb: number; council: number } = {
+      gvhd: 0.6,
+      gvpb: 0.2,
+      council: 0.2,
+    },
+  ): { gvhd: number; gvpb: number; council: number } {
+    const values = [rawWeights.gvhd, rawWeights.gvpb, rawWeights.council];
+    if (values.some((value) => !Number.isFinite(value) || value < 0)) {
+      return fallback;
+    }
+
+    let normalized = { ...rawWeights };
+
+    // Support both decimal input (0.6) and percentage input (60).
+    if (values.some((value) => value > 1)) {
+      normalized = {
+        gvhd: normalized.gvhd / 100,
+        gvpb: normalized.gvpb / 100,
+        council: normalized.council / 100,
+      };
+    }
+
+    const total = normalized.gvhd + normalized.gvpb + normalized.council;
+    if (!Number.isFinite(total) || total <= 0) {
+      return fallback;
+    }
+
+    return {
+      gvhd: normalized.gvhd / total,
+      gvpb: normalized.gvpb / total,
+      council: normalized.council / total,
+    };
   }
 
   mapToDto(

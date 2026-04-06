@@ -129,6 +129,45 @@ export class ScoresService {
     return Math.round(value * 100) / 100;
   }
 
+  private normalizeScoreWeights(rawWeights: {
+    gvhd: number;
+    gvpb: number;
+    council: number;
+  }): {
+    gvhd: number;
+    gvpb: number;
+    council: number;
+  } {
+    const fallback = { gvhd: 0.6, gvpb: 0.2, council: 0.2 };
+    const values = [rawWeights.gvhd, rawWeights.gvpb, rawWeights.council];
+
+    if (values.some((value) => !Number.isFinite(value) || value < 0)) {
+      return fallback;
+    }
+
+    let normalized = { ...rawWeights };
+
+    // Support both decimal input (0.6) and percentage input (60).
+    if (values.some((value) => value > 1)) {
+      normalized = {
+        gvhd: normalized.gvhd / 100,
+        gvpb: normalized.gvpb / 100,
+        council: normalized.council / 100,
+      };
+    }
+
+    const total = normalized.gvhd + normalized.gvpb + normalized.council;
+    if (!Number.isFinite(total) || total <= 0) {
+      return fallback;
+    }
+
+    return {
+      gvhd: normalized.gvhd / total,
+      gvpb: normalized.gvpb / total,
+      council: normalized.council / total,
+    };
+  }
+
   private async getTopicOrThrow(topicId: string): Promise<TopicRecord> {
     const topic = await this.topicsRepository.findById(topicId);
     if (!topic) {
@@ -623,6 +662,9 @@ export class ScoresService {
       confirmedByGvhd: summary.confirmedByGvhd,
       confirmedByCtHd: summary.confirmedByCtHd,
       published: summary.published,
+      aggregatedByTkHd: summary.aggregatedByTkHd,
+      aggregatedByTkHdAt: summary.aggregatedByTkHdAt,
+      aggregatedByTkHdUserId: summary.aggregatedByTkHdUserId,
     };
   }
 
@@ -1930,11 +1972,16 @@ export class ScoresService {
       const weightGvhd = await this.systemConfigRepository.getNumber('score.weight.gvhd', 0.6);
       const weightGvpb = await this.systemConfigRepository.getNumber('score.weight.gvpb', 0.2);
       const weightCouncil = await this.systemConfigRepository.getNumber('score.weight.council', 0.2);
+      const normalizedWeights = this.normalizeScoreWeights({
+        gvhd: weightGvhd,
+        gvpb: weightGvpb,
+        council: weightCouncil,
+      });
 
       finalScore = this.roundTo2(
-        gvhd.totalScore * weightGvhd +
-        gvpbScore * weightGvpb +
-        councilAvgScore * weightCouncil,
+        gvhd.totalScore * normalizedWeights.gvhd +
+        gvpbScore * normalizedWeights.gvpb +
+        councilAvgScore * normalizedWeights.council,
       );
     }
 

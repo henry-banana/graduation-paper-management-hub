@@ -54,6 +54,13 @@ export interface TopicListLatestSubmission {
   version: number;
 }
 
+export interface TopicScoreSource {
+  role: "GVHD" | "GVPB" | "COUNCIL";
+  rawScore: number | null;
+  weight: number;
+  weightedScore: number | null;
+}
+
 export interface TopicListScores {
   gvhd: number | null;
   gvpb: number | null;
@@ -68,6 +75,7 @@ export interface TopicListScores {
   aggregatedByTkHd?: boolean;
   aggregatedByTkHdAt?: string;
   aggregatedByTkHdUserId?: string;
+  sources?: TopicScoreSource[];
 }
 
 export interface CouncilTopicListItem {

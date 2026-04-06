@@ -58,7 +58,7 @@ const routes: Record<string, { name: string; path: string; icon: any }[]> = {
     { name: "Chấm điểm HĐ", path: "/council/scoring", icon: CheckSquare },
   ],
   TK_HD: [
-    { name: "Quản lý biên bản", path: "/council/secretary", icon: FileText },
+    { name: "Tổng hợp điểm", path: "/council/summary", icon: FileText },
   ],
   CT_HD: [
     { name: "Xác nhận công bố", path: "/council/final-confirm", icon: CheckSquare },
@@ -135,7 +135,7 @@ export function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (va
     }
 
     if (hasLecturerTopicRole(lecturerTopicRoles, "TK_HD")) {
-      dynamicRoutes.push({ name: "Tổng hợp thư ký", path: "/council/summary", icon: FileText });
+      dynamicRoutes.push({ name: "Tổng hợp điểm", path: "/council/summary", icon: FileText });
     }
 
     if (hasLecturerTopicRole(lecturerTopicRoles, "CT_HD")) {

@@ -28,6 +28,20 @@ export class TopicLatestSubmissionDto {
   version!: number;
 }
 
+export class TopicScoreSourceDto {
+  @ApiProperty({ enum: ['GVHD', 'GVPB', 'COUNCIL'], example: 'GVHD' })
+  role!: 'GVHD' | 'GVPB' | 'COUNCIL';
+
+  @ApiPropertyOptional({ example: 8.2, nullable: true })
+  rawScore!: number | null;
+
+  @ApiProperty({ example: 0.6 })
+  weight!: number;
+
+  @ApiPropertyOptional({ example: 4.92, nullable: true })
+  weightedScore!: number | null;
+}
+
 export class TopicScoresDto {
   @ApiPropertyOptional({ example: 8.2, nullable: true })
   gvhd!: number | null;
@@ -67,6 +81,9 @@ export class TopicScoresDto {
 
   @ApiPropertyOptional({ example: 'u6' })
   aggregatedByTkHdUserId?: string;
+
+  @ApiPropertyOptional({ type: [TopicScoreSourceDto] })
+  sources?: TopicScoreSourceDto[];
 }
 
 export class TopicResponseDto {

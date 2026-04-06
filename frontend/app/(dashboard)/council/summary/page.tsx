@@ -6,23 +6,10 @@ import {
   RefreshCw, Search, Users,
 } from "lucide-react";
 import { ApiListResponse, ApiResponse, api } from "@/lib/api";
-import type { CouncilTopicListItem, TopicListScores } from "@/types";
-
-interface ScoreSource {
-  role: string;
-  rawScore: number;
-  weight: number;
-  weightedScore?: number;
-}
-
-type TopicSummaryDto = Omit<CouncilTopicListItem, "scores"> & {
-  scores?: TopicListScores & {
-    sources?: ScoreSource[];
-  };
-};
+import type { CouncilTopicListItem, TopicListScores, TopicScoreSource } from "@/types";
 
 export default function CouncilSummaryPage() {
-  const [topics, setTopics] = useState<TopicSummaryDto[]>([]);
+  const [topics, setTopics] = useState<CouncilTopicListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -33,7 +20,7 @@ export default function CouncilSummaryPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<TopicSummaryDto>>(
+      const res = await api.get<ApiListResponse<CouncilTopicListItem>>(
         "/topics?role=tk_hd&page=1&size=100&states=DEFENSE,SCORING",
       );
       setTopics(res.data ?? []);
@@ -79,6 +66,76 @@ export default function CouncilSummaryPage() {
     if (score >= 8) return "text-green-700 bg-green-50";
     if (score >= 5) return "text-amber-700 bg-amber-50";
     return "text-error bg-error-container/20";
+  };
+
+  const normalizeWeight = (weight: number): number => {
+    if (!Number.isFinite(weight) || weight < 0) {
+      return 0;
+    }
+
+    return weight > 1 ? weight / 100 : weight;
+  };
+
+  const formatPercent = (weight: number): string => {
+    const value = normalizeWeight(weight) * 100;
+    return `${parseFloat(value.toFixed(2))}%`;
+  };
+
+  const toSourceRows = (
+    scores?: TopicListScores,
+  ): Array<{
+    key: string;
+    label: string;
+    value: number | null;
+    weight: number;
+    weightedValue: number | null;
+  }> => {
+    const roundTo2 = (value: number): number => Math.round(value * 100) / 100;
+    const labels: Record<TopicScoreSource["role"], string> = {
+      GVHD: "GVHD",
+      GVPB: "GVPB",
+      COUNCIL: "Hội đồng (TB)",
+    };
+
+    if (scores?.sources && scores.sources.length > 0) {
+      return scores.sources.map((source) => {
+        const weight = normalizeWeight(source.weight);
+        const weightedValue =
+          source.weightedScore != null
+            ? source.weightedScore
+            : source.rawScore != null
+              ? roundTo2(source.rawScore * weight)
+              : null;
+
+        return {
+          key: source.role,
+          label: labels[source.role] ?? source.role,
+          value: source.rawScore,
+          weight,
+          weightedValue,
+        };
+      });
+    }
+
+    const fallback = [
+      { key: "GVHD", label: "GVHD", value: scores?.gvhd ?? null, weight: 0.6 },
+      { key: "GVPB", label: "GVPB", value: scores?.gvpb ?? null, weight: 0.2 },
+      {
+        key: "COUNCIL",
+        label: "Hội đồng (TB)",
+        value: scores?.councilAvg ?? null,
+        weight: 0.2,
+      },
+    ];
+
+    return fallback.map((item) => ({
+      key: item.key,
+      label: item.label,
+      value: item.value,
+      weight: item.weight,
+      weightedValue:
+        item.value != null ? roundTo2(item.value * item.weight) : null,
+    }));
   };
 
   return (
@@ -169,21 +226,17 @@ export default function CouncilSummaryPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-outline-variant/10">
-                        {[
-                          { label: "GVHD", value: sc?.gvhd, weight: 30 },
-                          { label: "GVPB", value: sc?.gvpb, weight: 30 },
-                          { label: "Hội đồng (TB)", value: sc?.councilAvg, weight: 40 },
-                        ].map(row => (
-                          <tr key={row.label} className="hover:bg-surface-container-low/20 transition-colors">
+                        {toSourceRows(sc).map((row) => (
+                          <tr key={row.key} className="hover:bg-surface-container-low/20 transition-colors">
                             <td className="px-5 py-4 text-sm font-semibold text-on-surface">{row.label}</td>
                             <td className="px-5 py-4 text-center">
                               {row.value != null
                                 ? <span className={`text-sm font-bold px-2 py-0.5 rounded-lg ${scoreColor(row.value)}`}>{row.value.toFixed(2)}</span>
                                 : <span className="text-xs italic text-outline">Chưa có</span>}
                             </td>
-                            <td className="px-5 py-4 text-center text-sm text-outline">{row.weight}%</td>
+                            <td className="px-5 py-4 text-center text-sm text-outline">{formatPercent(row.weight)}</td>
                             <td className="px-5 py-4 text-center text-sm font-semibold text-on-surface">
-                              {row.value != null ? ((row.value * row.weight) / 100).toFixed(2) : "—"}
+                              {row.weightedValue != null ? row.weightedValue.toFixed(2) : "—"}
                             </td>
                             <td className="px-5 py-4">
                               {row.value != null
