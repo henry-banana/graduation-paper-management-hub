@@ -342,6 +342,37 @@ export class ScoresController {
     };
   }
 
+  /**
+   * TK_HD completes aggregation and locks all score editing.
+   * This creates an irreversible audit trail.
+   */
+  @Post('topics/:topicId/scores/aggregate')
+  @Roles('LECTURER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'TK_HD completes aggregation and locks all editing',
+    description: 'After TK_HD aggregates, no one can unlock or edit scores. This is irreversible.'
+  })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Aggregation completed and locked',
+    type: ScoreSummaryDto
+  })
+  @ApiResponse({ status: 400, description: 'Invalid request' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not TK_HD or already aggregated' })
+  @ApiResponse({ status: 404, description: 'Topic not found' })
+  async aggregateByTkHd(
+    @Param('topicId') topicId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const result = await this.scoresService.aggregateByTkHd(topicId, user);
+    return {
+      data: result,
+      meta: { requestId: generateRequestId() },
+    };
+  }
+
   @Get('topics/:topicId/scores/my-draft')
   @Roles('LECTURER')
   @ApiOperation({ summary: 'Get current user\'s draft or submitted score for a topic' })

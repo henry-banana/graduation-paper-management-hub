@@ -167,6 +167,24 @@ export class ScoreSummaryDto {
     example: '2026-04-05T08:15:00.000Z',
   })
   appealChoiceAt?: string;
+
+  @ApiPropertyOptional({
+    description: 'True if TK_HD has completed aggregation (locks all editing)',
+    example: false,
+  })
+  aggregatedByTkHd?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Timestamp when TK_HD completed aggregation',
+    example: '2026-04-05T10:30:00.000Z',
+  })
+  aggregatedByTkHdAt?: string;
+
+  @ApiPropertyOptional({
+    description: 'User ID of TK_HD who performed aggregation',
+    example: 'user_123',
+  })
+  aggregatedByTkHdUserId?: string;
 }
 
 export class DraftScoreResponseDto {

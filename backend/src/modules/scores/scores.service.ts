@@ -91,6 +91,10 @@ export interface ScoreSummaryRecord {
   appealChoice?: 'NO_APPEAL' | 'ACCEPT';  // Student choice after seeing published score
   appealChoiceAt?: string;                // Timestamp when choice made
   rubricDriveLink?: string;               // Auto-uploaded rubric link (populated when NO_APPEAL)
+  // TK_HD aggregation lock (Bug #3)
+  aggregatedByTkHd?: boolean;             // True when TK_HD completes aggregation
+  aggregatedByTkHdAt?: string;            // Timestamp when TK_HD aggregated
+  aggregatedByTkHdUserId?: string;        // TK_HD user ID who performed aggregation
 }
 
 
@@ -420,16 +424,24 @@ export class ScoresService {
     topic: TopicRecord,
     score: ScoreRecord,
   ): Promise<{ editable: boolean; reason?: string }> {
+    const summary = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topic.id,
+    );
+
+    // Bug #3: If TK_HD has aggregated, all scores are immutably locked
+    if (summary?.aggregatedByTkHd) {
+      return {
+        editable: false,
+        reason: `Scores locked by TK_HD aggregation at ${summary.aggregatedByTkHdAt}. This is irreversible.`,
+      };
+    }
+
     if (score.scorerRole !== 'GVHD') {
       return {
         editable: false,
         reason: 'Submitted score is immutable for this role/topic',
       };
     }
-
-    const summary = await this.scoreSummariesRepository.findFirst(
-      (s) => s.topicId === topic.id,
-    );
 
     // BCTT: GVHD can only edit submitted score when there is a pending appeal.
     if (topic.type === 'BCTT') {
@@ -1409,6 +1421,80 @@ export class ScoresService {
   }
 
   /**
+   * TK_HD completes aggregation and locks all score editing.
+   * After this, nobody can unlock or edit scores.
+   * This creates an irreversible audit trail.
+   */
+  async aggregateByTkHd(topicId: string, user: AuthUser): Promise<ScoreSummaryDto> {
+    if (user.role !== 'LECTURER') {
+      throw new ForbiddenException('Only lecturers can aggregate scores');
+    }
+
+    const topic = await this.getTopicOrThrow(topicId);
+
+    // Check if user is TK_HD for this topic
+    const hasTkHdRole = await this.hasAssignment(topicId, user.userId, 'TK_HD');
+    if (!hasTkHdRole) {
+      throw new ForbiddenException('Only TK_HD can aggregate scores for this topic');
+    }
+
+    // Check if already aggregated
+    const existing = await this.scoreSummariesRepository.findFirst(
+      (s) => s.topicId === topicId,
+    );
+
+    if (existing?.aggregatedByTkHd) {
+      throw new ConflictException(
+        `Scores already aggregated by TK_HD at ${existing.aggregatedByTkHdAt}. This action is irreversible.`,
+      );
+    }
+
+    // Calculate summary
+    const calculated = await this.calculateSummary(topicId, topic);
+
+    // Persist or update with aggregation lock
+    const now = new Date().toISOString();
+    const summaryRecord: ScoreSummaryRecord = {
+      id: existing?.id ?? `summary_${topicId}`,
+      topicId,
+      gvhdScore: calculated.gvhdScore,
+      gvpbScore: calculated.gvpbScore,
+      councilAvgScore: calculated.councilAvgScore,
+      finalScore: calculated.finalScore,
+      result: calculated.result,
+      confirmedByGvhd: existing?.confirmedByGvhd ?? false,
+      confirmedByCtHd: existing?.confirmedByCtHd ?? false,
+      published: existing?.published ?? false,
+      updatedAt: now,
+      councilComments: existing?.councilComments,
+      aggregatedByTkHd: true,
+      aggregatedByTkHdAt: now,
+      aggregatedByTkHdUserId: user.userId,
+    };
+
+    if (existing) {
+      await this.scoreSummariesRepository.update(existing.id, summaryRecord);
+    } else {
+      await this.scoreSummariesRepository.create(summaryRecord);
+    }
+
+    // Audit trail
+    await this.auditIfAvailable({
+      action: 'SCORE_AGGREGATED_BY_TK_HD',
+      actorId: user.userId,
+      actorRole: user.role,
+      topicId,
+      detail: {
+        finalScore: calculated.finalScore,
+        result: calculated.result,
+        aggregatedAt: now,
+      },
+    });
+
+    return this.attachStudentFacingFields(calculated, topic, summaryRecord);
+  }
+
+  /**
    * Find current user's draft or submitted score for a topic
    */
   async findMyDraft(
@@ -1822,7 +1908,7 @@ export class ScoresService {
   }
 
   private async auditIfAvailable(params: {
-    action: 'SCORE_SUBMITTED' | 'SCORE_CONFIRMED' | 'SCORE_PUBLISHED' | 'COUNCIL_COMMENTS_UPDATED';
+    action: 'SCORE_SUBMITTED' | 'SCORE_CONFIRMED' | 'SCORE_PUBLISHED' | 'COUNCIL_COMMENTS_UPDATED' | 'SCORE_AGGREGATED_BY_TK_HD';
     actorId: string;
     actorRole: string;
     topicId?: string;
