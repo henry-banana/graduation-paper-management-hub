@@ -613,6 +613,19 @@ export class ScoresService {
     };
   }
 
+  private toScoreSummaryDto(summary: ScoreSummaryRecord): ScoreSummaryDto {
+    return {
+      gvhdScore: summary.gvhdScore,
+      gvpbScore: summary.gvpbScore,
+      councilAvgScore: summary.councilAvgScore,
+      finalScore: summary.finalScore,
+      result: summary.result,
+      confirmedByGvhd: summary.confirmedByGvhd,
+      confirmedByCtHd: summary.confirmedByCtHd,
+      published: summary.published,
+    };
+  }
+
   /**
    * Ensure BCTT summary is persisted and visible to student immediately
    * once GVHD submits a score.
@@ -1164,43 +1177,46 @@ export class ScoresService {
         return this.attachStudentFacingFields(pending, topic, existing ?? undefined);
       }
 
-      const baseSummary: ScoreSummaryDto = {
-        gvhdScore: existing.gvhdScore,
-        gvpbScore: existing.gvpbScore,
-        councilAvgScore: existing.councilAvgScore,
-        finalScore: existing.finalScore,
-        result: existing.result,
-        confirmedByGvhd: existing.confirmedByGvhd,
-        confirmedByCtHd: existing.confirmedByCtHd,
-        published: existing.published,
-      };
-
-      return this.attachStudentFacingFields(baseSummary, topic, existing);
+      return this.attachStudentFacingFields(
+        this.toScoreSummaryDto(existing),
+        topic,
+        existing,
+      );
     }
 
     // TBM can view existing summaries for statistics, but cannot trigger calculation
     if (user.role === 'TBM') {
       // requestedByRole check is removed - TBM is not in SCORE_SUMMARY_REQUEST_ROLES anymore
-      const existing = await this.scoreSummariesRepository.findFirst(
+      const existingSummary = await this.scoreSummariesRepository.findFirst(
         (s) => s.topicId === topicId,
       );
-      if (!existing) {
+
+      if (topic.type === 'BCTT') {
+        const summary =
+          (await this.ensureBcttPublishedSummary(topic)) ?? existingSummary ?? undefined;
+        if (!summary?.published) {
+          const pending = this.buildStudentPendingSummary();
+          return this.attachStudentFacingFields(pending, topic, summary);
+        }
+
+        return this.attachStudentFacingFields(
+          this.toScoreSummaryDto(summary),
+          topic,
+          summary,
+        );
+      }
+
+      if (!existingSummary) {
         throw new ConflictException(
           'Score summary not yet available. TK_HD must aggregate scores first.',
         );
       }
       // Return existing summary without calculation
-      const baseSummary: ScoreSummaryDto = {
-        gvhdScore: existing.gvhdScore,
-        gvpbScore: existing.gvpbScore,
-        councilAvgScore: existing.councilAvgScore,
-        finalScore: existing.finalScore,
-        result: existing.result,
-        confirmedByGvhd: existing.confirmedByGvhd,
-        confirmedByCtHd: existing.confirmedByCtHd,
-        published: existing.published,
-      };
-      return this.attachStudentFacingFields(baseSummary, topic, existing);
+      return this.attachStudentFacingFields(
+        this.toScoreSummaryDto(existingSummary),
+        topic,
+        existingSummary,
+      );
     }
 
     if (user.role !== 'LECTURER') {
@@ -1220,6 +1236,24 @@ export class ScoresService {
       }
     } else if (!(await this.hasAssignment(topicId, user.userId))) {
       throw new ForbiddenException('Cannot view score summary for this topic');
+    }
+
+    if (topic.type === 'BCTT') {
+      const summary =
+        (await this.ensureBcttPublishedSummary(topic)) ??
+        (await this.scoreSummariesRepository.findFirst((s) => s.topicId === topicId)) ??
+        undefined;
+
+      if (!summary?.published) {
+        const pending = this.buildStudentPendingSummary();
+        return this.attachStudentFacingFields(pending, topic, summary);
+      }
+
+      return this.attachStudentFacingFields(
+        this.toScoreSummaryDto(summary),
+        topic,
+        summary,
+      );
     }
 
     const calculated = await this.calculateSummary(topicId, topic);

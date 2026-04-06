@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as puppeteer from 'puppeteer-core';
 import { renderMinutesHtml, MinutesTemplateData } from './minutes.template';
 import chromium = require('chromium');
+import { existsSync } from 'node:fs';
 
 
 export interface GeneratedPdf {
@@ -24,6 +25,15 @@ export interface GeneratedPdf {
 @Injectable()
 export class MinutesGeneratorService {
   private readonly logger = new Logger(MinutesGeneratorService.name);
+  private readonly fallbackExecutablePaths = [
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ];
 
   async generatePdf(data: MinutesTemplateData): Promise<GeneratedPdf> {
     this.logger.log(`Generating minutes PDF for topic: "${data.topicTitle}"`);
@@ -32,8 +42,7 @@ export class MinutesGeneratorService {
 
     let browser: puppeteer.Browser | null = null;
     try {
-      // Use bundled chromium binary
-      const executablePath = chromium.path;
+      const executablePath = this.resolveExecutablePath();
       browser = await puppeteer.launch({
         executablePath,
         headless: true,
@@ -98,5 +107,24 @@ export class MinutesGeneratorService {
    */
   renderPreviewHtml(data: MinutesTemplateData): string {
     return renderMinutesHtml(data);
+  }
+
+  private resolveExecutablePath(): string {
+    const candidates = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      process.env.CHROME_PATH,
+      chromium.path,
+      ...this.fallbackExecutablePaths,
+    ].filter((candidate): candidate is string => !!candidate && candidate.trim().length > 0);
+
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+
+    throw new Error(
+      'No Chromium executable found. Set PUPPETEER_EXECUTABLE_PATH or install chromium in runtime environment.',
+    );
   }
 }

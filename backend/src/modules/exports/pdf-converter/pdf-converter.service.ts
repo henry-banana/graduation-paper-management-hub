@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as mammoth from 'mammoth';
 import * as puppeteer from 'puppeteer-core';
 import * as chromium from 'chromium';
+import { existsSync } from 'node:fs';
 
 export interface ConversionResult {
   pdfBuffer: Buffer;
@@ -12,6 +13,15 @@ export interface ConversionResult {
 @Injectable()
 export class PdfConverterService {
   private readonly logger = new Logger(PdfConverterService.name);
+  private readonly fallbackExecutablePaths = [
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ];
 
   /**
    * Convert DOCX buffer to PDF buffer
@@ -41,7 +51,13 @@ export class PdfConverterService {
         pdfFilename,
       };
     } catch (error) {
-      this.logger.error(`Failed to convert ${originalFilename} to PDF:`, error);
+      if (this.isMissingBrowserError(error)) {
+        this.logger.warn(
+          `Skipping PDF conversion for ${originalFilename}: Chromium executable is unavailable`,
+        );
+      } else {
+        this.logger.error(`Failed to convert ${originalFilename} to PDF:`, error);
+      }
       throw error;
     }
   }
@@ -236,8 +252,9 @@ export class PdfConverterService {
     let browser: puppeteer.Browser | null = null;
 
     try {
+      const executablePath = this.resolveExecutablePath();
       browser = await puppeteer.launch({
-        executablePath: chromium.path,
+        executablePath,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -268,13 +285,37 @@ export class PdfConverterService {
 
       return Buffer.from(pdfBuffer);
     } catch (error) {
-      this.logger.error('Failed to convert HTML to PDF:', error);
       throw error;
     } finally {
       if (browser) {
         await browser.close();
       }
     }
+  }
+
+  private resolveExecutablePath(): string {
+    const candidates = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      process.env.CHROME_PATH,
+      chromium.path,
+      ...this.fallbackExecutablePaths,
+    ].filter((candidate): candidate is string => !!candidate && candidate.trim().length > 0);
+
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+
+    throw new Error(
+      'No Chromium executable found. Set PUPPETEER_EXECUTABLE_PATH or install chromium in runtime environment.',
+    );
+  }
+
+  private isMissingBrowserError(error: unknown): boolean {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+    return message.includes('ENOENT') || message.includes('No Chromium executable found');
   }
 
   /**

@@ -28,6 +28,11 @@ interface ExportResultDto {
   downloadUrl?: string;
 }
 
+interface ConfirmPublishResultDto {
+  confirmed: boolean;
+  published: boolean;
+}
+
 export default function CouncilFinalConfirmPage() {
   const [topics, setTopics] = useState<TopicSummaryDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,19 +76,20 @@ export default function CouncilFinalConfirmPage() {
       : "—",
   }), [topics]);
 
-  const canPublishTopic = (topic: TopicSummaryDto): boolean => {
+  const getPublishBlockingReason = (topic: TopicSummaryDto): string | null => {
     const scores = topic.scores;
-    if (!scores) return false;
+    if (!scores) return "Chưa có dữ liệu điểm tổng hợp";
+    if (topic.isPublished || scores.published) return "Đã công bố điểm";
+    if (!scores.isReady) return "Chưa đủ điểm thành phần để công bố";
+    if (!scores.isSummarized) return "Thư ký chưa tổng hợp điểm";
+    if (!scores.gvhdConfirmed) return "Chờ GVHD xác nhận";
+    if (scores.ctHdConfirmed) return "CT_HĐ đã xác nhận trước đó";
+    if (typeof scores.final !== "number") return "Chưa có điểm cuối";
+    return null;
+  };
 
-    return (
-      !topic.isPublished &&
-      !scores.published &&
-      scores.isReady &&
-      scores.isSummarized &&
-      scores.gvhdConfirmed &&
-      !scores.ctHdConfirmed &&
-      typeof scores.final === "number"
-    );
+  const canPublishTopic = (topic: TopicSummaryDto): boolean => {
+    return getPublishBlockingReason(topic) === null;
   };
 
   const handlePublish = async (topicId: string) => {
@@ -91,9 +97,19 @@ export default function CouncilFinalConfirmPage() {
     setIsPublishing(topicId);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/scores/confirm-publish`, {});
-      setTopics(prev => prev.map(t => t.id === topicId ? { ...t, isPublished: true } : t));
-      setSuccess("Đã công bố điểm thành công.");
+      const result = await api.post<ApiResponse<ConfirmPublishResultDto>>(
+        `/topics/${topicId}/scores/confirm-publish`,
+        {},
+      );
+      if (result.data?.published) {
+        await load();
+        setSuccess("Đã công bố điểm thành công. Đề tài đã được chuyển sang trạng thái COMPLETED.");
+      } else {
+        await load();
+        setError(
+          "Đã ghi nhận xác nhận của CT_HĐ nhưng điểm chưa được publish. Vui lòng kiểm tra trạng thái xác nhận của GVHD.",
+        );
+      }
       setTimeout(() => setSuccess(null), 4000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Công bố điểm thất bại.");
@@ -124,7 +140,12 @@ export default function CouncilFinalConfirmPage() {
       setSuccess("Đã tạo Biên bản Hội đồng thành công.");
       setTimeout(() => setSuccess(null), 4000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Tạo biên bản thất bại.");
+      const message = e instanceof Error ? e.message : "Tạo biên bản thất bại.";
+      if (message.includes("Không thể tạo PDF biên bản")) {
+        setError(`${message} Bạn vẫn có thể bấm "Công bố" để xác nhận và publish điểm.`);
+      } else {
+        setError(message);
+      }
     } finally {
       setIsSavingMinutes(false);
     }
@@ -197,6 +218,14 @@ export default function CouncilFinalConfirmPage() {
           className="w-full pl-10 pr-4 py-2.5 bg-surface-container-lowest rounded-xl border border-outline-variant/20 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 text-on-surface placeholder:text-outline/60" />
       </div>
 
+      <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 text-sm text-on-surface">
+        <p className="font-semibold mb-1">Hướng dẫn CT_HĐ xác nhận lần cuối</p>
+        <p>
+          1) Thư ký có thể tạo biên bản trước hoặc sau. 2) Chủ tịch bấm <span className="font-semibold">Công bố</span> để xác nhận lần cuối và publish điểm.
+          Khi publish thành công, đề tài tự chuyển sang trạng thái COMPLETED.
+        </p>
+      </div>
+
       {/* Loading */}
       {isLoading && (
         <div className="flex items-center justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-outline" /><span className="ml-3 text-sm text-outline">Đang tải...</span></div>
@@ -215,17 +244,27 @@ export default function CouncilFinalConfirmPage() {
               <table className="min-w-full divide-y divide-outline-variant/10">
                 <thead>
                   <tr className="bg-surface-container/50">
-                    {["Sinh viên", "Đề tài", "Điểm GVHD", "Điểm GVPB", "Điểm HĐ", "Điểm cuối", "Trạng thái", ""].map(h => (
-                      <th scope="col" key={h} className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">{h}</th>
-                    ))}
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Sinh viên</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Đề tài</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Báo cáo</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Turnitin</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Điểm GVHD</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Điểm GVPB</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Điểm HĐ</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Điểm cuối</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap">Trạng thái</th>
+                    <th scope="col" className="px-4 py-3.5 text-left text-xs font-semibold text-outline uppercase tracking-wider whitespace-nowrap"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/10">
                   {filtered.map(t => {
                     const publishing = isPublishing === t.id;
                     const canPublish = canPublishTopic(t);
+                    const publishBlockingReason = getPublishBlockingReason(t);
                     const isExpanded = expandedId === t.id;
                     const detailsId = `topic-details-${t.id}`;
+                    const latestReport = t.latestReportSubmission;
+                    const latestTurnitin = t.latestTurnitinSubmission;
                     return (
                       <Fragment key={t.id}>
                         <tr
@@ -240,6 +279,34 @@ export default function CouncilFinalConfirmPage() {
                               <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${t.type === "KLTN" ? "bg-purple-100 text-purple-700" : "bg-primary/10 text-primary"}`}>{t.type}</span>
                             </div>
                             <p className="text-xs text-on-surface line-clamp-2">{t.title}</p>
+                          </td>
+                          <td className="px-4 py-4">
+                            {latestReport?.driveLink ? (
+                              <a
+                                href={latestReport.driveLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs font-semibold text-primary hover:underline whitespace-nowrap"
+                              >
+                                Xem bài (v{latestReport.version})
+                              </a>
+                            ) : (
+                              <span className="text-xs text-outline">Chưa có</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-4">
+                            {latestTurnitin?.driveLink ? (
+                              <a
+                                href={latestTurnitin.driveLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs font-semibold text-primary hover:underline whitespace-nowrap"
+                              >
+                                Xem file (v{latestTurnitin.version})
+                              </a>
+                            ) : (
+                              <span className="text-xs text-outline">Chưa có</span>
+                            )}
                           </td>
                           <td className="px-4 py-4 text-center">
                             <span className={`text-sm font-bold ${scoreColor(t.scores?.gvhd)}`}>{t.scores?.gvhd?.toFixed(1) ?? "—"}</span>
@@ -256,7 +323,14 @@ export default function CouncilFinalConfirmPage() {
                           <td className="px-4 py-4">
                             {t.isPublished
                               ? <span className="flex items-center gap-1 text-green-600 text-xs font-semibold"><CheckCircle2 className="w-3.5 h-3.5" />Đã công bố</span>
-                              : <span className="text-xs text-amber-600 font-semibold">Chưa công bố</span>}
+                              : (
+                                <div className="space-y-1">
+                                  <span className="text-xs text-amber-600 font-semibold">Chưa công bố</span>
+                                  <p className="text-[11px] text-outline">
+                                    {publishBlockingReason ?? "Sẵn sàng công bố"}
+                                  </p>
+                                </div>
+                              )}
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex items-center gap-1.5 justify-end">
@@ -279,6 +353,11 @@ export default function CouncilFinalConfirmPage() {
                                   type="button"
                                   onClick={() => void handlePublish(t.id)}
                                   disabled={publishing || !canPublish}
+                                  title={
+                                    canPublish
+                                      ? "Xác nhận lần cuối và công bố điểm cho sinh viên"
+                                      : publishBlockingReason ?? "Chưa đủ điều kiện công bố"
+                                  }
                                   className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white text-xs font-semibold rounded-xl hover:bg-primary/90 transition-all disabled:opacity-50"
                                 >
                                   <Shield className="w-3.5 h-3.5" />
@@ -302,7 +381,7 @@ export default function CouncilFinalConfirmPage() {
                         {/* Expanded row */}
                       {isExpanded && (
                         <tr id={detailsId} className="bg-surface-container-low/20">
-                            <td colSpan={8} className="px-6 py-5">
+                            <td colSpan={10} className="px-6 py-5">
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-5 text-xs">
                                 <div>
                                   <p className="text-outline uppercase tracking-wider mb-1">GVHD</p>

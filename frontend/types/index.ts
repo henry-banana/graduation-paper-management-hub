@@ -77,6 +77,8 @@ export interface CouncilTopicListItem {
   reviewer?: TopicListPerson;
   period: TopicListPeriod;
   latestSubmission: TopicListLatestSubmission;
+  latestReportSubmission?: TopicListLatestSubmission;
+  latestTurnitinSubmission?: TopicListLatestSubmission;
   scores: TopicListScores;
   councilRole?: 'CT_HD' | 'TK_HD' | 'TV_HD';
   isPublished?: boolean;

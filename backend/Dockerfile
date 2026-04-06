@@ -48,6 +48,16 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# Install Chromium runtime dependencies for Puppeteer PDF rendering
+RUN apk add --no-cache \
+  chromium \
+  nss \
+  freetype \
+  harfbuzz \
+  ca-certificates \
+  ttf-freefont
 
 # Security: Tạo non-root user
 RUN addgroup -g 1001 -S nodejs && \

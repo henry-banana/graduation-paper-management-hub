@@ -1283,30 +1283,23 @@ export class TopicsService {
       ),
     );
 
-    const latestSubmissionByTopic = new Map<
-      string,
-      {
-        id: string;
-        driveLink?: string;
-        versionNumber: number;
-        uploadedAt: string;
-      }
-    >();
-    for (const submission of allSubmissions) {
-      if (!topicIds.has(submission.topicId)) {
-        continue;
-      }
+    interface SubmissionSnapshot {
+      id: string;
+      driveLink?: string;
+      versionNumber: number;
+      uploadedAt: string;
+    }
 
-      const candidate = {
-        id: submission.id,
-        driveLink: submission.driveLink,
-        versionNumber: submission.versionNumber,
-        uploadedAt: submission.uploadedAt,
-      };
-      const current = latestSubmissionByTopic.get(submission.topicId);
+    const latestSubmissionByTopic = new Map<string, SubmissionSnapshot>();
+    const latestReportSubmissionByTopic = new Map<string, SubmissionSnapshot>();
+    const latestTurnitinSubmissionByTopic = new Map<string, SubmissionSnapshot>();
+
+    const pickLatestSubmission = (
+      current: SubmissionSnapshot | undefined,
+      candidate: SubmissionSnapshot,
+    ): SubmissionSnapshot => {
       if (!current) {
-        latestSubmissionByTopic.set(submission.topicId, candidate);
-        continue;
+        return candidate;
       }
 
       const candidateTime = new Date(candidate.uploadedAt).getTime();
@@ -1315,7 +1308,50 @@ export class TopicsService {
         candidate.versionNumber > current.versionNumber ||
         (candidate.versionNumber === current.versionNumber && candidateTime > currentTime)
       ) {
-        latestSubmissionByTopic.set(submission.topicId, candidate);
+        return candidate;
+      }
+
+      return current;
+    };
+
+    for (const submission of allSubmissions) {
+      if (!topicIds.has(submission.topicId)) {
+        continue;
+      }
+
+      const candidate: SubmissionSnapshot = {
+        id: submission.id,
+        driveLink: submission.driveLink,
+        versionNumber: submission.versionNumber,
+        uploadedAt: submission.uploadedAt,
+      };
+
+      latestSubmissionByTopic.set(
+        submission.topicId,
+        pickLatestSubmission(
+          latestSubmissionByTopic.get(submission.topicId),
+          candidate,
+        ),
+      );
+
+      if (submission.fileType === 'REPORT') {
+        latestReportSubmissionByTopic.set(
+          submission.topicId,
+          pickLatestSubmission(
+            latestReportSubmissionByTopic.get(submission.topicId),
+            candidate,
+          ),
+        );
+      }
+
+      if (submission.fileType === 'TURNITIN') {
+        latestTurnitinSubmissionByTopic.set(
+          submission.topicId,
+          pickLatestSubmission(
+            latestTurnitinSubmissionByTopic.get(submission.topicId),
+            candidate,
+          ),
+        );
       }
     }
 
@@ -1370,6 +1406,8 @@ export class TopicsService {
         : null;
 
       const latestSubmission = latestSubmissionByTopic.get(topic.id);
+      const latestReportSubmission = latestReportSubmissionByTopic.get(topic.id);
+      const latestTurnitinSubmission = latestTurnitinSubmissionByTopic.get(topic.id);
       const topicScores = submittedScoresByTopic.get(topic.id) ?? [];
       const summary = summaryByTopic.get(topic.id);
 
@@ -1438,6 +1476,22 @@ export class TopicsService {
         driveLink: latestSubmission?.driveLink ?? '',
         version: latestSubmission?.versionNumber ?? 0,
       };
+
+      if (latestReportSubmission) {
+        dto.latestReportSubmission = {
+          id: latestReportSubmission.id,
+          driveLink: latestReportSubmission.driveLink ?? '',
+          version: latestReportSubmission.versionNumber,
+        };
+      }
+
+      if (latestTurnitinSubmission) {
+        dto.latestTurnitinSubmission = {
+          id: latestTurnitinSubmission.id,
+          driveLink: latestTurnitinSubmission.driveLink ?? '',
+          version: latestTurnitinSubmission.versionNumber,
+        };
+      }
 
       dto.scores = {
         gvhd: summary?.gvhdScore ?? gvhdScore ?? null,

@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
   ConflictException,
+  ServiceUnavailableException,
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -209,7 +210,21 @@ export class ExportsService {
     };
 
     // Generate PDF buffer
-    const generated = await this.minutesGeneratorService.generatePdf(templateData);
+    let generated: Awaited<
+      ReturnType<MinutesGeneratorService['generatePdf']>
+    >;
+    try {
+      generated = await this.minutesGeneratorService.generatePdf(templateData);
+    } catch (error) {
+      const message = this.extractErrorMessage(error);
+      this.logger.error(
+        `Minutes export failed for topicId=${topicId}: ${message}`,
+      );
+      throw new ServiceUnavailableException(
+        this.resolveMinutesExportFailureDetail(message),
+      );
+    }
+
     if (!generated.buffer?.length) {
       throw new ConflictException('Không thể tạo nội dung PDF biên bản');
     }
@@ -489,9 +504,9 @@ export class ExportsService {
         };
         this.logger.log(`Successfully converted to ${converted.pdfFilename}`);
       } catch (conversionError) {
+        const conversionMessage = this.extractErrorMessage(conversionError);
         this.logger.warn(
-          `PDF conversion failed for ${fileToUpload.filename}, uploading DOCX instead:`,
-          conversionError,
+          `PDF conversion failed for ${fileToUpload.filename} (${conversionMessage}), uploading DOCX instead.`,
         );
         // Continue with DOCX if conversion fails
       }
@@ -1078,5 +1093,16 @@ export class ExportsService {
       return error.message;
     }
     return 'Unknown error';
+  }
+
+  private resolveMinutesExportFailureDetail(message: string): string {
+    if (
+      message.includes('No Chromium executable found') ||
+      message.includes('Failed to launch the browser process')
+    ) {
+      return 'Không thể tạo PDF biên bản do dịch vụ PDF chưa sẵn sàng. Vui lòng liên hệ quản trị hệ thống để kiểm tra Chromium runtime.';
+    }
+
+    return 'Không thể tạo PDF biên bản lúc này. Vui lòng thử lại sau.';
   }
 }

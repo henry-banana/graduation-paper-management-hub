@@ -9,6 +9,7 @@ import { ScoresService } from './scores.service';
 import { AuthUser } from '../../common/types';
 import {
   AssignmentsRepository,
+  SystemConfigRepository,
   ScoreSummariesRepository,
   ScoresRepository,
   TopicsRepository,
@@ -409,6 +410,12 @@ describe('ScoresService', () => {
         { provide: TopicsRepository, useValue: topicsRepositoryMock },
         { provide: AssignmentsRepository, useValue: assignmentsRepositoryMock },
         { provide: UsersRepository, useValue: usersRepositoryMock },
+        {
+          provide: SystemConfigRepository,
+          useValue: {
+            getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
+          },
+        },
         { provide: NotificationsService, useValue: { create: jest.fn() } },
         { provide: AuditService, useValue: { log: jest.fn() } },
       ],
@@ -677,7 +684,7 @@ describe('ScoresService', () => {
       expect(result.gvhdScore).toBe(6);
       expect(result.gvpbScore).toBe(7);
       expect(result.councilAvgScore).toBe(8);
-      expect(result.finalScore).toBe(7);
+      expect(result.finalScore).toBe(7.1);
       expect(result.result).toBe('PASS');
     });
 
@@ -696,8 +703,8 @@ describe('ScoresService', () => {
 
       const result = await service.getSummary('tp_001', tkUser, 'TK_HD');
 
-      expect(result.councilAvgScore).toBe(7.75);
-      expect(result.finalScore).toBe(6.92);
+      expect(result.councilAvgScore).toBe(7.5);
+      expect(result.finalScore).toBe(6.9);
     });
 
     it('should block summary when active TV_HD is missing even if revoked TV_HD submitted', async () => {
@@ -734,6 +741,20 @@ describe('ScoresService', () => {
 
     it('should return pending summary for student on unpublished KLTN', async () => {
       const result = await service.getSummary('tp_001', studentUser);
+      expect(result.published).toBe(false);
+      expect(result.result).toBe('PENDING');
+      expect(result.finalScore).toBe(0);
+    });
+
+    it('should return pending summary for lecturer on unpublished BCTT', async () => {
+      const result = await service.getSummary('tp_bctt', lecturerUser);
+      expect(result.published).toBe(false);
+      expect(result.result).toBe('PENDING');
+      expect(result.finalScore).toBe(0);
+    });
+
+    it('should return pending summary for TBM on unpublished BCTT', async () => {
+      const result = await service.getSummary('tp_bctt', tbmUser);
       expect(result.published).toBe(false);
       expect(result.result).toBe('PENDING');
       expect(result.finalScore).toBe(0);

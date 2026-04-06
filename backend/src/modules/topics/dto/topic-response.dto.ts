@@ -125,6 +125,12 @@ export class TopicResponseDto {
   @ApiProperty({ type: TopicLatestSubmissionDto })
   latestSubmission!: TopicLatestSubmissionDto;
 
+  @ApiPropertyOptional({ type: TopicLatestSubmissionDto })
+  latestReportSubmission?: TopicLatestSubmissionDto;
+
+  @ApiPropertyOptional({ type: TopicLatestSubmissionDto })
+  latestTurnitinSubmission?: TopicLatestSubmissionDto;
+
   @ApiProperty({ type: TopicScoresDto })
   scores!: TopicScoresDto;
 
