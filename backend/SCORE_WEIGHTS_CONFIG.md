@@ -8,26 +8,38 @@
 finalScore = (gvhdScore × weightGvhd) + (gvpbScore × weightGvpb) + (councilAvgScore × weightCouncil)
 ```
 
-## SystemConfig Keys
+**Trọng số mặc định**: GVHD = **60%**, GVPB = **20%**, Council = **20%**
 
-Thêm các keys sau vào sheet **SystemConfig** (hoặc cấu hình qua API):
+## Quick Setup
+
+### Option 1: Run Setup Script (Recommended)
+
+```bash
+cd backend
+npm run build
+node scripts/init-score-weights.js
+```
+
+Script sẽ tự động tạo config keys với giá trị mặc định trong sheet SystemConfig.
+
+### Option 2: Manual Setup
+
+Thêm các keys sau vào sheet **SystemConfig**:
 
 | Key | Default Value | Description |
 |-----|---------------|-------------|
-| `score.weight.gvhd` | `0.3` | Trọng số điểm GVHD (30%) |
-| `score.weight.gvpb` | `0.3` | Trọng số điểm GVPB (30%) |
-| `score.weight.council` | `0.4` | Trọng số điểm trung bình Hội đồng (40%) |
+| `score.weight.gvhd` | `0.6` | Trọng số điểm GVHD (60%) |
+| `score.weight.gvpb` | `0.2` | Trọng số điểm GVPB (20%) |
+| `score.weight.council` | `0.2` | Trọng số điểm trung bình Hội đồng (20%) |
 
-## Example Setup
-
-Trong Google Sheet **SystemConfig**, thêm các dòng:
+## SystemConfig Sheet Format
 
 ```
-| key                    | value | description                           | updatedAt            |
-|------------------------|-------|---------------------------------------|----------------------|
-| score.weight.gvhd      | 0.3   | Trọng số điểm GVHD (30%)              | 2026-04-06T01:30:00Z |
-| score.weight.gvpb      | 0.3   | Trọng số điểm GVPB (30%)              | 2026-04-06T01:30:00Z |
-| score.weight.council   | 0.4   | Trọng số điểm trung bình HĐ (40%)     | 2026-04-06T01:30:00Z |
+| key                    | value | description                                      | updatedAt            |
+|------------------------|-------|--------------------------------------------------|----------------------|
+| score.weight.gvhd      | 0.6   | Trọng số điểm GVHD (60%)                         | 2026-04-06T02:30:00Z |
+| score.weight.gvpb      | 0.2   | Trọng số điểm GVPB (20%)                         | 2026-04-06T02:30:00Z |
+| score.weight.council   | 0.2   | Trọng số điểm trung bình HĐ (20%)                | 2026-04-06T02:30:00Z |
 ```
 
 ## Council Member Roles
@@ -53,9 +65,10 @@ Các roles sau **KHÔNG** chấm điểm:
 ### Via SystemConfigRepository
 
 ```typescript
-const weightGvhd = await systemConfigRepository.getNumber('score.weight.gvhd', 0.3);
-const weightGvpb = await systemConfigRepository.getNumber('score.weight.gvpb', 0.3);
-const weightCouncil = await systemConfigRepository.getNumber('score.weight.council', 0.4);
+// Defaults: GVHD=60%, GVPB=20%, Council=20%
+const weightGvhd = await systemConfigRepository.getNumber('score.weight.gvhd', 0.6);
+const weightGvpb = await systemConfigRepository.getNumber('score.weight.gvpb', 0.2);
+const weightCouncil = await systemConfigRepository.getNumber('score.weight.council', 0.2);
 
 const finalScore = 
   gvhdScore * weightGvhd +
@@ -82,13 +95,15 @@ Content-Type: application/json
 finalScore = (gvhd + gvpb + council) / 3;  // Always 33.33% each
 ```
 
-**After (configurable)**:
+**After (configurable with new defaults)**:
 ```typescript
 finalScore = 
-  gvhd * weightGvhd +      // Default 30%
-  gvpb * weightGvpb +      // Default 30%
-  council * weightCouncil; // Default 40%
+  gvhd * 0.6 +      // GVHD: 60% (default)
+  gvpb * 0.2 +      // GVPB: 20% (default)
+  council * 0.2;    // Council: 20% (default)
 ```
+
+**Rationale**: GVHD (supervisor) có trọng số cao hơn vì họ theo dõi sát quá trình nghiên cứu của sinh viên.
 
 ## Validation
 
@@ -102,5 +117,7 @@ weightGvhd + weightGvpb + weightCouncil = 1.0
 
 ## Changelog
 
-- **2026-04-06**: Chuyển từ hardcoded 30-30-40% sang configurable weights
+- **2026-04-06**: Update default weights to 60-20-20 (GVHD-GVPB-Council)
+- **2026-04-06**: Add setup script `scripts/init-score-weights.js`
+- **2026-04-06**: Chuyển từ hardcoded 33-33-33% sang configurable weights
 - **2026-04-06**: Fix council validation - chỉ require TV_HD scores (not CT_HD/TK_HD)
