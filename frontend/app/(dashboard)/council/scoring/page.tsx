@@ -72,7 +72,8 @@ function CouncilScoringContent() {
   }, [existingScore?.lockReason, isScoreLocked, isSubmitted]);
 
   const selectedTopic = useMemo(() => topics.find(t => t.id === selectedId) ?? null, [topics, selectedId]);
-  const canEnterScores = selectedTopic?.state === "SCORING";
+  const canSubmitScores = selectedTopic?.state === "SCORING" || selectedTopic?.state === "DEFENSE";
+  const canSaveDraft = selectedTopic?.state === "SCORING";
   const isDefensePhase = selectedTopic?.state === "DEFENSE";
 
   // Load topics assigned to council role
@@ -134,8 +135,8 @@ function CouncilScoringContent() {
 
   const handleSaveDraft = async () => {
     if (!selectedId) return;
-    if (!canEnterScores) {
-      setError("Đề tài chưa ở trạng thái SCORING. Vui lòng bắt đầu phiên chấm trước.");
+    if (!canSaveDraft) {
+      setError("Đề tài đang ở DEFENSE. Hãy nộp điểm chính thức để hệ thống tự chuyển sang SCORING.");
       return;
     }
     setIsSaving(true);
@@ -172,8 +173,8 @@ function CouncilScoringContent() {
 
   const handleSubmit = async () => {
     if (!selectedId) return;
-    if (!canEnterScores) {
-      setError("Đề tài chưa ở trạng thái SCORING. Vui lòng bắt đầu phiên chấm trước.");
+    if (!canSubmitScores) {
+      setError("Đề tài chưa ở giai đoạn chấm điểm.");
       return;
     }
     if (!window.confirm("Sau khi nộp chính thức, điểm sẽ không thể chỉnh sửa. Xác nhận?")) return;
@@ -184,33 +185,17 @@ function CouncilScoringContent() {
         criteria: scores, comments, role: "TV_HD",
       });
       setSuccess("Đã nộp điểm Hội đồng thành công!");
+      setTopics((prev) =>
+        prev.map((topic) =>
+          topic.id === selectedId ? { ...topic, state: "SCORING" } : topic,
+        ),
+      );
       setExistingScore(prev => ({ criteria: (prev?.criteria ?? {}), ...(prev ?? {}), isSubmitted: true } as ScoreDto));
       setTimeout(() => setSuccess(null), 5000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Nộp điểm thất bại.");
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleStartScoring = async () => {
-    if (!selectedId) return;
-    setError(null);
-    try {
-      await api.post<ApiResponse<unknown>>(`/topics/${selectedId}/transition`, {
-        action: "START_SCORING",
-        expectedState: "DEFENSE",
-      });
-
-      setTopics((prev) =>
-        prev.map((topic) =>
-          topic.id === selectedId ? { ...topic, state: "SCORING" } : topic,
-        ),
-      );
-      setSuccess("Đã chuyển đề tài sang trạng thái SCORING. Có thể bắt đầu nhập điểm.");
-      setTimeout(() => setSuccess(null), 4000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Không thể chuyển sang trạng thái SCORING.");
     }
   };
 
@@ -284,17 +269,10 @@ function CouncilScoringContent() {
         </div>
       )}
       {isDefensePhase && (
-        <div className="flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
           <p className="text-sm text-amber-700">
-            Đề tài đang ở trạng thái DEFENSE. Cần chuyển sang SCORING trước khi nhập điểm.
+            Đề tài đang ở trạng thái DEFENSE. Khi thành viên hội đồng nộp điểm đầu tiên, hệ thống sẽ tự động chuyển sang SCORING.
           </p>
-          <button
-            type="button"
-            onClick={() => void handleStartScoring()}
-            className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 transition-colors"
-          >
-            Bắt đầu chấm
-          </button>
         </div>
       )}
 
@@ -330,7 +308,7 @@ function CouncilScoringContent() {
                         </label>
                         <div className="flex items-center gap-2">
                           <input type="number" max={c.max} min={0} step={0.25} value={current}
-                            disabled={isScoreLocked || !canEnterScores}
+                            disabled={isScoreLocked || !canSubmitScores}
                             onChange={e => setScores(prev => ({ ...prev, [c.id]: Math.min(c.max, Math.max(0, parseFloat(e.target.value) || 0)) }))}
                             className="w-20 text-right rounded-xl border border-outline-variant/20 bg-surface-container text-on-surface text-sm font-bold px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
                           />
@@ -349,7 +327,7 @@ function CouncilScoringContent() {
             {/* Comments */}
             <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/10 p-5">
               <label className="block text-xs font-semibold uppercase text-outline mb-2">Nhận xét của Hội đồng</label>
-              <textarea rows={4} value={comments} disabled={existingScore?.isSubmitted || existingScore?.isLocked || !canEnterScores}
+              <textarea rows={4} value={comments} disabled={existingScore?.isSubmitted || existingScore?.isLocked || !canSubmitScores}
                 onChange={e => setComments(e.target.value)}
                 placeholder="Nhận xét về chất lượng đề tài, ưu & hạn chế..."
                 className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant/20 text-on-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none disabled:opacity-60"
@@ -426,11 +404,11 @@ function CouncilScoringContent() {
                     {submittedLockMessage}
                   </div>
                 )}
-                <button onClick={() => void handleSaveDraft()} disabled={isSaving || isScoreLocked || !canEnterScores}
+                <button onClick={() => void handleSaveDraft()} disabled={isSaving || isScoreLocked || !canSaveDraft}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-outline-variant/20 text-sm font-semibold text-on-surface hover:bg-surface-container transition-all disabled:opacity-60">
                   <Save className="w-4 h-4" />{isSaving ? "Đang lưu..." : "Lưu nháp"}
                 </button>
-                <button onClick={() => void handleSubmit()} disabled={isSubmitting || isScoreLocked || !canEnterScores}
+                <button onClick={() => void handleSubmit()} disabled={isSubmitting || isScoreLocked || !canSubmitScores}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60">
                   <FileCheck className="w-4 h-4" />{isSubmitting ? "Đang nộp..." : existingScore?.isSubmitted ? "Đã nộp" : "Nộp điểm chính thức"}
                 </button>

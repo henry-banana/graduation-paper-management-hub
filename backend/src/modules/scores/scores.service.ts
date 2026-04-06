@@ -371,6 +371,29 @@ export class ScoresService {
     this.assertBcttDeadlineElapsed(topic);
   }
 
+  private async ensureScoringStateAfterDefenseSubmit(
+    topic: TopicRecord,
+  ): Promise<TopicRecord> {
+    if (topic.type !== 'KLTN' || topic.state !== 'DEFENSE') {
+      return topic;
+    }
+
+    const latestTopic = await this.getTopicOrThrow(topic.id);
+    if (latestTopic.type !== 'KLTN' || latestTopic.state !== 'DEFENSE') {
+      return latestTopic;
+    }
+
+    latestTopic.state = 'SCORING';
+    latestTopic.updatedAt = new Date().toISOString();
+    await this.topicsRepository.update(latestTopic.id, latestTopic);
+
+    this.logger.log(
+      `[autoTransitionToScoring] topicId=${latestTopic.id} DEFENSE -> SCORING triggered by first submit`,
+    );
+
+    return latestTopic;
+  }
+
   private assertBcttDeadlineElapsed(topic: TopicRecord): void {
     if (topic.type !== 'BCTT') {
       return;
@@ -1075,13 +1098,15 @@ export class ScoresService {
       throw new ConflictException('Score has already been submitted');
     }
 
-    const topic = await this.getTopicOrThrow(score.topicId);
+    let topic = await this.getTopicOrThrow(score.topicId);
     await this.assertNotAggregatedLock(score.topicId);
-    this.assertScoringAllowed(topic);
 
     if (user.role !== 'LECTURER' || score.scorerUserId !== user.userId) {
       throw new ForbiddenException('Only the scorer can submit this score');
     }
+
+    topic = await this.ensureScoringStateAfterDefenseSubmit(topic);
+    this.assertScoringAllowed(topic);
 
     score.status = 'SUBMITTED';
     score.submittedAt = new Date().toISOString();
@@ -1575,7 +1600,8 @@ export class ScoresService {
     }
 
     await this.assertNotAggregatedLock(topicId);
-    const topic = await this.getTopicOrThrow(topicId);
+    let topic = await this.getTopicOrThrow(topicId);
+    topic = await this.ensureScoringStateAfterDefenseSubmit(topic);
     this.assertScoringAllowed(topic);
     this.assertScorerRoleAllowed(topic, scorerRole);
 

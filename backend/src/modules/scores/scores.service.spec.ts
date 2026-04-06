@@ -385,6 +385,12 @@ describe('ScoresService', () => {
 
     const topicsRepositoryMock = {
       findById: jest.fn(async (id: string) => topics.find((topic) => topic.id === id) ?? null),
+      update: jest.fn(async (id: string, entity: MockTopic) => {
+        const index = topics.findIndex((topic) => topic.id === id);
+        if (index >= 0) {
+          topics[index] = entity;
+        }
+      }),
     };
 
     const assignmentsRepositoryMock = {
@@ -602,6 +608,56 @@ describe('ScoresService', () => {
           role: 'LECTURER',
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('should auto transition KLTN topic from DEFENSE to SCORING on first submit', async () => {
+      const now = new Date().toISOString();
+      topics = topics.map((topic) =>
+        topic.id === 'tp_001' ? { ...topic, state: 'DEFENSE', updatedAt: now } : topic,
+      );
+
+      scores.push({
+        id: 'sc_defense_submit',
+        topicId: 'tp_001',
+        scorerUserId: 'USR_GVPB',
+        scorerRole: 'GVPB',
+        status: 'DRAFT',
+        totalScore: 7.5,
+        rubricData: [{ criterion: 'quality', score: 7.5, max: 10 }],
+        updatedAt: now,
+      });
+
+      const result = await service.submit('sc_defense_submit', gvpbUser);
+      expect(result.status).toBe('SUBMITTED');
+
+      const topicAfterSubmit = topics.find((topic) => topic.id === 'tp_001');
+      expect(topicAfterSubmit?.state).toBe('SCORING');
+    });
+  });
+
+  describe('createAndSubmitDirect', () => {
+    it('should auto transition KLTN topic from DEFENSE to SCORING on submit-direct', async () => {
+      const now = new Date().toISOString();
+      topics = topics.map((topic) =>
+        topic.id === 'tp_001' ? { ...topic, state: 'DEFENSE', updatedAt: now } : topic,
+      );
+
+      const result = await service.createAndSubmitDirect(
+        'tp_001',
+        { content: 4.5, presentation: 1.5, defense: 2.0 },
+        'GVPB',
+        [
+          { id: 'content', max: 5 },
+          { id: 'presentation', max: 2 },
+          { id: 'defense', max: 3 },
+        ],
+        gvpbUser,
+        { isDraftOnly: false },
+      );
+
+      expect(result.status).toBe('SUBMITTED');
+      const topicAfterSubmit = topics.find((topic) => topic.id === 'tp_001');
+      expect(topicAfterSubmit?.state).toBe('SCORING');
     });
   });
 
