@@ -102,16 +102,12 @@ function GVHDScoringContent() {
   const isPassed = totalScore >= 5.0;
   const isSubmitted = existingScore?.isSubmitted ?? false;
   const isScoreLocked = isSubmitted && (existingScore?.isLocked ?? true);
-  const isSubmittedEditable = isSubmitted && !isScoreLocked;
   const hasPendingAppeal =
     selectedTopic?.type === "BCTT" &&
     scoreSummary?.appeal?.status === "PENDING";
 
   const submittedLockMessage = useMemo(() => {
     if (!isSubmitted) return "";
-    if (!isScoreLocked) {
-      return "Phiếu điểm đã được nộp chính thức nhưng vẫn có thể chỉnh sửa trước xác nhận cuối. Hãy dùng nút 'Cập nhật điểm đã nộp' để lưu thay đổi.";
-    }
     if (existingScore?.lockReason?.includes("published")) {
       return "Phiếu điểm đã bị khóa vì điểm đã được công bố.";
     }
@@ -119,7 +115,7 @@ function GVHDScoringContent() {
       return "Phiếu điểm đã bị khóa vì đã có xác nhận cuối.";
     }
     return "Phiếu điểm đã được nộp chính thức và hiện không thể chỉnh sửa.";
-  }, [existingScore?.lockReason, isScoreLocked, isSubmitted]);
+  }, [existingScore?.lockReason, isSubmitted]);
 
   const loadTopics = useCallback(async () => {
     setIsLoadingTopics(true);
@@ -217,9 +213,7 @@ function GVHDScoringContent() {
 
   const handleSubmit = async () => {
     if (!selectedId) return;
-    const confirmMessage = isSubmittedEditable
-      ? "Bạn muốn cập nhật phiếu điểm đã nộp? Thao tác này chỉ được phép trước khi xác nhận cuối."
-      : "Sau khi nộp chính thức, điểm sẽ không thể chỉnh sửa. Xác nhận?";
+    const confirmMessage = "Sau khi nộp chính thức, điểm sẽ không thể chỉnh sửa. Xác nhận?";
     if (!window.confirm(confirmMessage)) return;
     setIsSubmitting(true);
     setError(null);
@@ -231,11 +225,7 @@ function GVHDScoringContent() {
         comments,
         role,
       });
-      setSuccess(
-        isSubmittedEditable
-          ? "Đã cập nhật phiếu điểm đã nộp thành công!"
-          : "Đã nộp phiếu điểm chính thức thành công!",
-      );
+      setSuccess("Đã nộp phiếu điểm chính thức thành công!");
 
       // Refresh lock state from backend after submit/update.
       try {
@@ -249,7 +239,7 @@ function GVHDScoringContent() {
         );
         setScoreSummary(refreshedSummary.data);
       } catch {
-        setExistingScore({ criteria: scores, ...existingScore, isSubmitted: true, isLocked: false } as ScoreDto);
+        setExistingScore({ criteria: scores, ...existingScore, isSubmitted: true, isLocked: true } as ScoreDto);
       }
 
       setTimeout(() => setSuccess(null), 5000);
@@ -415,7 +405,7 @@ function GVHDScoringContent() {
             </p>
           )}
           <p className="text-xs text-amber-700">
-            Bạn có thể cập nhật điểm đã nộp bên dưới để hệ thống tự đóng phúc khảo, hoặc giữ nguyên điểm bằng nút xác nhận.
+            Điểm đã nộp là bất biến. Vui lòng ghi chú phản hồi và xác nhận giữ nguyên điểm để hoàn tất phúc khảo.
           </p>
           <textarea
             rows={2}
@@ -675,12 +665,10 @@ function GVHDScoringContent() {
                 >
                   <FileCheck className="w-4 h-4" />
                   {isSubmitting
-                    ? isSubmitted ? "Đang cập nhật..." : "Đang nộp..."
+                    ? "Đang nộp..."
                     : isScoreLocked
-                      ? "Đã khóa sau xác nhận cuối"
-                      : isSubmitted
-                        ? "Cập nhật điểm đã nộp"
-                        : "Nộp phiếu chính thức"}
+                      ? "Đã khóa sau nộp"
+                      : "Nộp phiếu chính thức"}
                 </button>
               </div>
             </div>

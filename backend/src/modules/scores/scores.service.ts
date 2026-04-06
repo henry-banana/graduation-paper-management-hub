@@ -136,6 +136,18 @@ export class ScoresService {
     return topic;
   }
 
+  private async assertNotAggregatedLock(topicId: string): Promise<void> {
+    const summary = await this.scoreSummariesRepository.findFirst(
+      (record) => record.topicId === topicId,
+    );
+
+    if (summary?.aggregatedByTkHd) {
+      throw new ConflictException(
+        `Scores are locked by TK_HD aggregation at ${summary.aggregatedByTkHdAt}. This action is irreversible.`,
+      );
+    }
+  }
+
   private toAppealInfo(summary?: ScoreSummaryRecord): ScoreAppealInfoDto | undefined {
     if (!summary?.appealRequestedAt) {
       return undefined;
@@ -436,6 +448,28 @@ export class ScoresService {
       };
     }
 
+    if (summary?.published) {
+      return {
+        editable: false,
+        reason: 'Score summary has been published',
+      };
+    }
+
+    if (summary?.confirmedByGvhd || summary?.confirmedByCtHd) {
+      return {
+        editable: false,
+        reason: 'Score summary has been confirmed',
+      };
+    }
+
+    if (topic.type === 'BCTT' && this.isPendingAppeal(summary ?? undefined)) {
+      return {
+        editable: false,
+        reason:
+          'Submitted score is immutable. Resolve appeal without editing score.',
+      };
+    }
+
     if (score.scorerRole !== 'GVHD') {
       return {
         editable: false,
@@ -443,45 +477,10 @@ export class ScoresService {
       };
     }
 
-    // BCTT: GVHD can only edit submitted score when there is a pending appeal.
-    if (topic.type === 'BCTT') {
-      if (this.isPendingAppeal(summary ?? undefined)) {
-        return { editable: true };
-      }
-
-      return {
-        editable: false,
-        reason: 'Submitted score is immutable unless there is a pending appeal',
-      };
-    }
-
-    // KLTN: existing editable window before final confirmations/publication.
-    if (topic.type !== 'KLTN') {
-      return {
-        editable: false,
-        reason: 'Submitted score is immutable for this role/topic',
-      };
-    }
-
-    if (!summary) {
-      return { editable: true };
-    }
-
-    if (summary.published) {
-      return {
-        editable: false,
-        reason: 'Score summary has been published',
-      };
-    }
-
-    if (summary.confirmedByGvhd || summary.confirmedByCtHd) {
-      return {
-        editable: false,
-        reason: 'Score summary has been confirmed',
-      };
-    }
-
-    return { editable: true };
+    return {
+      editable: false,
+      reason: 'Submitted score is immutable after submit',
+    };
   }
 
   private async refreshSummaryAfterSubmittedScoreChange(
@@ -963,6 +962,7 @@ export class ScoresService {
     dto: CreateDraftScoreDto,
     user: AuthUser,
   ): Promise<DraftScoreResponseDto> {
+    await this.assertNotAggregatedLock(topicId);
     const topic = await this.getTopicOrThrow(topicId);
     this.assertScoringAllowed(topic);
     this.assertScorerRoleAllowed(topic, dto.scorerRole);
@@ -1076,6 +1076,7 @@ export class ScoresService {
     }
 
     const topic = await this.getTopicOrThrow(score.topicId);
+    await this.assertNotAggregatedLock(score.topicId);
     this.assertScoringAllowed(topic);
 
     if (user.role !== 'LECTURER' || score.scorerUserId !== user.userId) {
@@ -1573,6 +1574,7 @@ export class ScoresService {
       throw new ForbiddenException('Only lecturers can score topics');
     }
 
+    await this.assertNotAggregatedLock(topicId);
     const topic = await this.getTopicOrThrow(topicId);
     this.assertScoringAllowed(topic);
     this.assertScorerRoleAllowed(topic, scorerRole);

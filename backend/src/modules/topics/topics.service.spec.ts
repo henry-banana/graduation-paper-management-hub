@@ -527,6 +527,19 @@ describe('TopicsService', () => {
       expect(result.data.every((t) => t.state === 'PENDING_GV')).toBe(true);
     });
 
+    it('should filter topics by multiple states', async () => {
+      const result = await service.findAll(
+        { states: ['DEFENSE', 'SCORING'] },
+        tbmUser,
+      );
+
+      expect(
+        result.data.every((topic) =>
+          ['DEFENSE', 'SCORING'].includes(topic.state),
+        ),
+      ).toBe(true);
+    });
+
     it('should only return student own topics when role is STUDENT', async () => {
       const result = await service.findAll({}, studentUser);
 

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import {
   NotFoundException,
   ForbiddenException,
@@ -213,6 +214,15 @@ describe('AssignmentsService', () => {
       create: jest.fn(async () => ({ id: 'nt_mock' })),
     };
 
+    const configServiceMock = {
+      get: jest.fn((key: string, defaultValue?: string) => {
+        if (key === 'DEMO_MODE') {
+          return 'false';
+        }
+        return defaultValue;
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AssignmentsService,
@@ -221,6 +231,7 @@ describe('AssignmentsService', () => {
         { provide: TopicsRepository, useValue: topicsRepositoryMock },
         { provide: UsersRepository, useValue: usersRepositoryMock },
         { provide: NotificationsService, useValue: notificationsServiceMock },
+        { provide: ConfigService, useValue: configServiceMock },
       ],
     }).compile();
 

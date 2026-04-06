@@ -614,11 +614,11 @@ const NOTIFICATIONS_ROWS: Row[] = [
 
 // ── SystemConfig ──────────────────────────────────────────────
 const SYSTEM_CONFIG_ROWS: Row[] = [
-  ['score.weight.gvhd',        '0.5',   'Trọng số điểm GVHD (50%)', T],
-  ['score.weight.gvpb',        '0.25',  'Trọng số điểm GVPB (25%)', T],
-  ['score.weight.council',     '0.25',  'Trọng số điểm TB hội đồng (25%)', T],
+  ['score.weight.gvhd',        '0.6',   'Trọng số điểm GVHD (50%)', T],
+  ['score.weight.gvpb',        '0.2',  'Trọng số điểm GVPB (25%)', T],
+  ['score.weight.council',     '0.2',  'Trọng số điểm TB hội đồng (25%)', T],
   ['score.pass.threshold',     '5.0',   'Điểm tối thiểu để đạt (thang 10)', T],
-  ['submission.max_file_mb',   '50',    'Kích thước file tối đa (MB)', T],
+  ['submission.max_file_mb',   '20',    'Kích thước file tối đa (MB)', T],
   ['kltn.min_credits',         '120',   'Số tín chỉ tích lũy tối thiểu để làm KLTN', T],
   ['kltn.min_bctt_score',      '6.0',   'Điểm BCTT tối thiểu để làm KLTN', T],
   ['approval.deadline_days',   '5',     'Số ngày GVHD có để phê duyệt/từ chối', T],

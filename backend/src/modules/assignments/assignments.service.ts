@@ -26,7 +26,7 @@ import {
   UsersRepository,
 } from '../../infrastructure/google-sheets';
 import { NotificationsService } from '../notifications/notifications.service';
-import type { TopicsService } from '../topics/topics.service';
+import { TopicsService } from '../topics/topics.service';
 
 export interface AssignmentRecord {
   id: string;
@@ -52,7 +52,7 @@ export class AssignmentsService {
     @Optional()
     private readonly notificationsService?: NotificationsService,
     @Optional()
-    @Inject(forwardRef(() => 'TopicsService'))
+    @Inject(forwardRef(() => TopicsService))
     private readonly topicsService?: TopicsService,
   ) {}
 
@@ -87,13 +87,6 @@ export class AssignmentsService {
     return date.toLocaleString('vi-VN', { hour12: false });
   }
 
-  /**
-   * Check if DEMO_MODE is enabled
-   * @returns true if DEMO_MODE env var is 'true', false otherwise
-   */
-  private isDemoMode(): boolean {
-    return this.configService.get<string>('DEMO_MODE', 'false') === 'true';
-  }
 
   private async getLecturerQuota(userId: string): Promise<{
     userId: string;
@@ -533,7 +526,6 @@ export class AssignmentsService {
     }
 
     const scheduleDetails = `Lich bao ve: ${formattedDefenseAt} tai ${locationDetail}.`;
-    const scheduleMessage = `Hoi dong cham bao ve da duoc phan cong cho de tai "${topic.title}". ${scheduleDetails}`;
 
     // Create assignments
     const newAssignments: AssignmentRecord[] = [];

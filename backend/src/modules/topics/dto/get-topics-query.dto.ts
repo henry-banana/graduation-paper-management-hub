@@ -1,5 +1,5 @@
 import { IsOptional, IsIn, IsInt, Min, Max, IsString } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TopicType, TopicState } from '../topic-state.enum';
 
@@ -39,6 +39,34 @@ export class GetTopicsQueryDto {
   @IsOptional()
   @IsIn(GetTopicsQueryDto.TOPIC_STATES)
   state?: TopicState;
+
+  @ApiPropertyOptional({
+    description:
+      'Filter by multiple states (comma-separated or repeated query params)',
+    enum: GetTopicsQueryDto.TOPIC_STATES,
+    isArray: true,
+    example: ['DEFENSE', 'SCORING'],
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value)) {
+      return value
+        .flatMap((item) => String(item).split(','))
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+    }
+
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+    }
+
+    return undefined;
+  })
+  @IsIn(GetTopicsQueryDto.TOPIC_STATES, { each: true })
+  states?: TopicState[];
 
   @ApiPropertyOptional({
     description: 'Filter by role context',

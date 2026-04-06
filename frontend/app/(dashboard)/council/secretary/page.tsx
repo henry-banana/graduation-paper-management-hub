@@ -54,7 +54,7 @@ function SecretaryContent() {
       try {
         // Load topics assigned to TK_HD
         const res = await api.get<ApiListResponse<TopicDto>>(
-          "/topics?role=tk_hd&page=1&size=100&state=SCORING,DEFENSE,COMPLETED"
+          "/topics?role=tk_hd&page=1&size=100&states=DEFENSE,SCORING"
         );
         setTopics(res.data ?? []);
       } catch (e) {

@@ -33,7 +33,9 @@ export default function CouncilSummaryPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=tk_hd&page=1&size=100&state=SCORING");
+      const res = await api.get<ApiListResponse<TopicSummaryDto>>(
+        "/topics?role=tk_hd&page=1&size=100&states=DEFENSE,SCORING",
+      );
       setTopics(res.data ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải tổng hợp điểm.");
@@ -51,32 +53,19 @@ export default function CouncilSummaryPage() {
     ), [topics, search]);
 
   const handleSummarize = async (topicId: string) => {
-    if (!window.confirm("Xác nhận ghi biên bản tổng hợp điểm? Điểm sẽ được tính và lưu chính thức.")) return;
+    if (
+      !window.confirm(
+        "Xác nhận tổng hợp điểm? Hệ thống sẽ khóa chỉnh sửa điểm sau thao tác này.",
+      )
+    ) {
+      return;
+    }
     setIsSummarizing(topicId);
     setError(null);
     try {
-      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/scores/summary`, { requestedByRole: "TK_HD" });
-      setTopics(prev => prev.map(t =>
-        t.id === topicId
-          ? {
-              ...t,
-              scores: {
-                gvhd: t.scores?.gvhd ?? null,
-                gvpb: t.scores?.gvpb ?? null,
-                councilAvg: t.scores?.councilAvg ?? null,
-                council: t.scores?.council ?? null,
-                final: t.scores?.final ?? null,
-                isReady: t.scores?.isReady ?? false,
-                isSummarized: true,
-                gvhdConfirmed: t.scores?.gvhdConfirmed ?? false,
-                ctHdConfirmed: t.scores?.ctHdConfirmed ?? false,
-                published: t.scores?.published ?? false,
-                sources: t.scores?.sources,
-              },
-            }
-          : t,
-      ));
-      setSuccess("Đã tổng hợp điểm thành công. Chờ CT_HD và GVHD xác nhận.");
+      await api.post<ApiResponse<unknown>>(`/topics/${topicId}/scores/aggregate`, {});
+      await load();
+      setSuccess("Đã tổng hợp và khóa chỉnh sửa điểm thành công.");
       setTimeout(() => setSuccess(null), 5000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Tổng hợp điểm thất bại.");

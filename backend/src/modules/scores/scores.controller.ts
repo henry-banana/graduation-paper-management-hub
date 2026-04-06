@@ -178,14 +178,10 @@ export class ScoresController {
   @ApiResponse({ status: 404, description: 'Topic not found' })
   async getSummary(
     @Param('topicId') topicId: string,
-    @Body() dto: RequestSummaryDto,
+    @Body() _dto: RequestSummaryDto,
     @CurrentUser() user: AuthUser,
   ) {
-    const result = await this.scoresService.getSummary(
-      topicId,
-      user,
-      dto.requestedByRole,
-    );
+    const result = await this.scoresService.getSummary(topicId, user);
     return {
       data: result,
       meta: { requestId: generateRequestId() },

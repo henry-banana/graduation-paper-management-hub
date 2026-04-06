@@ -44,7 +44,9 @@ export default function CouncilFinalConfirmPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<ApiListResponse<TopicSummaryDto>>("/topics?role=ct_hd&page=1&size=100&state=SCORING");
+      const res = await api.get<ApiListResponse<TopicSummaryDto>>(
+        "/topics?role=ct_hd&page=1&size=100&states=DEFENSE,SCORING",
+      );
       setTopics(res.data ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không thể tải tổng hợp điểm.");

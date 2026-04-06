@@ -127,8 +127,11 @@ export class TopicsService {
       topics = topics.filter((t) => t.type === query.type);
     }
 
-    // Filter by state
-    if (query.state) {
+    // Filter by state (single or multi-state)
+    if (query.states && query.states.length > 0) {
+      const stateSet = new Set(query.states);
+      topics = topics.filter((t) => stateSet.has(t.state));
+    } else if (query.state) {
       topics = topics.filter((t) => t.state === query.state);
     }
 

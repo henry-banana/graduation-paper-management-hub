@@ -67,6 +67,9 @@ describe('ScoresService', () => {
     confirmedByGvhd: boolean;
     confirmedByCtHd: boolean;
     published: boolean;
+    aggregatedByTkHd?: boolean;
+    aggregatedByTkHdAt?: string;
+    aggregatedByTkHdUserId?: string;
   };
 
   let topics: MockTopic[];
@@ -740,10 +743,10 @@ describe('ScoresService', () => {
     });
   });
 
-  describe('submitted score edit window (KLTN GVHD)', () => {
+  describe('submitted score immutability (KLTN GVHD)', () => {
     const gvhdRubric = [{ id: 'quality', max: 10 }];
 
-    it('should allow GVHD to update submitted score before final confirmation', async () => {
+    it('should block GVHD from updating submitted score immediately after submit', async () => {
       await service.createAndSubmitDirect(
         'tp_001',
         { quality: 6.0 },
@@ -753,27 +756,16 @@ describe('ScoresService', () => {
         { isDraftOnly: false },
       );
 
-      const updated = await service.createAndSubmitDirect(
-        'tp_001',
-        { quality: 8.0 },
-        'GVHD',
-        gvhdRubric,
-        lecturerUser,
-        { isDraftOnly: false },
-      );
-
-      expect(updated.status).toBe('SUBMITTED');
-      expect(updated.totalScore).toBe(8.0);
-
-      const gvhdScore = scores.find(
-        (score) =>
-          score.topicId === 'tp_001' &&
-          score.scorerUserId === lecturerUser.userId &&
-          score.scorerRole === 'GVHD' &&
-          score.status === 'SUBMITTED',
-      );
-
-      expect(gvhdScore?.totalScore).toBe(8.0);
+      await expect(
+        service.createAndSubmitDirect(
+          'tp_001',
+          { quality: 8.0 },
+          'GVHD',
+          gvhdRubric,
+          lecturerUser,
+          { isDraftOnly: false },
+        ),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('should block submitted update after final confirmation starts', async () => {
@@ -840,6 +832,33 @@ describe('ScoresService', () => {
       expect(myDraft?.isSubmitted).toBe(true);
       expect(myDraft?.isLocked).toBe(true);
       expect(myDraft?.lockReason).toContain('published');
+    });
+
+    it('should block score submission when TK_HD aggregation lock is active', async () => {
+      await prepareSubmittedKltnScores();
+
+      const staleDraftId = 'sc_stale_draft';
+      scores.push({
+        id: staleDraftId,
+        topicId: 'tp_001',
+        scorerUserId: tv2User.userId,
+        scorerRole: 'TV_HD',
+        status: 'DRAFT',
+        totalScore: 6.5,
+        rubricData: [{ criterion: 'quality', score: 6.5, max: 10 }],
+        updatedAt: new Date().toISOString(),
+      });
+
+      await service.aggregateByTkHd('tp_001', tkUser);
+
+      const summary = summaries.find((item) => item.topicId === 'tp_001');
+      expect(summary?.aggregatedByTkHd).toBe(true);
+      expect(summary?.aggregatedByTkHdAt).toBeDefined();
+      expect(summary?.aggregatedByTkHdUserId).toBe(tkUser.userId);
+
+      await expect(service.submit(staleDraftId, tv2User)).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 

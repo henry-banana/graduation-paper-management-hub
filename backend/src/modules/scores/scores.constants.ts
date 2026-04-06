@@ -10,7 +10,8 @@ export const SCORE_STATUSES = ['DRAFT', 'SUBMITTED'] as const;
 
 export const SCORE_RESULTS = ['PASS', 'FAIL', 'PENDING'] as const;
 
-// Bug #10 fix: Remove COMPLETED from allowed states - scoring should be locked after completion
-export const SCORE_ALLOWED_TOPIC_STATES = ['GRADING', 'SCORING', 'DEFENSE'] as const;
+// Scoring is only allowed in scoring phases.
+// KLTN must transition DEFENSE -> SCORING before any score mutation.
+export const SCORE_ALLOWED_TOPIC_STATES = ['GRADING', 'SCORING'] as const;
 
 export const SCORE_PASS_THRESHOLD = 5;

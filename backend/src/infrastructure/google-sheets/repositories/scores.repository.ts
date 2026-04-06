@@ -182,6 +182,7 @@ export class ScoresRepository extends SheetsBaseRepository<ScoreRecord> {
  * [12]=appealRequestedAt [13]=appealRequestedBy [14]=appealReason [15]=appealStatus
  * [16]=appealResolvedAt [17]=appealResolvedBy [18]=appealResolutionNote [19]=appealScoreAdjusted
  * [20]=appealChoice [21]=appealChoiceAt [22]=rubricDriveLink
+ * [23]=aggregatedByTkHd [24]=aggregatedByTkHdAt [25]=aggregatedByTkHdUserId
  */
 @Injectable()
 export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryRecord> {
@@ -220,6 +221,10 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
           : undefined,
       appealChoiceAt: this.optionalStr(v[21]),
       rubricDriveLink: this.optionalStr(v[22]),
+      aggregatedByTkHd:
+        this.optionalStr(v[23]) === undefined ? undefined : this.bool(v[23]),
+      aggregatedByTkHdAt: this.optionalStr(v[24]),
+      aggregatedByTkHdUserId: this.optionalStr(v[25]),
     };
   }
 
@@ -248,6 +253,9 @@ export class ScoreSummariesRepository extends SheetsBaseRepository<ScoreSummaryR
       this.str(entity.appealChoice ?? ''), // [20] appealChoice
       this.str(entity.appealChoiceAt ?? ''), // [21] appealChoiceAt
       this.str(entity.rubricDriveLink ?? ''), // [22] rubricDriveLink
+      entity.aggregatedByTkHd ?? '', // [23] aggregatedByTkHd
+      this.str(entity.aggregatedByTkHdAt ?? ''), // [24] aggregatedByTkHdAt
+      this.str(entity.aggregatedByTkHdUserId ?? ''), // [25] aggregatedByTkHdUserId
     ];
   }
 
