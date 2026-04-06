@@ -1138,16 +1138,29 @@ export class ScoresService {
       return this.attachStudentFacingFields(baseSummary, topic, existing);
     }
 
+    // TBM can view existing summaries for statistics, but cannot trigger calculation
     if (user.role === 'TBM') {
-      if (requestedByRole && requestedByRole !== 'TBM') {
-        throw new ForbiddenException('requestedByRole does not match current user');
-      }
-
-      const calculated = await this.calculateSummary(topicId, topic);
+      // requestedByRole check is removed - TBM is not in SCORE_SUMMARY_REQUEST_ROLES anymore
       const existing = await this.scoreSummariesRepository.findFirst(
         (s) => s.topicId === topicId,
       );
-      return this.attachStudentFacingFields(calculated, topic, existing ?? undefined);
+      if (!existing) {
+        throw new ConflictException(
+          'Score summary not yet available. TK_HD must aggregate scores first.',
+        );
+      }
+      // Return existing summary without calculation
+      const baseSummary: ScoreSummaryDto = {
+        gvhdScore: existing.gvhdScore,
+        gvpbScore: existing.gvpbScore,
+        councilAvgScore: existing.councilAvgScore,
+        finalScore: existing.finalScore,
+        result: existing.result,
+        confirmedByGvhd: existing.confirmedByGvhd,
+        confirmedByCtHd: existing.confirmedByCtHd,
+        published: existing.published,
+      };
+      return this.attachStudentFacingFields(baseSummary, topic, existing);
     }
 
     if (user.role !== 'LECTURER') {
@@ -1155,8 +1168,9 @@ export class ScoresService {
     }
 
     if (requestedByRole) {
-      if (requestedByRole === 'TBM') {
-        throw new ForbiddenException('requestedByRole TBM is only valid for TBM users');
+      // requestedByRole must be TK_HD only (removed TBM from valid roles)
+      if (requestedByRole !== 'TK_HD') {
+        throw new ForbiddenException('requestedByRole must be TK_HD for summary aggregation');
       }
 
       if (!(await this.hasAssignment(topicId, user.userId, requestedByRole))) {
@@ -1757,7 +1771,9 @@ export class ScoresService {
       );
     }
 
-    const result: ScoreResult = finalScore > SCORE_PASS_THRESHOLD ? 'PASS' : 'FAIL';
+    // Bug fix: Use >= instead of > to match requirement "đạt nếu từ 5 điểm trở lên"
+    // A score of exactly 5.0 should PASS, not FAIL
+    const result: ScoreResult = finalScore >= SCORE_PASS_THRESHOLD ? 'PASS' : 'FAIL';
 
     const existingSummary = await this.scoreSummariesRepository.findFirst(
       (s) => s.topicId === topicId,

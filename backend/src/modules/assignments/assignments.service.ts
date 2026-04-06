@@ -2,6 +2,8 @@ import {
   Injectable,
   Logger,
   Optional,
+  Inject,
+  forwardRef,
   NotFoundException,
   ConflictException,
   ForbiddenException,
@@ -24,6 +26,7 @@ import {
   UsersRepository,
 } from '../../infrastructure/google-sheets';
 import { NotificationsService } from '../notifications/notifications.service';
+import type { TopicsService } from '../topics/topics.service';
 
 export interface AssignmentRecord {
   id: string;
@@ -48,6 +51,9 @@ export class AssignmentsService {
     private readonly configService: ConfigService,
     @Optional()
     private readonly notificationsService?: NotificationsService,
+    @Optional()
+    @Inject(forwardRef(() => 'TopicsService'))
+    private readonly topicsService?: TopicsService,
   ) {}
 
   private generateId(): string {
@@ -582,9 +588,24 @@ export class AssignmentsService {
       await this.assignmentsRepository.create(item);
     }
 
-    // Production mode: State transition is manual
-    // TBM must explicitly update topic state after council assignment
-    // This ensures proper workflow control and audit trail
+    // Auto state transition PENDING_CONFIRM -> DEFENSE after council assignment
+    // Bug fix: Restore auto transition removed during DEMO_MODE cleanup
+    // This ensures student can see council info and defense schedule
+    if (topic.type === 'KLTN' && topic.state === 'PENDING_CONFIRM') {
+      try {
+        if (this.topicsService) {
+          await this.topicsService.transition(topicId, 'CONFIRM_DEFENSE', user);
+          this.logger.log(
+            `[assignCouncil:autoTransition] topicId=${topicId} PENDING_CONFIRM -> DEFENSE`,
+          );
+        }
+      } catch (error) {
+        this.logger.warn(
+          `[assignCouncil:autoTransition] Failed to transition state for topicId=${topicId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
+        // Don't fail the whole operation if state transition fails
+      }
+    }
 
     // Notify all council members about their assignment
     for (const item of newAssignments) {
